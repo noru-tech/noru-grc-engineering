@@ -8,6 +8,8 @@ Covers:
   * the bundled fallback YAML loader, on the constructs our manifests actually use. This is the
     riskiest code in the repository: it only runs when PyYAML is absent, which is exactly when
     nobody is watching.
+  * that the fallback loader and PyYAML return the identical document, so a manifest cannot
+    validate on one machine and fail on another. Runs only where PyYAML is importable.
   * every valid fixture against its contract JSON Schema, so the schema and the hand-written
     validator cannot disagree about what a valid manifest is.
   * exit codes 0 / 1 / 2 and the "did you mean ...?" hint.
@@ -40,6 +42,16 @@ source:
   nested:
     deep: true
     empty_list: []
+    # YAML 1.1 booleans: PyYAML resolves all of these, so the fallback must too.
+    gated: yes
+    disabled: off
+    absent: No
+    enabled: ON
+    switches: [yes, off, true]
+    # ... but only in these exact casings, and never when quoted.
+    mixed_case: yEs
+    quoted: "yes"
+    single_letter: y
 items:
   - name: first
     tags: [a, b, c]
@@ -73,7 +85,18 @@ FALLBACK_EXPECTED = {
     "source": {
         "slug": "example-org/example-app",
         "commit_sha": "0123456789abcdef",
-        "nested": {"deep": True, "empty_list": []},
+        "nested": {
+            "deep": True,
+            "empty_list": [],
+            "gated": True,
+            "disabled": False,
+            "absent": False,
+            "enabled": True,
+            "switches": [True, False, True],
+            "mixed_case": "yEs",
+            "quoted": "yes",
+            "single_letter": "y",
+        },
     },
     "items": [
         {
@@ -198,6 +221,63 @@ def test_fallback_loader(results):
             actual == FALLBACK_EXPECTED,
             "" if actual == FALLBACK_EXPECTED else f"PyYAML gave {json.dumps(actual, sort_keys=True)}",
         )
+
+
+def _deep_diff(a, b, path="$"):
+    """Mismatches between two loaded documents, by path. Type-strict on purpose.
+
+    `==` alone would not do: in Python `True == 1`, so a loader returning 1 where the other
+    returns True compares equal while the validators' isinstance(..., bool) checks disagree.
+    """
+    if type(a) is not type(b):
+        return [f"{path}: {type(a).__name__} {a!r} vs {type(b).__name__} {b!r}"]
+    if isinstance(a, dict):
+        out = []
+        for key in sorted(set(a) | set(b)):
+            if key not in a or key not in b:
+                out.append(f"{path}.{key}: present in only one loader")
+            else:
+                out += _deep_diff(a[key], b[key], f"{path}.{key}")
+        return out
+    if isinstance(a, list):
+        if len(a) != len(b):
+            return [f"{path}: length {len(a)} vs {len(b)}"]
+        return [d for i, (x, y) in enumerate(zip(a, b)) for d in _deep_diff(x, y, f"{path}[{i}]")]
+    return [] if a == b else [f"{path}: {a!r} vs {b!r}"]
+
+
+def test_loader_agreement(results):
+    """The two loaders must return the same document, or a manifest is machine-dependent.
+
+    test_fallback_loader pins the fallback to a hand-written expectation, which only catches a
+    fallback that disagrees with what someone typed. This catches the failure that actually
+    bites: the fallback and PyYAML disagreeing with each other, so the same file validates on a
+    machine with PyYAML installed and fails on one without it. Unquoted dates were one instance;
+    the YAML 1.1 booleans (`ci_gated: yes`) were another. Only runs where PyYAML is importable.
+    """
+    piece = piece_dirs()[0]
+    module = load_module(piece / "scripts" / "validate_manifest.py", "piece_loader_agreement")
+    name = "fallback loader and PyYAML return the same document, with the same types"
+    try:
+        import yaml  # noqa: F401,PLC0415
+    except ImportError:
+        results.skip(
+            name,
+            "PyYAML is not importable here. The CI matrix runs a leg with it installed, which is "
+            "where this comparison happens.",
+        )
+        return
+
+    # Asks the loader the validators actually use, not yaml.safe_load: load_yaml strips the
+    # implicit timestamp resolver, so an unquoted date stays the ISO string our manifests are
+    # contracted to carry. Compared against stock PyYAML this sample would diverge on any date.
+    document, loader = module.load_yaml(FALLBACK_SAMPLE)
+    diffs = _deep_diff(module._fallback_load(FALLBACK_SAMPLE), document)
+    results.check(
+        name,
+        loader == "PyYAML" and not diffs,
+        "; ".join(diffs)[:400] if diffs else f"loader was {loader!r}, expected 'PyYAML'",
+    )
 
 
 def test_suggestions(results):
@@ -388,6 +468,7 @@ def main(argv):
 
     results = Results()
     test_fallback_loader(results)
+    test_loader_agreement(results)
     test_suggestions(results)
     test_exit_codes(results)
     test_as_of_expiry(results)
