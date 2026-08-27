@@ -61,6 +61,47 @@ input fields do not include an expiry, so the expiry is set afterwards on the re
 returns. Those calls carry `depends_on`, naming the earlier call and the single field to substitute.
 Substituting that field is the only edit a client may make to any emitted call.
 
+### audit-pack
+
+| Phase | Tools | Scopes |
+|---|---|---|
+| `:scan` (read) | `getOrganizationFrameworks`, `getOrganizationControls`, `getControlContext`, `getEvidenceForControl`, `getEvidenceItems` | `read:frameworks`, `read:controls`, `read:evidence` |
+| `:diff` (read) | `getOrganizationEvidence` | `read:evidence` |
+| `:push` (write) | `createEvidence`, `linkEvidenceToControl` | `write:evidence` |
+
+This is the piece that mostly *consumes*: the pack under `.noru/audit-pack/` is a local deliverable
+and what lands in Noru is the tested conclusion for each control. No idempotency key is documented
+for evidence, so the diff probes rather than assuming one — each workpaper carries a marker in its
+description built from the pack key, the workpaper key and a digest of the rendered workpaper, and
+`getOrganizationEvidence`'s `search` filter narrows to it.
+
+### iac-scan
+
+| Phase | Tools | Scopes |
+|---|---|---|
+| `:scan` (read) | `getSecurityFindings` with `source: "iac-scan"`, `getOrganizationAssets`, `getOrganizationRisks` | `read:risks`, `read:assets` |
+| `:diff` (read) | `getSecurityFindings` with `source: "iac-scan"` | `read:risks` |
+| `:push` (write) | `createSecurityFinding` | `write:risks` |
+
+`createSecurityFinding` is a documented server-side upsert on `source + externalId`, so filing a
+finding and closing one are the same call, and running the same call twice lands the same record.
+This is the only piece where that holds — do not generalize it to the others, and stop for a human
+on a failure you do not understand even here.
+
+### privacy-datamap
+
+| Phase | Tools | Scopes |
+|---|---|---|
+| `:scan` | none — the collector reads the repository and opens no socket | — |
+| `:diff` (read) | `getPrivacyDataMap`, `listPrivacyDatasets`, `getPrivacyTaxonomy` | `read:datamaps` |
+| `:push` (write) | `ingestDatamap` | `write:datamaps` |
+
+`ingestDatamap` takes the whole map for a source, so the push is one call whether the repository has
+four fields or four hundred. `getPrivacyTaxonomy` is the truth about which taxonomy keys are valid;
+the snapshot vendored under `contract/lib/taxonomy/` is the offline floor the validator needs when
+it runs with no network. A key Noru knows and the snapshot does not is a stale snapshot, fixed by
+refreshing that directory — never by editing a vendored copy.
+
 ## Control identifiers
 
 `getOrganizationControls` returns two identifiers per control. The lowercase `id` is canonical —

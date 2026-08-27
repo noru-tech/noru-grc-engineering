@@ -24,13 +24,26 @@ key from **Noru → Settings → Developer → API Keys** configured the way Cur
 **Do not commit a config that inlines the key**, and do not paste it into a chat. MCP connections
 are local to the host: authorizing Cursor does not authorize Claude Code or Codex.
 
-Grant least privilege: `read:organization`, `read:frameworks`, `read:controls`, `read:evidence` to
-look around; add `read:assets` and `read:vendors` for `ai-inventory:diff`; add write scopes only
-when you intend to push.
+Grant least privilege. `read:organization`, `read:frameworks`, `read:controls`, `read:evidence` is
+enough to look around and to run `:scan` and `:diff` for most pieces; add write scopes only when you
+intend to push. Two pieces sit outside that set entirely:
+
+| Doing this | Scopes |
+|---|---|
+| `ai-inventory:diff` also | `read:assets`, `read:vendors` |
+| `ai-inventory:push` | adds `write:assets`, `write:vendors`, `write:evidence` |
+| `evidence-push:push`, `governance-records:push`, `review-signoff:push`, `audit-pack:push` | adds `write:evidence` |
+| `iac-scan:scan` and `:diff` | `read:risks`, `read:assets` — and nothing else |
+| `iac-scan:push` | adds `write:risks` |
+| `privacy-datamap:scan` and `:diff` | `read:datamaps` — and nothing else |
+| `privacy-datamap:push` | adds `write:datamaps` |
 
 ## 2. Run a piece
 
-Clone this repository somewhere, then drive the scripts from the repository you want to scan:
+Clone this repository somewhere, then drive the scripts from the repository you want to scan.
+`ai-inventory` below is only the example — every piece ships the same three scripts, so substitute
+`evidence-push`, `governance-records`, `review-signoff`, `audit-pack`, `iac-scan` or
+`privacy-datamap` and the sequence is identical:
 
 ```bash
 GRC=/path/to/noru-grc-engineering
@@ -56,8 +69,16 @@ node "$GRC/plugins/ai-inventory/scripts/push.mjs" --repo=. --confirm
 `push.mjs` writes the confirmed call list to `.noru/.cache/ai-inventory.calls.json`. Ask the agent
 to execute exactly those calls over the `noru` MCP connection, in order, and nothing else.
 
-`evidence-push:push` is different: it performs the upload itself over REST, so it needs
-`NORU_API_KEY` in your shell.
+Three pieces depart from that shape, and it is worth knowing which before you drive them:
+
+- **`evidence-push:push`** performs the upload itself over REST rather than emitting MCP calls, so
+  it needs `NORU_API_KEY` in your shell. File upload is a deliberate omission from Noru's MCP
+  surface — tool arguments are JSON and cannot carry a multipart body.
+- **`iac-scan:push`** emits `createSecurityFinding` calls, which are documented server-side upserts
+  on `source + externalId`. Filing a finding and closing one are the same call, and a repeat lands
+  the same record.
+- **`privacy-datamap:push`** emits a single `ingestDatamap` call carrying the whole map for a
+  source, however many fields the repository has.
 
 ## Why the scripts and the agent are split
 

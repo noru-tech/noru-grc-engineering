@@ -102,6 +102,12 @@ Then configure the Noru MCP connection: [Claude guide](./docs/clients/claude-cod
 codex plugin marketplace add noru-tech/noru-grc-engineering
 codex plugin add noru@noru-grc-engineering
 codex plugin add ai-inventory@noru-grc-engineering
+codex plugin add evidence-push@noru-grc-engineering
+codex plugin add governance-records@noru-grc-engineering
+codex plugin add review-signoff@noru-grc-engineering
+codex plugin add audit-pack@noru-grc-engineering
+codex plugin add iac-scan@noru-grc-engineering
+codex plugin add privacy-datamap@noru-grc-engineering
 ```
 
 Then configure Noru MCP: [Codex guide](./docs/clients/codex.md).
@@ -227,7 +233,8 @@ noru-grc-engineering/
 │   ├── governance-records/             # :scan :diff :push  (MCP)
 │   ├── review-signoff/                 # :scan :diff :push  (MCP)
 │   ├── audit-pack/                     # :scan :diff :push  (MCP)
-│   └── iac-scan/                       # :scan :diff :push  (MCP)
+│   ├── iac-scan/                       # :scan :diff :push  (MCP)
+│   └── privacy-datamap/                # :scan :diff :push  (MCP)
 ├── .github/actions/noru-ci/            # the CI-mode action: scan, validate, expiry, diff, push
 ├── scripts/                            # scaffolder, contract test, checks — stdlib/built-ins only
 ├── tests/fixture-repo/                 # the repository the collectors are tested against
@@ -247,6 +254,9 @@ python3 scripts/test_idempotency.py   # a second push must be a no-op
 python3 scripts/contract_test.py      # every plugin satisfies requirements 1-9
 python3 scripts/test_ci_mode.py       # CI mode really fails on drift and on an expired claim
 ```
+
+What each of those actually proves — and, more usefully, what is *not* verified — is written down
+in [docs/verification.md](./docs/verification.md).
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
