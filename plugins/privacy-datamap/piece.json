@@ -13,13 +13,17 @@
   "collector": {
     "entrypoint": "scripts/collect.mjs",
     "deterministic": true,
-    "network": false
+    "network": false,
+    "inputs": [
+      ".noru/.cache/privacy-datamap-queue.json"
+    ]
   },
   "validator": {
     "entrypoint": "scripts/validate_manifest.py",
     "runtime": "python3-stdlib",
     "vocabulary": [
       "references/vocabulary.json",
+      "references/classification.json",
       "references/taxonomy/data_categories.json",
       "references/taxonomy/data_uses.json",
       "references/taxonomy/data_subjects.json"
@@ -40,8 +44,32 @@
           "expect_message": "missing required `interpretation`"
         },
         {
-          "path": "fixtures/invalid-unknown-kind.privacy-datamap.yml",
-          "expect_message": "unknown item kind"
+          "path": "fixtures/invalid-missing-refs.privacy-datamap.yml",
+          "expect_message": "every claim must cite the lines that produced it"
+        },
+        {
+          "path": "fixtures/invalid-unknown-category.privacy-datamap.yml",
+          "expect_message": "unknown fideslang data category"
+        },
+        {
+          "path": "fixtures/invalid-unknown-data-use.privacy-datamap.yml",
+          "expect_message": "unknown fideslang data use"
+        },
+        {
+          "path": "fixtures/invalid-unknown-data-subject.privacy-datamap.yml",
+          "expect_message": "unknown fideslang data subject"
+        },
+        {
+          "path": "fixtures/invalid-needs-review.privacy-datamap.yml",
+          "expect_message": "still true"
+        },
+        {
+          "path": "fixtures/invalid-dangling-dataset-reference.privacy-datamap.yml",
+          "expect_message": "is not a dataset defined in this manifest"
+        },
+        {
+          "path": "fixtures/invalid-duplicate-dataset-key.privacy-datamap.yml",
+          "expect_message": "duplicate dataset key"
         }
       ]
     }

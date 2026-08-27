@@ -2,14 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/privacy-datamap.schema.json",
   "title": "Noru Privacy Datamap manifest (.noru/privacy-datamap.yml)",
-  "description": "TODO: describe what this manifest asserts and who reviews it.",
+  "description": "A Fideslang data map for one repository, plus the bookkeeping that makes it reviewable: a file:line citation behind every claim, an interpretation block naming who stands behind each collection and each privacy declaration, and needs_review flags the collector sets on anything it could not resolve. The bookkeeping is stripped before the map is sent to Noru or rendered to .fides/datamap.yml \u2014 it exists for the pull request, not for the wire.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "version",
     "piece",
     "source",
-    "items"
+    "dataset",
+    "system"
   ],
   "properties": {
     "version": {
@@ -22,10 +23,18 @@
     "source": {
       "$ref": "#/$defs/source"
     },
-    "items": {
+    "dataset": {
+      "description": "One dataset per logical store. Collections are tables or models; fields are columns or attributes.",
       "type": "array",
       "items": {
-        "$ref": "#/$defs/item"
+        "$ref": "#/$defs/dataset"
+      }
+    },
+    "system": {
+      "description": "One system per deployable service, with a privacy declaration per distinct purpose.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/system"
       }
     }
   },
@@ -100,28 +109,182 @@
         }
       }
     },
-    "item": {
+    "dataset": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "key",
-        "kind",
-        "title",
-        "refs",
-        "interpretation"
+        "fides_key",
+        "name",
+        "collections"
       ],
       "properties": {
-        "key": {
+        "fides_key": {
           "type": "string",
-          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          "pattern": "^[A-Za-z0-9_.<>-]+$"
         },
-        "kind": {
+        "name": {
           "type": "string",
           "minLength": 1
         },
-        "title": {
+        "description": {
+          "type": "string"
+        },
+        "collections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/collection"
+          }
+        }
+      }
+    },
+    "collection": {
+      "description": "The claim unit. One interpretation block covers the whole collection: per-field attribution would be five hundred blocks on a five-hundred-column schema, which is a form nobody fills in.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "refs",
+        "fields"
+      ],
+      "properties": {
+        "name": {
           "type": "string",
           "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        },
+        "needs_review": {
+          "type": "boolean"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "refs"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "data_categories": {
+          "description": "Fideslang data category keys, checked against the bundled snapshot in contract/lib/taxonomy/. An empty list means the field was considered and holds no personal data \u2014 which is not the same as a field nobody looked at, and is why needs_review exists.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        },
+        "needs_review": {
+          "type": "boolean"
+        },
+        "fields": {
+          "description": "Nested fields: a JSON column, an embedded document, a protobuf sub-message.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
+      }
+    },
+    "system": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fides_key",
+        "name",
+        "privacy_declarations"
+      ],
+      "properties": {
+        "fides_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.<>-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "system_type": {
+          "type": "string"
+        },
+        "dataset_references": {
+          "description": "fides_key values of datasets defined in this same manifest. A reference to anything else is a dangling edge in the map.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.<>-]+$"
+          }
+        },
+        "privacy_declarations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/declaration"
+          }
+        }
+      }
+    },
+    "declaration": {
+      "description": "A purpose, and what it processes. The join that binds a data use to the categories and subjects it touches.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "data_use",
+        "data_subjects",
+        "refs"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data_use": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data_subjects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "data_categories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "refs": {
           "type": "array",

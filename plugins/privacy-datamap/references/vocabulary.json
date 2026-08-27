@@ -1,14 +1,16 @@
 {
   "_comment": [
     "Bundled vocabulary for the privacy-datamap validator (contract requirement 3).",
-    "Kept in sync with the contract schema by scripts/check_repo.py once you add an entry to",
-    "its VOCAB_SYNC table.",
+    "",
+    "The vocabulary this piece validates against is the Fideslang taxonomy under",
+    "references/taxonomy/, loaded by the validator alongside this file. It is vendored from",
+    "contract/lib/taxonomy/ and kept byte-identical by scripts/check_vendored_lib.py.",
+    "",
+    "references/classification.json is a different thing and not a vocabulary: it is the",
+    "field-name -> category table the collector applies mechanically, which is what lets the",
+    "collector be deterministic.",
     "",
     "What must NEVER go here: framework control text, guidance, or an evidence-item list. A piece",
     "asks Noru what is needed. See contract/README.md, requirement 9."
-  ],
-  "item_kind": [
-    "TODO_first_kind",
-    "TODO_second_kind"
   ]
 }

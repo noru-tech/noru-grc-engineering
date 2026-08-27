@@ -8,6 +8,34 @@ one version number; the release workflow fails if they disagree.
 
 ### Added
 
+- `privacy-datamap` — the collector, the manifest shape and the validator. It reads SQL DDL, Prisma,
+  Django/SQLAlchemy models, protobuf and GraphQL SDL into datasets, collections and fields, each
+  carrying the `file:line` that produced it. The README lists what it does *not* read yet
+  (OpenAPI, TypeORM, Mongoose, ActiveRecord, Ecto, GORM, TS/Zod DTOs), because an empty data map
+  from an unsupported format looks exactly like a repository with no personal data in it.
+
+  **Structure is derived, meaning is judged.** That a column named `email` exists at
+  `db/schema.sql:12` is a parse; what it means is a lookup or a judgement. The collector classifies
+  only by exact match against a bundled table of 107 rules whose every value was checked against
+  the vendored taxonomy, and raises everything else as `needs_review: true` rather than inferring.
+  That is what lets a collector whose job is classification be deterministic, and a manifest
+  carrying an unresolved flag cannot be pushed — a confidently wrong data category is worse than a
+  gap, because the gap gets reviewed and the wrong answer gets signed.
+
+  The claim unit is the **collection**: one interpretation block per table rather than per column,
+  because five hundred blocks on a five-hundred-column schema is a form nobody fills in. Special
+  category data (GDPR Article 9, and Article 10 criminal-offence data) is collected into its own
+  list so the highest-risk thing in the map is never something a reviewer has to go looking for.
+
+  The validator checks every `data_categories`, `data_use` and `data_subjects` value against the
+  vendored Fideslang snapshot with did-you-mean hints, requires a citation and an interpretation on
+  every claim, and rejects a `dataset_references` entry naming a dataset the manifest does not
+  define — a dangling edge in the map, which would otherwise render as a system reading from a
+  store nothing describes.
+
+  Nineteen collector assertions, each mutation-tested: making the classifier guess, shifting a
+  citation by one line, letting the collector overwrite a reviewed manifest, and dropping the
+  special-category flag are all caught.
 - `privacy-datamap` — the piece skeleton, its declaration and its push. Supersedes
   [`noru-tech/privacy-taxonomy`](https://github.com/noru-tech/privacy-taxonomy), whose skill name it
   keeps, so `/privacy-datamap` and "generate a Fides data map for this repo" go on working; the

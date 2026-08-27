@@ -1,4 +1,5 @@
-# Fixture: a complete, attributed manifest. The validator must exit 0 on this file.
+# A filled-in privacy-datamap manifest: what :scan produces once a human has resolved every
+# needs_review flag and signed for each collection and each declaration.
 version: 0.1.0
 piece: privacy-datamap
 source:
@@ -6,15 +7,66 @@ source:
   commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
   branch: main
   generated_by: privacy-datamap@0.1.0
-items:
-  - key: example-item
-    kind: TODO_first_kind
-    title: An example item
-    refs:
-      - src/example.ts:12
-    interpretation:
-      owner: a.person@example.com
-      decided_at: 2026-08-27
-      expires_at: 2027-02-27
-      rationale: >
-        Why this claim holds, in a sentence a reviewer can argue with.
+  derived_digest: a394e4f94e66e9e52804bd1ca023aea9c42486000584183f2a98481e1f66f9e8
+dataset:
+  - fides_key: app_postgres
+    name: db/migrations/0001_create_accounts.sql
+    description: The application's primary store.
+    collections:
+      - name: accounts
+        refs:
+          - "db/migrations/0001_create_accounts.sql:2"
+        interpretation:
+          owner: Dana Okafor
+          decided_at: "2026-08-20"
+          expires_at: "2027-02-20"
+          rationale: >-
+            Walked the table with the service owner. The classifications follow the column
+            semantics enforced by the application layer, not just the column names.
+          refs:
+            - "db/migrations/0001_create_accounts.sql:2"
+        fields:
+          - name: email
+            data_categories:
+              - user.contact.email
+            refs:
+              - "db/migrations/0001_create_accounts.sql:4"
+          - name: password_hash
+            data_categories:
+              - user.authorization.password
+            refs:
+              - "db/migrations/0001_create_accounts.sql:5"
+          - name: last_login_ip
+            data_categories:
+              - user.device.ip_address
+            refs:
+              - "db/migrations/0001_create_accounts.sql:7"
+          - name: created_at
+            data_categories: []
+            refs:
+              - "db/migrations/0001_create_accounts.sql:9"
+system:
+  - fides_key: web_app
+    name: The customer-facing web application
+    system_type: Application
+    dataset_references:
+      - app_postgres
+    privacy_declarations:
+      - name: Operate the account
+        data_use: essential.service
+        data_subjects:
+          - customer
+        data_categories:
+          - user.contact.email
+          - user.authorization.password
+        refs:
+          - "store/models.py:4"
+        interpretation:
+          owner: Dana Okafor
+          decided_at: "2026-08-20"
+          expires_at: "2027-02-20"
+          rationale: >-
+            Sign-in and account recovery are the only purposes these columns serve in this
+            service; marketing reads from a separate store.
+          refs:
+            - "store/models.py:4"
