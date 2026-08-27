@@ -7,10 +7,25 @@ Contract requirement 8 is the rule that makes this piece worth trusting: every i
 refs[] citing the lines that produced it AND a complete interpretation block naming the person who
 stands behind it. An unattributed claim is an ERROR, never a warning.
 
+Two things anchor a claim here, and the pair is the point.
+
+`structure_digest` pins WHAT a signature was given for: the field names of the collection, not their
+categories, so resolving a classification keeps the signature and adding a column breaks it. That is
+the fourth anchor in contract/README.md requirement 8, and this is the piece that uses it.
+
+`expires_at` pins HOW LONG nobody has looked. It is measured from `decided_at`, which is an honest
+anchor here and is not in most pieces: elsewhere it rewards signing late, and here it cannot,
+because a signature cannot outlive the structure it was given for. Special-category data gets a
+shorter horizon. `--as-of=YYYY-MM-DD` turns an already-expired claim into an error; leave it off and
+the file is judged on its own terms, so nothing here reads the clock by itself.
+
 Usage:
-    python3 validate_manifest.py <manifest.yml> [--output=json] [--quiet] [--emit-parsed=<path>]
+    python3 validate_manifest.py <manifest.yml> [--as-of=YYYY-MM-DD] [--output=json] [--quiet]
+        [--emit-parsed=<path>]
 Exit codes: 0 = valid (warnings allowed), 1 = validation errors, 2 = usage / load error.
 """
+import datetime
+import hashlib
 import json
 import pathlib
 import sys
@@ -365,12 +380,16 @@ KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 # Fideslang's own key grammar, from the upstream FidesKey type.
 FIDES_KEY_RE = re.compile(r"^[A-Za-z0-9_.<>-]+$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
+DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
 TOP_LEVEL_KEYS = {"version", "piece", "source", "dataset", "system"}
 SOURCE_KEYS = {"slug", "commit_sha", "branch", "generated_by", "derived_digest"}
 INTERPRETATION_KEYS = {"owner", "decided_at", "expires_at", "rationale", "refs"}
 DATASET_KEYS = {"fides_key", "name", "description", "collections"}
-COLLECTION_KEYS = {"name", "description", "refs", "interpretation", "needs_review", "fields"}
+COLLECTION_KEYS = {
+    "name", "description", "refs", "interpretation", "needs_review", "fields",
+    "structure_digest",
+}
 FIELD_KEYS = {"name", "description", "data_categories", "refs", "needs_review", "fields"}
 SYSTEM_KEYS = {
     "fides_key", "name", "description", "system_type", "dataset_references",
@@ -398,6 +417,8 @@ def load_vocabulary():
     ):
         rows = json.loads((REFERENCES / "taxonomy" / f"{name}.json").read_text(encoding="utf-8"))
         vocab[key] = [row["fides_key"] for row in rows]
+    table = json.loads((REFERENCES / "classification.json").read_text(encoding="utf-8"))
+    vocab["special_categories"] = table["special_categories"]
     return vocab
 
 
@@ -465,6 +486,77 @@ def check_source(rep, doc):
             )
 
 
+
+def structure_digest(fields):
+    """Mirror of structureDigest() in collect.mjs. The two must agree.
+
+    Kept deliberately trivial for exactly that reason: the sorted dotted field names, newline
+    joined, sha256. Categories are not in it — resolving a classification must not invalidate a
+    signature, but adding, removing or renaming a column must.
+    """
+    names = []
+
+    def walk(items, prefix):
+        for field in items or []:
+            if not isinstance(field, dict):
+                continue
+            name = field.get("name")
+            if not isinstance(name, str):
+                continue
+            names.append(prefix + name)
+            if isinstance(field.get("fields"), list):
+                walk(field["fields"], f"{prefix}{name}.")
+
+    walk(fields, "")
+    return hashlib.sha256("\n".join(sorted(names)).encode("utf-8")).hexdigest()
+
+
+def parse_date(value):
+    try:
+        return datetime.date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def check_horizon(rep, path, block, horizon_days, as_of):
+    """expires_at is required, bounded, and — with --as-of — must not already have passed."""
+    ipath = f"{path}.interpretation"
+    decided = parse_date(block.get("decided_at"))
+    expires_raw = block.get("expires_at")
+    if expires_raw is None:
+        rep.err(
+            f"{ipath}.expires_at",
+            "missing required `expires_at` — a classification nobody has re-owned is not current, "
+            "and only a date says when that starts being true",
+        )
+        return
+    expires = parse_date(expires_raw)
+    if expires is None or decided is None:
+        return
+    if expires <= decided:
+        rep.err(
+            f"{ipath}.expires_at",
+            f"expires on {expires.isoformat()}, on or before it was decided "
+            f"({decided.isoformat()}) — a claim that expires before it is made asserts nothing",
+        )
+        return
+    days = (expires - decided).days
+    if days > horizon_days:
+        rep.err(
+            f"{ipath}.expires_at",
+            f"stands for {days} days from decided_at; this claim may stand for at most "
+            f"{horizon_days}. The anchor is decided_at rather than the day the schema was read, "
+            "which is honest here only because structure_digest pins what the claim is about: a "
+            "signature cannot outlive the structure it was given for",
+        )
+    if as_of is not None and expires < as_of:
+        rep.err(
+            f"{ipath}.expires_at",
+            f"this claim expired on {expires.isoformat()}, before the --as-of date "
+            f"{as_of.isoformat()} — review it and sign again rather than pushing the old one",
+        )
+
+
 def check_categories(rep, path, node, vocab):
     """Every data category must be a real Fideslang key. A typo is an error, not a new category."""
     cats = node.get("data_categories")
@@ -524,7 +616,7 @@ def check_fields(rep, path, fields, vocab, counts):
             check_fields(rep, fpath, field["fields"], vocab, counts)
 
 
-def check_datasets(rep, doc, vocab, counts):
+def check_datasets(rep, doc, vocab, counts, as_of):
     datasets = doc.get("dataset")
     if datasets is None:
         rep.err("dataset", "missing required `dataset` (an empty list is a valid answer)")
@@ -576,6 +668,42 @@ def check_datasets(rep, doc, vocab, counts):
             # column schema, which is a form nobody fills in.
             check_refs(rep, cpath, collection)
             check_interpretation(rep, cpath, collection)
+
+            # The structural anchor. A signature is given for a set of columns; if that set has
+            # changed, the signature is not a statement about this table any more. Recomputed here
+            # rather than trusted, so editing the fields without re-running :scan is caught in the
+            # same breath as editing the digest by hand.
+            stamped = collection.get("structure_digest")
+            actual = structure_digest(collection.get("fields", []))
+            if not isinstance(stamped, str) or not DIGEST_RE.match(stamped or ""):
+                rep.err(
+                    f"{cpath}.structure_digest",
+                    "missing or malformed — every collection carries the digest of the field names "
+                    "its signature was given for. Re-run :scan to stamp it",
+                )
+            elif stamped != actual:
+                rep.err(
+                    f"{cpath}.structure_digest",
+                    f"does not match this collection's fields (stamped {stamped[:12]}, computed "
+                    f"{actual[:12]}) — a column was added, removed or renamed since this was "
+                    "signed, so the signature is no longer a statement about this table. Re-run "
+                    ":scan, review what changed, and sign again",
+                )
+
+            block = collection.get("interpretation")
+            if isinstance(block, dict):
+                cats = [
+                    c
+                    for field in collection.get("fields", []) or []
+                    if isinstance(field, dict)
+                    for c in (field.get("data_categories") or [])
+                ]
+                special = any(c in vocab["special_categories"] for c in cats)
+                horizon = vocab["horizon_days"][
+                    "special_category" if special else "standard"
+                ]
+                check_horizon(rep, cpath, block, horizon, as_of)
+
             if collection.get("needs_review") is True:
                 counts["needs_review"] += 1
                 rep.err(
@@ -587,7 +715,7 @@ def check_datasets(rep, doc, vocab, counts):
     return keys
 
 
-def check_systems(rep, doc, vocab, dataset_keys, counts):
+def check_systems(rep, doc, vocab, dataset_keys, counts, as_of):
     systems = doc.get("system")
     if systems is None:
         rep.err("system", "missing required `system` (an empty list is a valid answer)")
@@ -667,9 +795,16 @@ def check_systems(rep, doc, vocab, dataset_keys, counts):
                             f"unknown fideslang data subject '{subject}'"
                             + suggest(str(subject), vocab["data_subjects"]),
                         )
-            check_categories(rep, dpath, decl, vocab)
+            cats = check_categories(rep, dpath, decl, vocab)
             check_refs(rep, dpath, decl)
             check_interpretation(rep, dpath, decl)
+            block = decl.get("interpretation")
+            if isinstance(block, dict):
+                special = any(c in vocab["special_categories"] for c in cats)
+                horizon = vocab["horizon_days"][
+                    "special_category" if special else "standard"
+                ]
+                check_horizon(rep, dpath, block, horizon, as_of)
             if decl.get("needs_review") is True:
                 counts["needs_review"] += 1
                 rep.err(
@@ -679,7 +814,7 @@ def check_systems(rep, doc, vocab, dataset_keys, counts):
                 )
 
 
-def validate(doc, vocab):
+def validate(doc, vocab, as_of=None):
     rep = Report()
     counts = {"datasets": 0, "collections": 0, "fields": 0, "systems": 0, "needs_review": 0}
     if not isinstance(doc, dict):
@@ -697,14 +832,14 @@ def validate(doc, vocab):
         rep.err("piece", f"expected '{PIECE}', found '{doc.get('piece')}'")
 
     check_source(rep, doc)
-    dataset_keys = check_datasets(rep, doc, vocab, counts)
-    check_systems(rep, doc, vocab, dataset_keys, counts)
+    dataset_keys = check_datasets(rep, doc, vocab, counts, as_of)
+    check_systems(rep, doc, vocab, dataset_keys, counts, as_of)
     counts["datasets"] = len(doc.get("dataset") or [])
     return rep, counts
 
 
 USAGE = (
-    "usage: validate_manifest.py <manifest.yml> [--output=json] [--quiet] "
+    "usage: validate_manifest.py <manifest.yml> [--as-of=YYYY-MM-DD] [--output=json] [--quiet] "
     "[--emit-parsed=<path.json>]\n"
 )
 
@@ -713,6 +848,7 @@ def main(argv):
     output_json = False
     quiet = False
     emit_parsed = None
+    as_of = None
     positional = []
     for arg in argv:
         if arg == "--output=json":
@@ -723,6 +859,14 @@ def main(argv):
             quiet = True
         elif arg.startswith("--emit-parsed="):
             emit_parsed = arg.split("=", 1)[1]
+        elif arg.startswith("--as-of="):
+            as_of = parse_date(arg.split("=", 1)[1])
+            if as_of is None:
+                sys.stderr.write(
+                    f"error: --as-of must be an ISO date (YYYY-MM-DD), got "
+                    f"'{arg.split('=', 1)[1]}'\n"
+                )
+                return 2
         elif arg in ("-h", "--help"):
             sys.stdout.write(USAGE)
             return 0
@@ -750,7 +894,7 @@ def main(argv):
         sys.stderr.write(f"error: could not load bundled vocabulary ({exc})\n")
         return 2
 
-    rep, counts = validate(doc, vocab)
+    rep, counts = validate(doc, vocab, as_of)
     ok = not rep.errors
 
     if ok and emit_parsed:

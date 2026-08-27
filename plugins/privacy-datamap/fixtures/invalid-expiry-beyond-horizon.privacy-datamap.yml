@@ -20,7 +20,7 @@ dataset:
         interpretation:
           owner: Dana Okafor
           decided_at: "2026-08-20"
-          expires_at: "2027-02-20"
+          expires_at: "2029-02-20"
           rationale: >-
             Walked the table with the service owner. The classifications follow the column
             semantics enforced by the application layer, not just the column names.
@@ -30,6 +30,8 @@ dataset:
           - name: email
             data_categories:
               - user.contact.email
+            refs:
+              - "db/migrations/0001_create_accounts.sql:4"
           - name: password_hash
             data_categories:
               - user.authorization.password

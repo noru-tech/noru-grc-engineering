@@ -1061,6 +1061,37 @@ def test_datamap_never_overwrites_a_reviewed_manifest(results, tmp):
 
 
 
+def test_datamap_digest_agrees_across_languages(results, tmp):
+    """collect.mjs stamps structure_digest; validate_manifest.py recomputes it. Two implementations
+    of one hash in two languages is exactly the thing that silently diverges, and the failure would
+    be invisible: every collection would read as "changed shape since it was signed" forever, and
+    the obvious fix — re-running :scan — would not help."""
+    _, repo = datamap_repo(
+        tmp,
+        "digest-agreement",
+        {
+            "db/schema.sql": SQL_FIXTURE,
+            "api/contact.proto": (
+                'syntax = "proto3";\n\nmessage ContactCard {\n'
+                "  string email = 1;\n  string phone_number = 2;\n}\n"
+            ),
+        },
+    )
+    validator = PRIVACY_DATAMAP / "scripts" / "validate_manifest.py"
+    result = run(["python3", str(validator), str(repo / ".noru" / "privacy-datamap.yml")])
+    # The skeleton is deliberately invalid — it is full of needs_review — so the assertion is not
+    # "it validates", it is "the digest is never the thing it complains about".
+    complaints = [
+        line for line in result.stdout.splitlines() if "structure_digest" in line
+    ]
+    results.check(
+        "[privacy-datamap] the JS and Python structure digests agree",
+        not complaints,
+        "; ".join(complaints)[:300],
+    )
+
+
+
 def main(argv):
     output_json = False
     quiet = False
@@ -1097,6 +1128,7 @@ def main(argv):
             test_datamap_citations_point_at_the_real_line(results, tmp)
             test_datamap_surfaces_special_category_data(results, tmp)
             test_datamap_never_overwrites_a_reviewed_manifest(results, tmp)
+            test_datamap_digest_agrees_across_languages(results, tmp)
             test_iac_never_copies_the_line(results, tmp)
             test_iac_identity_survives_a_move(results, tmp)
             test_iac_absence_is_detectable(results, tmp)

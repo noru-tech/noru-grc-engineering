@@ -16,7 +16,7 @@ dataset:
       - name: accounts
         refs:
           - "db/migrations/0001_create_accounts.sql:2"
-        structure_digest: 4abfeae8e1bec7459d35fab52df76e873996f4d1d79316fe73150ea9c1886b57
+        structure_digest: 5b53a67f7565353eaf22d14eb3279c5c5ad191817bfb8be6cfbf09b1ba98bb8a
         interpretation:
           owner: Dana Okafor
           decided_at: "2026-08-20"
@@ -30,6 +30,8 @@ dataset:
           - name: email
             data_categories:
               - user.contact.email
+            refs:
+              - "db/migrations/0001_create_accounts.sql:4"
           - name: password_hash
             data_categories:
               - user.authorization.password
@@ -40,8 +42,9 @@ dataset:
               - user.device.ip_address
             refs:
               - "db/migrations/0001_create_accounts.sql:7"
-          - name: created_at
-            data_categories: []
+          - name: medical_record_number
+            data_categories:
+              - user.health_and_medical.record_id
             refs:
               - "db/migrations/0001_create_accounts.sql:9"
 system:

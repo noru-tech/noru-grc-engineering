@@ -30,6 +30,8 @@ dataset:
           - name: email
             data_categories:
               - user.contact.email
+            refs:
+              - "db/migrations/0001_create_accounts.sql:4"
           - name: password_hash
             data_categories:
               - user.authorization.password
@@ -44,6 +46,11 @@ dataset:
             data_categories: []
             refs:
               - "db/migrations/0001_create_accounts.sql:9"
+          - name: date_of_birth
+            data_categories:
+              - user.demographic.date_of_birth
+            refs:
+              - "db/migrations/0001_create_accounts.sql:10"
 system:
   - fides_key: web_app
     name: The customer-facing web application
