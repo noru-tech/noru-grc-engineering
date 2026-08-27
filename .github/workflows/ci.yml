@@ -130,6 +130,8 @@ jobs:
         run: python3 scripts/test_idempotency.py
       - name: every plugin satisfies contract requirements 1-9
         run: python3 scripts/contract_test.py
+      - name: CI mode fails on drift and on an expired interpretation
+        run: python3 scripts/test_ci_mode.py
 
   scaffold:
     name: a scaffolded piece satisfies the contract
@@ -147,6 +149,108 @@ jobs:
         run: python3 scripts/contract_test.py --piece=ci-scaffold-probe
       - name: and its validator must pass its own fixtures
         run: python3 scripts/test_validators.py
+      - name: and CI mode must be able to drive it with no changes to the orchestrator
+        # scripts/ci_check.py reads plugins/<piece>/piece.json and nothing else. A tooling failure
+        # exits 6 even in warn mode, so a clean 0 here means it really drove the piece.
+        run: python3 scripts/ci_check.py --piece=ci-scaffold-probe --repo=tests/fixture-repo --mode=warn
       - name: clean up so nothing is committed by accident
         if: always()
-        run: rm -rf plugins/ci-scaffold-probe contract/ci-scaffold-probe.schema.json
+        run: |
+          rm -rf plugins/ci-scaffold-probe contract/ci-scaffold-probe.schema.json
+          rm -f tests/fixture-repo/.noru/.cache/ci-scaffold-probe.*
+          git checkout -- .claude-plugin/marketplace.json .agents/plugins/marketplace.json
+          git status --porcelain
+
+  ci-mode:
+    name: the CI-mode action, on this repository
+    runs-on: ubuntu-latest
+    # Dogfood. This action is what every consumer's compliance gate will run, so it runs here first,
+    # on every pull request, against the fixture repository this repo already maintains. The dates
+    # are pinned so these three assertions mean the same thing next year as they do today.
+    env:
+      NORU_CI_AS_OF: "2026-08-27"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: materialise a repository whose committed manifest matches it
+        run: python3 scripts/test_ci_mode.py --emit-fixture="${{ runner.temp }}/dogfood"
+
+      - name: gate mode passes when the record is true
+        uses: ./.github/actions/noru-ci
+        with:
+          piece: ai-inventory
+          repo: ${{ runner.temp }}/dogfood
+          mode: gate
+          as-of: ${{ env.NORU_CI_AS_OF }}
+
+      - name: a pull request that adds a model provider without updating the inventory
+        run: |
+          set -euo pipefail
+          cat > "${{ runner.temp }}/dogfood/src/summarize.ts" <<'TS'
+          // Added by CI to prove the drift gate fires. Not real code; nothing here runs.
+          import { generateText } from "ai"
+          import { anthropic } from "@ai-sdk/anthropic"
+
+          export async function summarize(text: string) {
+            return generateText({ model: anthropic("claude-sonnet-4-5"), prompt: text })
+          }
+          TS
+
+      - name: must fail the gate with the drift exit code
+        id: drift
+        continue-on-error: true
+        uses: ./.github/actions/noru-ci
+        with:
+          piece: ai-inventory
+          repo: ${{ runner.temp }}/dogfood
+          mode: gate
+          as-of: ${{ env.NORU_CI_AS_OF }}
+          summary: "false"
+
+      - name: warn-only mode reports the same finding and does not fail
+        id: warn
+        uses: ./.github/actions/noru-ci
+        with:
+          piece: ai-inventory
+          repo: ${{ runner.temp }}/dogfood
+          mode: warn
+          as-of: ${{ env.NORU_CI_AS_OF }}
+          summary: "false"
+
+      - name: an interpretation that expired must fail the gate too
+        id: expired
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          repo="${{ runner.temp }}/dogfood"
+          rm -f "$repo/src/summarize.ts"
+          sed -i 's/expires_at: 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]/expires_at: 2020-01-01/' \
+            "$repo/.noru/ai-inventory.yml"
+          set +e
+          python3 scripts/ci_check.py --piece=ai-inventory --repo="$repo" \
+            --as-of="$NORU_CI_AS_OF" --output=text
+          echo "exit-code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: the three assertions
+        run: |
+          set -euo pipefail
+          fail=0
+          check() {
+            if [ "$2" != "$3" ]; then
+              echo "::error::$1: expected '$3', got '$2'"
+              fail=1
+            else
+              echo "ok: $1 == $3"
+            fi
+          }
+          check "drift outcome"     "${{ steps.drift.outcome }}"            "failure"
+          check "drift exit code"   "${{ steps.drift.outputs.exit-code }}"  "3"
+          check "drift output flag" "${{ steps.drift.outputs.drift }}"      "true"
+          check "warn exits 0"      "${{ steps.warn.outcome }}"             "success"
+          check "warn still finds"  "${{ steps.warn.outputs.drift }}"       "true"
+          check "warn status"       "${{ steps.warn.outputs.status }}"      "warn"
+          check "expiry exit code"  "${{ steps.expired.outputs.exit-code }}" "4"
+          exit "$fail"

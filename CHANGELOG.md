@@ -21,6 +21,33 @@ one version number; the release workflow fails if they disagree.
   Its queue has two halves: expectations with nothing linked, and sign-offs Noru reports as expiring
   or expired.
 - `contract/governance-records.schema.json`, `contract/review-signoff.schema.json`.
+- **CI mode.** `scripts/ci_check.py` runs any piece headless — `scan → validate → expiry`, and
+  optionally `diff → push` — driven entirely by that piece's `piece.json`, so a piece scaffolded
+  tomorrow works with no change to the orchestrator. Two conditions fail a build and **both are
+  computed from the repository and a calendar, with no network and no credential**, so the checks
+  work on a pull request from a fork: the committed manifest no longer matching the repository
+  (exit `3`, with a readable account of what the collector found that the manifest names nowhere),
+  and an interpretation whose expiry has passed or that is outside the review cadence the pipeline
+  declared (exit `4`). Documented exit codes distinguish each condition from a tooling failure, and
+  `--mode=warn` reports the identical findings without failing, so a team can adopt it before
+  gating on it. `--output=json --quiet` throughout; no TTY.
+- `scripts/check_expiry.py` — the expiry half on its own, over a manifest or a validated document.
+  Reports `expired`, `cadence`, `expiring`, `unbounded` and `unparsable`, and compares a
+  record-level expiry (`expiry_date`) the same way it compares `interpretation.expires_at`.
+- `.github/actions/noru-ci` — the published GitHub Action wrapping it, with a job summary, outputs
+  for `status` / `exit-code` / `drift` / `expired`, and `require-yaml-loader` so a runner image that
+  changes which YAML parser is importable fails the build instead of quietly switching parser under
+  a compliance gate. It installs nothing. [`docs/ci-mode.md`](./docs/ci-mode.md) documents the exit
+  codes, warn-only adoption, the opt-in push job, and the GitLab and plain-shell recipes for anyone
+  not on GitHub.
+- `scripts/test_ci_mode.py` — constructs both failure conditions in a throwaway repository and
+  asserts each one really fails with its own exit code and message, that they are distinguishable
+  when both fire, that warn-only reports the same findings and exits `0`, that a check which could
+  not run is never reported as a pass, and that `NORU_API_KEY` never reaches a step that does not
+  push. Runs in CI under both YAML loaders and against a freshly scaffolded piece.
+- The `ci` workflow dogfoods the action on this repository: it gates a repository whose manifest is
+  true, then asserts the drift gate fails with exit `3`, warn-only mode does not, and an expired
+  interpretation fails with exit `4`.
 - `review-signoff`'s validator takes `--as-of=YYYY-MM-DD`, which turns an already-expired sign-off
   into an error. Nothing in any validator reads the clock by itself, so this stays deterministic and
   the check is explicit where it belongs — in CI, or before a release.

@@ -1,0 +1,267 @@
+name: "Noru last-mile CI check"
+description: >
+  Run a last-mile piece headless — scan, validate, expiry, and optionally diff and push. The default
+  mode needs no network and no credential, so it works on a fork pull request.
+author: "Noru"
+
+branding:
+  icon: check-circle
+  color: gray-dark
+
+# There is no dependency install step anywhere below, and there must never be one. Collectors are
+# Node built-ins only and validators are the Python standard library only; if this action ever needs
+# `npm install` or `pip install`, the atomicity promise in CONTRIBUTING.md has been broken.
+
+inputs:
+  piece:
+    description: "Which piece to run, for example ai-inventory. Must exist under the plugins directory."
+    required: true
+  repo:
+    description: "Path to the repository to check. Defaults to the workspace."
+    required: false
+    default: "."
+  mode:
+    description: >
+      gate (default) fails the step on a finding. warn reports the identical findings and exits 0 —
+      adopt in warn first, turn it into a gate when the report is quiet.
+    required: false
+    default: "gate"
+  steps:
+    description: >
+      Comma-separated: scan, validate, expiry, diff, push — or 'all'. The default,
+      scan,validate,expiry, is the part that needs no credential.
+    required: false
+    default: "scan,validate,expiry"
+  fail-on:
+    description: >
+      Which finding kinds gate the build: drift, invalid, dangling_ref, expired, cadence, expiring,
+      unbounded — or 'none'. Empty uses the tool default
+      (drift, invalid, expired, cadence, unparsable).
+    required: false
+    default: ""
+  max-age-days:
+    description: >
+      The review cadence this pipeline declares, in days. A claim last decided longer ago than this,
+      or declaring a longer review window than this, is reported as `cadence`. 0 (the default)
+      declares no cadence, and the check does not invent one.
+    required: false
+    default: "0"
+  warn-within-days:
+    description: "How far ahead to report an expiry that has not passed yet."
+    required: false
+    default: "30"
+  as-of:
+    description: "Evaluate expiry against this date (YYYY-MM-DD) instead of today. For testing."
+    required: false
+    default: ""
+  state:
+    description: >
+      Path to a Noru state snapshot for the diff step. Only a job that can read the organization can
+      produce one; without it the diff and push steps report as skipped.
+    required: false
+    default: ""
+  on-missing-prerequisite:
+    description: >
+      skip (default) reports a step with no input to work on and exits 0 — the normal state for a
+      queue-driven piece on a fork pull request. fail treats it as a tooling failure.
+    required: false
+    default: "skip"
+  plugins:
+    description: "Directory holding the pieces. Defaults to the ones bundled with this action."
+    required: false
+    default: ""
+  require-yaml-loader:
+    description: >
+      Assert which YAML loader the runner will use — 'pyyaml' or 'fallback' — and fail if it is the
+      other one. Validators use PyYAML when it is importable and a bundled parser otherwise, so a
+      runner image change can silently switch loader underneath you. Empty (the default) reports the
+      loader without asserting it.
+    required: false
+    default: ""
+  summary:
+    description: "Write a job summary. Set to false for a quieter log."
+    required: false
+    default: "true"
+
+outputs:
+  status:
+    description: "pass, pass-with-warnings, warn, skipped, fail or error."
+    value: ${{ steps.check.outputs.status }}
+  exit-code:
+    description: "The orchestrator's exit code. See docs/ci-mode.md for the table."
+    value: ${{ steps.check.outputs.exit-code }}
+  report:
+    description: "Path to the JSON report."
+    value: ${{ steps.check.outputs.report }}
+  drift:
+    description: "true when the committed manifest no longer matches the repository."
+    value: ${{ steps.check.outputs.drift }}
+  expired:
+    description: "Number of interpretations whose expiry has passed."
+    value: ${{ steps.check.outputs.expired }}
+
+runs:
+  using: composite
+  steps:
+    - name: node and python3 must already be on the runner
+      shell: bash
+      run: |
+        set -euo pipefail
+        missing=""
+        command -v node >/dev/null 2>&1 || missing="$missing node"
+        command -v python3 >/dev/null 2>&1 || missing="$missing python3"
+        if [ -n "$missing" ]; then
+          echo "::error::this action needs$missing on the runner. Add actions/setup-node and/or"
+          echo "::error::actions/setup-python before it. It installs nothing itself, on purpose."
+          exit 1
+        fi
+        echo "node $(node --version), $(python3 --version)"
+
+    - name: report which YAML loader this runner will use
+      shell: bash
+      env:
+        REQUIRE_YAML_LOADER: ${{ inputs.require-yaml-loader }}
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import importlib.util, os, sys
+
+        have = importlib.util.find_spec("yaml") is not None
+        actual = "pyyaml" if have else "fallback"
+        print(f"YAML loader on this runner: {actual}")
+        want = os.environ.get("REQUIRE_YAML_LOADER", "").strip()
+        if not want:
+            sys.exit(0)
+        if want not in ("pyyaml", "fallback"):
+            sys.exit(f"require-yaml-loader must be 'pyyaml' or 'fallback', got '{want}'")
+        if want != actual:
+            sys.exit(
+                f"require-yaml-loader={want} but this runner would use {actual}. "
+                "The manifest validators pick PyYAML when it is importable and a bundled parser "
+                "otherwise; pin the one you tested against, or drop the assertion."
+            )
+        PY
+
+    - name: run the piece headless
+      id: check
+      shell: bash
+      env:
+        NORU_CI_PIECE: ${{ inputs.piece }}
+        NORU_CI_REPO: ${{ inputs.repo }}
+        NORU_CI_MODE: ${{ inputs.mode }}
+        NORU_CI_STEPS: ${{ inputs.steps }}
+        NORU_CI_FAIL_ON: ${{ inputs.fail-on }}
+        NORU_CI_MAX_AGE_DAYS: ${{ inputs.max-age-days }}
+        NORU_CI_WARN_WITHIN_DAYS: ${{ inputs.warn-within-days }}
+        NORU_CI_AS_OF: ${{ inputs.as-of }}
+        NORU_CI_STATE: ${{ inputs.state }}
+        NORU_CI_ON_MISSING: ${{ inputs.on-missing-prerequisite }}
+        NORU_CI_PLUGINS: ${{ inputs.plugins }}
+      run: |
+        set -uo pipefail
+        # The toolkit ships with this action, so find its root by walking up from the action path.
+        root="$GITHUB_ACTION_PATH"
+        while [ "$root" != "/" ] && [ ! -f "$root/scripts/ci_check.py" ]; do
+          root="$(dirname "$root")"
+        done
+        if [ ! -f "$root/scripts/ci_check.py" ]; then
+          echo "::error::could not find scripts/ci_check.py above $GITHUB_ACTION_PATH"
+          exit 1
+        fi
+
+        report="${RUNNER_TEMP:-/tmp}/noru-ci-${NORU_CI_PIECE}.json"
+        args=(
+          "--piece=$NORU_CI_PIECE"
+          "--repo=$NORU_CI_REPO"
+          "--mode=$NORU_CI_MODE"
+          "--steps=$NORU_CI_STEPS"
+          "--max-age-days=$NORU_CI_MAX_AGE_DAYS"
+          "--warn-within-days=$NORU_CI_WARN_WITHIN_DAYS"
+          "--on-missing-prerequisite=$NORU_CI_ON_MISSING"
+          "--report=$report"
+          "--output=text"
+        )
+        [ -n "$NORU_CI_FAIL_ON" ] && args+=("--fail-on=$NORU_CI_FAIL_ON")
+        [ -n "$NORU_CI_AS_OF" ] && args+=("--as-of=$NORU_CI_AS_OF")
+        [ -n "$NORU_CI_STATE" ] && args+=("--state=$NORU_CI_STATE")
+        args+=("--plugins=${NORU_CI_PLUGINS:-$root/plugins}")
+
+        # NORU_API_KEY is deliberately not named here. If the caller put it in the job environment
+        # it is inherited by this process and read, at the point of use, only by the piece's own
+        # push entrypoint. Nothing in this action reads, echoes or logs its value.
+        python3 "$root/scripts/ci_check.py" "${args[@]}"
+        code=$?
+
+        {
+          echo "exit-code=$code"
+          echo "report=$report"
+        } >> "$GITHUB_OUTPUT"
+
+        if [ -f "$report" ]; then
+          python3 - "$report" >> "$GITHUB_OUTPUT" <<'PY'
+        import json, sys
+
+        report = json.load(open(sys.argv[1]))
+        counts = report.get("counts", {})
+        print(f"status={report.get('status', 'error')}")
+        print(f"drift={'true' if counts.get('drift', 0) else 'false'}")
+        print(f"expired={counts.get('expired', 0)}")
+        PY
+        else
+          { echo "status=error"; echo "drift=false"; echo "expired=0"; } >> "$GITHUB_OUTPUT"
+        fi
+        exit "$code"
+
+    - name: job summary
+      if: always() && inputs.summary == 'true'
+      shell: bash
+      env:
+        NORU_CI_REPORT: ${{ steps.check.outputs.report }}
+      run: |
+        set -uo pipefail
+        [ -f "${NORU_CI_REPORT:-}" ] || exit 0
+        python3 - "$NORU_CI_REPORT" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+        import json, sys
+
+        report = json.load(open(sys.argv[1]))
+        fail_on = set(report.get("policy", {}).get("fail_on", []))
+        gating = report.get("mode") == "gate"
+        icon = {
+            "pass": "PASS",
+            "pass-with-warnings": "PASS",
+            "warn": "WARN-ONLY",
+            "skipped": "SKIPPED",
+            "fail": "FAIL",
+            "error": "ERROR",
+        }.get(report.get("status"), report.get("status"))
+
+        print(f"### Noru CI mode — `{report['piece']}` — {icon} (exit {report.get('exit_code')})")
+        print()
+        print("| step | result | note |")
+        print("| --- | --- | --- |")
+        for step in report.get("steps", []):
+            note = str(step.get("detail") or "").replace("|", "\\|")
+            print(f"| {step['step']} | {step['status']} | {note[:180]} |")
+
+        findings = report.get("findings", [])
+        if findings:
+            print()
+            print("| | kind | where | what |")
+            print("| --- | --- | --- | --- |")
+            for finding in findings[:50]:
+                blocking = finding["kind"] in fail_on
+                mark = ("blocking" if gating else "would block") if blocking else "note"
+                where = str(finding.get("path") or finding.get("manifest") or "")
+                message = finding["message"].replace("|", "\\|")
+                rows = (finding.get("explanation") or {}).get("new_in_repository", [])
+                if rows:
+                    named = ", ".join(f"`{row['identity']}`" for row in rows[:8])
+                    message += f"<br>present in the repository, named nowhere in the manifest: {named}"
+                note = (finding.get("explanation") or {}).get("note")
+                if note:
+                    message += f"<br>{note}"
+                print(f"| {mark} | `{finding['kind']}` | `{where[:80]}` | {message[:600]} |")
+            if len(findings) > 50:
+                print()
+                print(f"_{len(findings) - 50} further finding(s) in the JSON report._")
+        PY

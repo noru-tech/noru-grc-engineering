@@ -96,6 +96,29 @@ Commit `.noru/<piece>.yml`. Reviewing it in a pull request is the point: a compl
 is diffable, versioned and argued about in review is worth more than one assembled the week before
 an audit.
 
+## In CI
+
+The same pieces run headless, so the record stays true between audits instead of being rebuilt
+before one:
+
+```yaml
+- uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.2.0
+  with:
+    piece: ai-inventory
+    mode: warn      # switch to gate once the report is quiet
+```
+
+Two things fail a build, and **both are computed from the repository and a calendar** — no network,
+no credential, so this works on a pull request from a fork:
+
+- **drift** — the collector no longer agrees with the committed manifest, so someone changed the
+  code without updating the record (exit `3`)
+- **an expired interpretation** — nobody has stood behind this claim since it went stale (exit `4`)
+
+`:diff` and `:push` need a key, so they are an opt-in job that runs only where secrets exist, and
+report as skipped rather than failing when there is none. Exit codes, warn-only adoption, and the
+GitLab and plain-shell recipes: [docs/ci-mode.md](./docs/ci-mode.md).
+
 Add to `.gitignore`:
 
 ```gitignore
@@ -172,6 +195,7 @@ noru-grc-engineering/
 │   ├── evidence-push/                  # :scan :diff :push  (REST upload)
 │   ├── governance-records/             # :scan :diff :push  (MCP)
 │   └── review-signoff/                 # :scan :diff :push  (MCP)
+├── .github/actions/noru-ci/            # the CI-mode action: scan, validate, expiry, diff, push
 ├── scripts/                            # scaffolder, contract test, checks — stdlib/built-ins only
 ├── tests/fixture-repo/                 # the repository the collectors are tested against
 └── docs/
@@ -187,6 +211,7 @@ python3 scripts/check_vendored_lib.py # the vendored blocks have not drifted
 python3 scripts/test_validators.py    # schema fixtures + validator unit tests
 python3 scripts/test_idempotency.py   # a second push must be a no-op
 python3 scripts/contract_test.py      # every plugin satisfies requirements 1-9
+python3 scripts/test_ci_mode.py       # CI mode really fails on drift and on an expired claim
 ```
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md).

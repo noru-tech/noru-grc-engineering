@@ -38,6 +38,7 @@ jobs:
           python3 scripts/test_validators.py
           python3 scripts/test_idempotency.py
           python3 scripts/contract_test.py
+          python3 scripts/test_ci_mode.py
 
       - name: tag, marketplace entries and plugin manifests agree on one version
         env:

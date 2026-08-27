@@ -12,6 +12,7 @@ python3 scripts/check_vendored_lib.py  # vendored blocks are byte-identical acro
 python3 scripts/test_validators.py     # schema fixtures + validator unit tests
 python3 scripts/test_idempotency.py    # a second push is a no-op, end to end
 python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
+python3 scripts/test_ci_mode.py        # CI mode fails on drift and on an expired interpretation
 ```
 
 | Property | How it is proven |
@@ -29,6 +30,20 @@ python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
 | No catalogue is vendored | every plugin file is scanned for catalogue-shaped evidence-item and control ids; fixtures may only use the reserved `E-ZZ-*` / `zz-*` namespaces |
 | No credential leaks into the repository | the tree is scanned for credential-shaped strings |
 | A scaffolded piece satisfies the contract | CI scaffolds one and runs the contract test against it |
+| **CI mode fails on drift** | `test_ci_mode.py` adds a model provider to a copy of the fixture repo and asserts exit `3`, that the message names the provider and the `file:line` it arrived at, and that the gate clears again when the file is removed |
+| **CI mode fails on an expired interpretation** | the same manifest with every `expires_at` moved into the past must exit `4`, name the owner, and *not* report drift — the code did not change |
+| Both at once is distinguishable from either | exit `1`, with both kinds in the report |
+| An invalid manifest is its own exit code | a fixture violating a piece's own cadence rule exits `5`, carries the validator's message through, and blocks the expiry step rather than passing it |
+| Warn-only mode reports and does not fail | the identical findings, `"status": "warn"`, exit `0` |
+| A check that could not run is not a pass | a piece whose queue is missing reports `skipped`, and `--on-missing-prerequisite=fail` exits `6` |
+| CI mode is piece-agnostic | every piece in the marketplace is driven through it green, the orchestrator's source is checked for hardcoded piece names, and CI runs it against a freshly scaffolded piece |
+| No credential reaches a step that does not push | asserted on the helper every step goes through: `NORU_API_KEY` is absent from the child environment except for `:push` |
+| Missing credential degrades, not errors | with no `NORU_API_KEY` the push step reports `skipped` and the build stays green |
+| Both YAML loaders agree in CI mode | the whole CI-mode suite runs under an interpreter with PyYAML and one without, and the orchestrator invokes each validator with its own interpreter so the loader cannot change mid-run |
+
+The CI-mode gates have also been checked in the other direction, which is the only way a gate is
+worth anything: the drift condition and the expiry condition were each constructed in a scratch
+repository and observed failing with their own exit code and message before being asserted.
 
 The contract test has also been checked in the other direction — it was confirmed to **fail** when a
 collector is made non-deterministic, when a hardcoded evidence list is added to a plugin, and when
@@ -110,3 +125,19 @@ Until these are done, treat the pieces as reviewed and internally consistent, no
   stepped outside the reviewed plan. That is a real residual risk, not a solved problem.
 - **Framework identifiers come back as ids, not display names.** Pieces read and store the ids, and
   never try to reconstruct a display name from them.
+- **CI mode's drift check is a digest, not a diff against the base branch.** It answers "does the
+  manifest match the repository as it is now", which is the right question, but it cannot say what a
+  particular pull request changed: the previous derived facts live in `.noru/.cache/` and are not
+  committed. So the itemisation under a drift failure can include things that were already untracked
+  before the change, and it is empty when only line numbers moved — it says so when that happens.
+- **CI mode checks the repository's record, not Noru's.** Offline it cannot see whether a control is
+  still satisfied, whether the evidence is still linked, or whether someone deleted the record last
+  week. A fork pull request gets the two local gates and nothing else, which is the honest ceiling
+  of a check with no credential.
+- **A queue-driven piece has little to check offline.** `evidence-push`, `governance-records` and
+  `review-signoff` build their manifests from a queue Noru serves, so without it the collector
+  cannot run and CI mode reports `skipped`. The expiry half still works on a committed manifest; the
+  drift half does not.
+- **Nothing offline can tell a considered expiry from a convenient one.** An `expires_at` set two
+  years out to stop a build complaining passes every check here. `--max-age-days` is the blunt
+  ceiling; a manifest-declared `cadence`, which only `review-signoff` has, is the sharp one.
