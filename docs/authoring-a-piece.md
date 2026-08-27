@@ -88,6 +88,7 @@ of use, never storing or logging it.
 ```bash
 python3 scripts/contract_test.py
 python3 scripts/test_validators.py
+python3 scripts/test_collectors.py      # add your piece to it — assert what your collector finds
 python3 scripts/test_idempotency.py     # add your piece to it — a second push must be a no-op
 python3 scripts/check_repo.py           # will tell you to register the piece in both marketplaces
 ```

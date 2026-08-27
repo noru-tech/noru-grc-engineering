@@ -24,6 +24,22 @@ one version number; the release workflow fails if they disagree.
 - `review-signoff`'s validator takes `--as-of=YYYY-MM-DD`, which turns an already-expired sign-off
   into an error. Nothing in any validator reads the clock by itself, so this stays deterministic and
   the check is explicit where it belongs — in CI, or before a release.
+- `ai-inventory` now detects **EU AI Act Article 50 triggers and whether the disclosure or content
+  marking each one requires is actually present in the code**. Detecting that a system qualifies was
+  never the useful half. The check reports `present` (the notice or mark is emitted from the same
+  file as the model call), `unclear` (something disclosure-shaped exists but nothing ties it to this
+  surface) or `absent`, and an `absent` finding must record `searched` — where the check looked —
+  because a notice rendered by a design system, a CMS, a mobile client or another repository is
+  invisible to a repository scan.
+- `ai-inventory` screens for seven of the eight Article 5(1) prohibited practices and reports which
+  practices it screened even when it finds nothing, so that "the screen ran and found nothing" is
+  distinguishable from silence. The collector never writes `determination: indicated`: a pattern
+  match proposes `needs_legal_review` with `needs_review: true`, and only a person decides.
+- `scripts/test_collectors.py` — a new gate asserting what the collectors actually detect, rather
+  than only that they are deterministic, offline and contract-clean. It runs the real collector over
+  purpose-built repositories and pins each disclosure state, the marking-is-not-a-label rule, the
+  emotion-recognition-is-biometric rule, and the collector's refusal to assert. Wired into `ci` and
+  `release`.
 
 ### Changed
 
@@ -32,7 +48,40 @@ one version number; the release workflow fails if they disagree.
 - `scripts/test_idempotency.py` enumerates pieces from disk and **fails** when a piece has no
   idempotency test registered, instead of quietly covering a subset while reporting "every piece".
   Its summary line now names the pieces it actually exercised.
-- `scripts/check_repo.py` — vocabulary/schema sync entries for both new pieces.
+- `scripts/check_repo.py` — vocabulary/schema sync entries for both new pieces, and a `keys`
+  comparison mode that pins the *declaration order* of the `ai-inventory` finding categories against
+  the vocabulary, because that order is meaning rather than formatting.
+
+### Changed — `ai-inventory` findings (breaking to the manifest format)
+
+- **`classifications[]` is replaced by `findings`**, an ordered block of four distinct categories:
+  `prohibited_practices`, `transparency_obligations`, `role_and_risk`, `standards_alignment`. A
+  manifest that writes them in another order is a validator error. The order is the substance: the
+  first two are already enforceable, the third serves a later date, and a reader acts on what they
+  read first. A `.noru/ai-inventory.yml` written before this change will not validate; re-run
+  `:scan` against the new schema.
+- Article 5 findings carry the practice, its point of Article 5(1), a determination, and an `action`
+  — required unless the determination is `no_indication`, because a prohibition that produces a row
+  in a table and no instruction has failed at the only thing it was for. Article 5 findings and
+  missing Article 50 disclosures are lifted above everything else in `:scan`, `:diff` and validator
+  output, and carried in `--output=json` under `alerts` so CI can fail on them.
+- `role_and_risk` requires `enforceable_from`, the date the obligations that follow from the tier
+  start to apply, so a finding serving a future deadline cannot be presented as one due today. It
+  also carries the article driving the role and the article driving the tier, an Annex III screen,
+  and the Article 6(3) assessment where the conclusion is not-high-risk — including the profiling
+  answer, which the validator gates on: Article 6(3) does not permit that conclusion for a system
+  that performs profiling of natural persons.
+- The tier vocabulary drops `limited_risk` and `minimal_risk`. They are commentary shorthand rather
+  than terms of the Regulation, and the transparency duties they usually stand for now have their
+  own category. `prohibited` is gone from the tier list for the same reason.
+
+### Fixed
+
+- The `ai-inventory` documentation no longer implies that the EU AI Act requires an organization to
+  keep an AI register. It does not. Articles 49 and 71 are registration into a public Commission
+  database by providers of Annex III high-risk systems, and by deployers only where they are public
+  authorities or EU bodies; a private-sector deployer has no registration duty. The piece README now
+  states what the Regulation does ask for and why an inventory is still worth keeping.
 
 
 ## 0.1.0

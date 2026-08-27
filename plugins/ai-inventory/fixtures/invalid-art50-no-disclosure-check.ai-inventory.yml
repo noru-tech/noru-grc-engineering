@@ -1,0 +1,49 @@
+# Fixture: the failure the whole Article 50 category exists to prevent. Someone found the model
+# call, recorded that Article 50(1) applies, and stopped there. Detecting that a system qualifies is
+# not the finding; whether the required disclosure is actually present is the finding, and it is the
+# half that is enforceable today.
+# Expected: exit 1, "missing required `disclosure`" on the transparency finding.
+version: 0.1.0
+piece: ai-inventory
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: ai-inventory@0.1.0
+providers:
+  - key: example-llm
+    vendor_name: Example LLM Provider
+    refs:
+      - packages/inference/src/client.ts:12
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      rationale: Only model provider reachable from production code paths at this commit.
+ai_systems:
+  - key: support-assistant
+    name: Support chat assistant
+    purpose: Answers customer questions in a chat panel on the support site.
+    provider: example-llm
+    deployment: hosted_api
+    autonomy: assistive
+    refs:
+      - apps/support/src/chat/route.ts:33
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      expires_at: 2027-02-01
+      rationale: Read the chat route with the support engineering lead and confirmed the surface.
+findings:
+  transparency_obligations:
+    - system: support-assistant
+      trigger: direct_human_interaction
+      article: Article 50(1)
+      required_action: inform_natural_person
+      status: suggested
+      refs:
+        - apps/support/src/chat/route.ts:33
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-02
+        expires_at: 2027-02-02
+        rationale: Customers type into this panel, so the transparency obligation is in play.

@@ -50,7 +50,9 @@ duplicates happen.
 
 - Re-run `/ai-inventory:diff`. Every operation should now be `skip`. If any is not, say which and
   why rather than pushing again.
-- Report the created and updated ids, and note that classifications landed as *suggestions* that
-  someone in Noru still needs to accept or reject.
+- Report the created and updated ids, and note that every finding landed as a *suggestion* that
+  someone in Noru still needs to accept or reject. Name the Article 5 findings and the Article 50
+  disclosure gaps explicitly: those are already enforceable, and landing them in Noru is where they
+  become someone's work, not where they stop being a problem.
 - Remind the user to commit `.noru/ai-inventory.yml`. The manifest is the reviewable artifact;
   `.noru/.cache/` is machine state and should stay untracked.

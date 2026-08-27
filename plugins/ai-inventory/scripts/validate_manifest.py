@@ -9,9 +9,14 @@ Self-contained and atomic:
     so it runs anywhere python3 exists.
 
 The rule that makes this piece worth trusting (contract requirement 8): every AI system, every
-provider, every provider claim and every classification must carry `refs[]` citing the repository
-lines that produced it AND a complete `interpretation` block naming the person who stands behind
-it. An unattributed claim is an ERROR, never a warning.
+provider, every provider claim and every finding must carry `refs[]` citing the repository lines
+that produced it AND a complete `interpretation` block naming the person who stands behind it. An
+unattributed claim is an ERROR, never a warning.
+
+The `findings` block is ordered, and this file enforces the order: prohibited practices, then
+transparency obligations, then role and risk tier, then standards alignment. A manifest that leads
+with a risk tier leads with the obligation that is furthest away, and the reader acts on what they
+read first.
 
 Usage:
     python3 validate_manifest.py <manifest.yml> [--output=json] [--quiet]
@@ -270,7 +275,10 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
-TOP_LEVEL_KEYS = {"version", "piece", "source", "ai_systems", "providers", "classifications"}
+ARTICLE_RE = re.compile(r"^Article \d+(\([0-9a-z]+\))*$")
+ART5_ARTICLE_RE = re.compile(r"^Article 5\(1\)\([a-h]\)$")
+
+TOP_LEVEL_KEYS = {"version", "piece", "source", "ai_systems", "providers", "findings"}
 SOURCE_KEYS = {"slug", "commit_sha", "branch", "generated_by", "derived_digest"}
 INTERPRETATION_KEYS = {"owner", "decided_at", "expires_at", "rationale", "refs"}
 SYSTEM_KEYS = {
@@ -284,7 +292,36 @@ PROVIDER_KEYS = {
 }
 CLAIM_KEYS = {"kind", "value", "source", "interpretation"}
 CLAIM_SOURCE_KEYS = {"type", "ref", "url", "document", "retrieved_on"}
-CLASSIFICATION_KEYS = {"system", "scheme", "value", "driver", "status", "refs", "interpretation"}
+
+PROHIBITED_KEYS = {
+    "system", "practice", "article", "determination", "action", "status", "needs_review",
+    "refs", "interpretation",
+}
+TRANSPARENCY_KEYS = {
+    "system", "trigger", "article", "required_action", "applies_to_role", "disclosure", "status",
+    "needs_review", "refs", "interpretation",
+}
+DISCLOSURE_KEYS = {"state", "mechanism", "gap", "searched", "refs"}
+ROLE_RISK_KEYS = {
+    "system", "role", "role_article", "tier", "tier_article", "annex_iii_area",
+    "not_high_risk_assessment", "enforceable_from", "status", "needs_review", "refs",
+    "interpretation",
+}
+ART_6_3_KEYS = {"ground", "profiling", "article", "refs"}
+STANDARDS_KEYS = {
+    "system", "scheme", "value", "reference", "status", "needs_review", "refs", "interpretation",
+}
+
+# Article 50 pairs a trigger with a specific required action. Recording a trigger without the
+# action it demands is how a scan ends up reporting a label instead of an obligation.
+TRIGGER_REQUIRED_ACTION = {
+    "direct_human_interaction": {"inform_natural_person"},
+    "synthetic_content_generation": {"machine_readable_marking"},
+    "emotion_recognition": {"inform_natural_person"},
+    "biometric_categorisation": {"inform_natural_person"},
+    "deep_fake": {"disclose_artificial_content"},
+    "public_interest_text": {"disclose_artificial_content"},
+}
 
 # Claim kinds whose truth depends on a configuration that can silently change. Contract
 # requirement 8 scopes expiry to exactly these; a procedural claim may omit expires_at.
@@ -611,54 +648,317 @@ def check_provider(rep, path, provider, vocab):
     return key
 
 
-def check_classification(rep, path, item, vocab, system_keys):
-    if not isinstance(item, dict):
-        rep.err(path, "classification must be a mapping")
-        return
-    check_unknown_keys(rep, path, item, CLASSIFICATION_KEYS)
-
+def check_finding_common(rep, path, item, vocab, system_keys):
+    """Every finding, in every category, answers the same three questions."""
     system = item.get("system")
     if system not in system_keys:
         rep.err(
             f"{path}.system",
             f"'{system}' is not declared in ai_systems[]" + suggest(system, system_keys),
         )
-
-    scheme = item.get("scheme")
-    check_enum(rep, f"{path}.scheme", scheme, vocab["classification_scheme"], "classification scheme")
-
-    value = item.get("value")
-    if not value:
-        rep.err(f"{path}.value", "missing required `value`")
-    else:
-        allowed = vocab["classification_values"].get(scheme)
-        if allowed is not None and value not in allowed:
-            rep.err(f"{path}.value", f"unknown {scheme} value '{value}'" + suggest(value, allowed))
-
-    check_enum(
-        rep, f"{path}.status", item.get("status"),
-        vocab["classification_status"], "classification status",
-    )
+    check_enum(rep, f"{path}.status", item.get("status"), vocab["finding_status"], "finding status")
     if item.get("status") in ("accepted", "rejected"):
         rep.warn(
             f"{path}.status",
             "the piece only ever emits 'suggested'; accepted/rejected is a human's call in Noru",
         )
-
-    if scheme in vocab["schemes_requiring_driver"] and not item.get("driver"):
+    if item.get("needs_review") is True:
         rep.err(
-            f"{path}.driver",
-            f"missing required `driver` — a {scheme} value must name the provision that drives it "
-            "(for example 'Article 50(1)')",
+            f"{path}.needs_review",
+            "still true — the collector proposed this finding but nobody has decided it; decide it "
+            "and remove the flag before pushing",
         )
-
     check_refs(rep, path, item)
     check_interpretation(rep, path, item, expiry_required=True)
 
 
+def check_article(rep, path, value, label, regex=ARTICLE_RE):
+    if not value:
+        rep.err(path, f"missing required `{label}` — cite the provision that drives this finding")
+        return
+    if not isinstance(value, str) or not regex.match(value):
+        rep.err(
+            path,
+            f"'{value}' is not an article citation. Write it as it appears in the instrument, for "
+            "example 'Article 50(1)' or 'Article 5(1)(f)'",
+        )
+
+
+def check_prohibited_practice(rep, path, item, vocab, system_keys):
+    """Article 5. The one category where the answer is stop, not document."""
+    if not isinstance(item, dict):
+        rep.err(path, "prohibited-practice finding must be a mapping")
+        return
+    check_unknown_keys(rep, path, item, PROHIBITED_KEYS)
+
+    practice = item.get("practice")
+    check_enum(rep, f"{path}.practice", practice, vocab["prohibited_practice"], "practice")
+
+    article = item.get("article")
+    check_article(rep, f"{path}.article", article, "article", ART5_ARTICLE_RE)
+    expected = vocab["prohibited_practice_article"].get(practice)
+    if expected and article and article != expected:
+        rep.err(
+            f"{path}.article",
+            f"'{practice}' is {expected}, not '{article}' — the citation and the practice must be "
+            "the same provision or the finding cannot be checked",
+        )
+
+    determination = item.get("determination")
+    check_enum(
+        rep, f"{path}.determination", determination,
+        vocab["prohibited_determination"], "determination",
+    )
+    if determination in ("indicated", "needs_legal_review"):
+        action = item.get("action")
+        if not action or not isinstance(action, str) or len(action.strip()) < 10:
+            rep.err(
+                f"{path}.action",
+                "missing required `action` — a determination of "
+                f"'{determination}' means someone has to do something, and this is where it is "
+                "written down. Article 5 is a prohibition: the answer is to stop the practice, not "
+                "to document it",
+            )
+
+    check_finding_common(rep, path, item, vocab, system_keys)
+
+
+def check_disclosure(rep, path, node, vocab, trigger):
+    """The Article 50 check that is actually enforceable: is the disclosure there or is it not."""
+    if node is None:
+        rep.err(
+            path,
+            "missing required `disclosure` — an Article 50 trigger recorded without saying whether "
+            "the required disclosure or marking is present is the failure this category exists to "
+            "prevent. Finding the model call is not the finding",
+        )
+        return
+    if not isinstance(node, dict):
+        rep.err(path, "must be a mapping with at least `state`")
+        return
+    check_unknown_keys(rep, path, node, DISCLOSURE_KEYS)
+
+    state = node.get("state")
+    check_enum(rep, f"{path}.state", state, vocab["disclosure_state"], "disclosure state")
+
+    refs = node.get("refs")
+    if state == "present":
+        mechanism = node.get("mechanism")
+        if not mechanism or not isinstance(mechanism, str) or len(mechanism.strip()) < 5:
+            rep.err(
+                f"{path}.mechanism",
+                "missing required `mechanism` — say how the disclosure or mark is produced, so the "
+                "next reader can check it rather than trust it",
+            )
+        if not isinstance(refs, list) or not refs:
+            rep.err(
+                f"{path}.refs",
+                "missing required `refs` — 'the disclosure is present' is a claim about a line of "
+                "code, so cite the line",
+            )
+    if state in ("absent", "unclear"):
+        gap = node.get("gap")
+        if not gap or not isinstance(gap, str) or len(gap.strip()) < 10:
+            rep.err(
+                f"{path}.gap",
+                f"missing required `gap` — say what is missing for a '{state}' disclosure and what "
+                "would close it",
+            )
+    if state == "unclear" and (not isinstance(refs, list) or not refs):
+        rep.err(
+            f"{path}.refs",
+            "missing required `refs` — 'unclear' means something disclosure-shaped was found but "
+            "nothing ties it to this surface, so cite what was found",
+        )
+    if state == "absent":
+        searched = node.get("searched")
+        if not isinstance(searched, list) or not searched:
+            rep.err(
+                f"{path}.searched",
+                "missing required `searched` — a disclosure is only ever absent from somewhere. A "
+                "notice rendered by a design system, a CMS, a mobile client or another repository "
+                "is invisible to a repository scan, so list where the check looked before calling "
+                "it a gap",
+            )
+    if isinstance(refs, list):
+        check_refs(rep, path, node, required=False)
+
+    if state == "present" and trigger == "synthetic_content_generation":
+        rep.warn(
+            path,
+            "Article 50(2) asks for a machine-readable mark on the output, not a label in the "
+            "interface — confirm the mark travels with the artifact",
+        )
+
+
+def check_transparency(rep, path, item, vocab, system_keys):
+    """Article 50. Applicable since 2 August 2026, and the gap a repository scan can actually see."""
+    if not isinstance(item, dict):
+        rep.err(path, "transparency finding must be a mapping")
+        return
+    check_unknown_keys(rep, path, item, TRANSPARENCY_KEYS)
+
+    trigger = item.get("trigger")
+    check_enum(rep, f"{path}.trigger", trigger, vocab["transparency_trigger"], "Article 50 trigger")
+    check_article(rep, f"{path}.article", item.get("article"), "article")
+
+    action = item.get("required_action")
+    check_enum(rep, f"{path}.required_action", action, vocab["required_action"], "required action")
+    expected = TRIGGER_REQUIRED_ACTION.get(trigger)
+    if expected and action and action not in expected:
+        rep.err(
+            f"{path}.required_action",
+            f"a '{trigger}' trigger requires {' or '.join(sorted(expected))}, not '{action}' — "
+            "informing a person and marking an output are different duties under different "
+            "paragraphs and one does not satisfy the other",
+        )
+
+    if item.get("applies_to_role") is not None:
+        check_enum(
+            rep, f"{path}.applies_to_role", item.get("applies_to_role"),
+            vocab["eu_ai_act_role"], "role",
+        )
+
+    check_disclosure(rep, f"{path}.disclosure", item.get("disclosure"), vocab, trigger)
+    check_finding_common(rep, path, item, vocab, system_keys)
+
+
+def check_role_and_risk(rep, path, item, vocab, system_keys):
+    """Role and tier. Real, and dated: enforceable_from keeps a future deadline from reading as now."""
+    if not isinstance(item, dict):
+        rep.err(path, "role-and-risk finding must be a mapping")
+        return
+    check_unknown_keys(rep, path, item, ROLE_RISK_KEYS)
+
+    check_enum(rep, f"{path}.role", item.get("role"), vocab["eu_ai_act_role"], "role")
+    check_article(rep, f"{path}.role_article", item.get("role_article"), "role_article")
+
+    tier = item.get("tier")
+    check_enum(rep, f"{path}.tier", tier, vocab["eu_ai_act_tier"], "risk tier")
+    check_article(rep, f"{path}.tier_article", item.get("tier_article"), "tier_article")
+
+    area = item.get("annex_iii_area")
+    if area is not None:
+        check_enum(rep, f"{path}.annex_iii_area", area, vocab["annex_iii_area"], "Annex III area")
+
+    enforceable = item.get("enforceable_from")
+    if enforceable is None:
+        rep.err(
+            f"{path}.enforceable_from",
+            "missing required `enforceable_from` — say the date from which the obligations that "
+            "follow from this tier apply, so that a finding serving a future deadline is not read "
+            "as one that is due now",
+        )
+    elif not isinstance(enforceable, str) or not DATE_RE.match(enforceable):
+        rep.err(f"{path}.enforceable_from", f"'{enforceable}' is not an ISO date (YYYY-MM-DD)")
+
+    assessment = item.get("not_high_risk_assessment")
+    in_annex_iii = area is not None and area != "none"
+    if tier == "not_high_risk" and in_annex_iii and assessment is None:
+        rep.err(
+            f"{path}.not_high_risk_assessment",
+            "missing required `not_high_risk_assessment` — concluding that a system in an Annex III "
+            "area is not high-risk is the Article 6(3) derogation, and Article 6(4) expects the "
+            "assessment behind it to be documented",
+        )
+    if assessment is not None:
+        apath = f"{path}.not_high_risk_assessment"
+        if not isinstance(assessment, dict):
+            rep.err(apath, "must be a mapping")
+        else:
+            check_unknown_keys(rep, apath, assessment, ART_6_3_KEYS)
+            check_enum(
+                rep, f"{apath}.ground", assessment.get("ground"),
+                vocab["art_6_3_ground"], "Article 6(3) ground",
+            )
+            check_article(rep, f"{apath}.article", assessment.get("article"), "article")
+            profiling = assessment.get("profiling")
+            if not isinstance(profiling, bool):
+                rep.err(
+                    f"{apath}.profiling",
+                    "missing required boolean `profiling` — Article 6(3) turns on whether the "
+                    "system profiles natural persons, so the answer cannot be left implicit",
+                )
+            elif profiling is True and tier == "not_high_risk":
+                rep.err(
+                    f"{apath}.profiling",
+                    "is true while the tier is not_high_risk — Article 6(3) does not allow that "
+                    "conclusion for a system that performs profiling of natural persons",
+                )
+            if isinstance(assessment.get("refs"), list):
+                check_refs(rep, apath, assessment, required=False)
+
+    check_finding_common(rep, path, item, vocab, system_keys)
+
+
+def check_standards(rep, path, item, vocab, system_keys):
+    """ISO/IEC 42001 references and NIST AI RMF function tags."""
+    if not isinstance(item, dict):
+        rep.err(path, "standards finding must be a mapping")
+        return
+    check_unknown_keys(rep, path, item, STANDARDS_KEYS)
+
+    scheme = item.get("scheme")
+    check_enum(rep, f"{path}.scheme", scheme, vocab["standards_scheme"], "scheme")
+
+    value = item.get("value")
+    if not value:
+        rep.err(f"{path}.value", "missing required `value`")
+    elif scheme == "nist_ai_rmf" and value not in vocab["nist_ai_rmf_function"]:
+        rep.err(
+            f"{path}.value",
+            f"unknown NIST AI RMF function '{value}'" + suggest(value, vocab["nist_ai_rmf_function"]),
+        )
+
+    check_finding_common(rep, path, item, vocab, system_keys)
+
+
+CATEGORY_CHECKS = {
+    "prohibited_practices": check_prohibited_practice,
+    "transparency_obligations": check_transparency,
+    "role_and_risk": check_role_and_risk,
+    "standards_alignment": check_standards,
+}
+
+
+def check_findings(rep, doc, vocab, system_keys, counts):
+    findings = doc.get("findings")
+    if findings is None:
+        return
+    if not isinstance(findings, dict):
+        rep.err(
+            "findings",
+            "must be a mapping of finding categories, in order: "
+            + ", ".join(vocab["finding_categories"]),
+        )
+        return
+
+    order = vocab["finding_categories"]
+    check_unknown_keys(rep, "findings", findings, set(order))
+
+    # The order is the change, not a formatting preference. A manifest that opens with a risk tier
+    # opens with the obligation that is furthest away, and readers act on what they read first.
+    present = [key for key in findings if key in order]
+    if present != [key for key in order if key in findings]:
+        rep.err(
+            "findings",
+            f"categories are out of order ({', '.join(present)}). Write them as "
+            f"{', '.join(order)}: what is enforceable today comes before what is enforceable later",
+        )
+
+    for category in order:
+        items = rep.aslist(findings.get(category))
+        counts[category] = len(items)
+        check = CATEGORY_CHECKS[category]
+        for i, item in enumerate(items):
+            check(rep, f"findings.{category}[{i}]", item, vocab, system_keys)
+
+
 def validate(doc, vocab):
     rep = Report()
-    counts = {"ai_systems": 0, "providers": 0, "classifications": 0}
+    counts = {"ai_systems": 0, "providers": 0}
+    for category in vocab["finding_categories"]:
+        counts[category] = 0
     if not isinstance(doc, dict):
         rep.err("<root>", "manifest must be a mapping with `version`, `piece`, `source`, `ai_systems`")
         return rep, counts
@@ -702,12 +1002,83 @@ def validate(doc, vocab):
                 rep.err(label, f"duplicate key '{key}' — keys must be unique and stable")
             seen.add(key)
 
-    classifications = rep.aslist(doc.get("classifications"))
-    for i, item in enumerate(classifications):
-        check_classification(rep, f"classifications[{i}]", item, vocab, system_keys)
-    counts["classifications"] = len(classifications)
+    check_findings(rep, doc, vocab, system_keys, counts)
 
     return rep, counts
+
+
+def collect_alerts(doc):
+    """The two things a reader must not scroll past.
+
+    An Article 5 hit and a missing Article 50 disclosure are both enforceable now, so neither is
+    left as a row in a table: they are lifted out of the findings block and printed above
+    everything else, and carried in --output=json so CI can fail on them.
+    """
+    alerts = []
+    findings = doc.get("findings") if isinstance(doc, dict) else None
+    if not isinstance(findings, dict):
+        return alerts
+
+    for item in findings.get("prohibited_practices") or []:
+        if not isinstance(item, dict):
+            continue
+        determination = item.get("determination")
+        if determination not in ("indicated", "needs_legal_review"):
+            continue
+        # An indicated practice and an unclear one are not the same claim, and the banner must not
+        # flatten them into one. Article 5 is a prohibition either way, but only one of the two is
+        # an assertion that the prohibition is engaged.
+        tail = (
+            "Article 5 is a prohibition: the answer is to stop the practice and take legal advice, "
+            "not to document it."
+            if determination == "indicated"
+            else "A signal was found and the code does not settle it. Take legal advice before this "
+            "runs again."
+        )
+        alerts.append(
+            {
+                "severity": "stop" if determination == "indicated" else "review",
+                "category": "prohibited_practices",
+                "system": item.get("system"),
+                "message": (
+                    f"{item.get('article')} {item.get('practice')} — {determination} on "
+                    f"'{item.get('system')}'. {tail}"
+                ),
+            }
+        )
+
+    for item in findings.get("transparency_obligations") or []:
+        if not isinstance(item, dict):
+            continue
+        disclosure = item.get("disclosure")
+        state = disclosure.get("state") if isinstance(disclosure, dict) else None
+        if state not in ("absent", "unclear"):
+            continue
+        alerts.append(
+            {
+                "severity": "gap" if state == "absent" else "unresolved",
+                "category": "transparency_obligations",
+                "system": item.get("system"),
+                "message": (
+                    f"{item.get('article')} {item.get('trigger')} on '{item.get('system')}': the "
+                    f"required {item.get('required_action')} is {state}."
+                ),
+            }
+        )
+    return alerts
+
+
+def render_alerts(alerts):
+    if not alerts:
+        return []
+    width = max(len(a["message"]) for a in alerts)
+    rule = "=" * min(max(width + 4, 40), 96)
+    lines = [rule]
+    for alert in alerts:
+        lines.append(f"  {alert['severity'].upper()}: {alert['message']}")
+    lines.append(rule)
+    lines.append("")
+    return lines
 
 
 USAGE = (
@@ -776,6 +1147,8 @@ def main(argv):
             sys.stderr.write(f"error: could not write {emit_parsed} ({exc})\n")
             return 2
 
+    alerts = collect_alerts(doc)
+
     if output_json:
         sys.stdout.write(
             json.dumps(
@@ -785,6 +1158,7 @@ def main(argv):
                     "ok": ok,
                     "loader": loader,
                     "counts": counts,
+                    "alerts": alerts,
                     "errors": [{"path": p, "message": m} for p, m in rep.errors],
                     "warnings": [{"path": p, "message": m} for p, m in rep.warnings],
                 },
@@ -795,6 +1169,8 @@ def main(argv):
         )
         return 0 if ok else 1
 
+    for line in render_alerts(alerts):
+        print(line)
     if not quiet:
         print(f"(parsed with {loader})")
         for p, m in rep.warnings:
@@ -808,8 +1184,13 @@ def main(argv):
     if not quiet:
         print(
             f"\nOK: {counts['ai_systems']} AI system(s), {counts['providers']} provider(s), "
-            f"{counts['classifications']} classification(s), all keys valid "
-            f"({len(rep.warnings)} warning(s))."
+            f"all keys valid ({len(rep.warnings)} warning(s))."
+        )
+        print(
+            "     findings: "
+            + ", ".join(
+                f"{counts[c]} {c.replace('_', ' ')}" for c in vocab["finding_categories"]
+            )
         )
     return 0
 

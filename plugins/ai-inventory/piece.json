@@ -30,7 +30,11 @@
       "2": "usage error, unreadable file, or unparseable YAML"
     },
     "fixtures": {
-      "valid": ["fixtures/valid.ai-inventory.yml"],
+      "valid": [
+        "fixtures/valid.ai-inventory.yml",
+        "fixtures/valid-art50-missing-disclosure.ai-inventory.yml",
+        "fixtures/valid-art5-stop.ai-inventory.yml"
+      ],
       "invalid": [
         {
           "path": "fixtures/invalid-missing-interpretation.ai-inventory.yml",
@@ -51,6 +55,30 @@
         {
           "path": "fixtures/invalid-no-expiry-on-technical-claim.ai-inventory.yml",
           "expect_message": "missing required `expires_at`"
+        },
+        {
+          "path": "fixtures/invalid-art5-no-action.ai-inventory.yml",
+          "expect_message": "missing required `action`"
+        },
+        {
+          "path": "fixtures/invalid-art50-no-disclosure-check.ai-inventory.yml",
+          "expect_message": "missing required `disclosure`"
+        },
+        {
+          "path": "fixtures/invalid-art50-absent-without-searched.ai-inventory.yml",
+          "expect_message": "missing required `searched`"
+        },
+        {
+          "path": "fixtures/invalid-role-without-enforceable-from.ai-inventory.yml",
+          "expect_message": "missing required `enforceable_from`"
+        },
+        {
+          "path": "fixtures/invalid-findings-out-of-order.ai-inventory.yml",
+          "expect_message": "categories are out of order"
+        },
+        {
+          "path": "fixtures/invalid-art6-3-profiling.ai-inventory.yml",
+          "expect_message": "does not allow that conclusion"
         }
       ]
     }

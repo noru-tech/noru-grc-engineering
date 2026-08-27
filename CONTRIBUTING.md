@@ -110,6 +110,7 @@ Before opening a pull request:
 python3 scripts/check_repo.py          # marketplaces, schema/vocabulary sync, secret hygiene
 python3 scripts/check_vendored_lib.py  # vendored blocks are byte-identical
 python3 scripts/test_validators.py     # schema fixtures + validator unit tests
+python3 scripts/test_collectors.py     # collectors detect what the pieces claim they detect
 python3 scripts/test_idempotency.py    # a second push is a no-op
 python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
 git diff --check

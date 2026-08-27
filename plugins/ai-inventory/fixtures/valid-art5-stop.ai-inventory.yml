@@ -1,0 +1,129 @@
+# Fixture: the one category where the correct finding is "stop", not "document".
+#
+# Article 5 has applied since 2 February 2025 (Article 113(a)). It is a prohibition, so a finding
+# here is not an item for a remediation backlog next to everything else: it says the practice has to
+# stop while counsel looks at it. The manifest still validates - the finding is data, and it has to
+# reach a human in Noru to be acted on - but the validator lifts it above everything else in its
+# output rather than leaving it as one row among many.
+version: 0.1.0
+piece: ai-inventory
+source:
+  slug: example-org/example-hiring
+  commit_sha: 7c2e4a6b8d0f13579ace02468bdf13579acefdb2
+  branch: main
+  generated_by: ai-inventory@0.1.0
+providers:
+  - key: example-vision
+    vendor_name: Example Vision Provider
+    category: software_as_a_service
+    refs:
+      - services/screening/src/vision.ts:14
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-20
+      rationale: The only vision provider reachable from the screening service at this commit.
+ai_systems:
+  - key: interview-affect
+    name: Interview affect scorer
+    purpose: >
+      Scores recorded interview video for candidate engagement and returns the score to the hiring
+      panel alongside the transcript.
+    provider: example-vision
+    deployment: hosted_api
+    autonomy: assistive
+    human_oversight:
+      - type: human_review_before_action
+        description: The hiring panel reads the score; no rejection is automatic.
+        refs:
+          - services/screening/src/panel/review.ts:71
+    inputs:
+      description: Recorded interview video and audio.
+      data_categories:
+        - user.biometric
+      refs:
+        - services/screening/src/affect.ts:29
+    evals:
+      suites: []
+      ci_gated: false
+    data_categories:
+      - user.biometric
+    refs:
+      - services/screening/src/affect.ts:29
+      - services/screening/src/affect.ts:58
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-20
+      expires_at: 2027-02-20
+      rationale: >
+        Walked the screening path with the hiring platform team; the affect score is computed from
+        the recording and shown to the panel with the transcript.
+findings:
+  prohibited_practices:
+    - system: interview-affect
+      practice: emotion_inference_workplace_or_education
+      article: Article 5(1)(f)
+      determination: indicated
+      action: >
+        Disable the affect scorer in every environment today and take legal advice before it runs
+        again. Do not schedule this as remediation work: Article 5 is a prohibition, so there is no
+        version of this that is documented into compliance.
+      status: suggested
+      refs:
+        - services/screening/src/affect.ts:29
+        - services/screening/src/affect.ts:58
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-20
+        expires_at: 2026-09-20
+        rationale: >
+          The system infers an emotional state of a candidate from biometric input in a recruitment
+          context, which is what Article 5(1)(f) describes. That a human reads the score does not
+          change the analysis: the prohibition is on the inference, not on how the output is used.
+          Suggested, not asserted - counsel decides - but it is raised as stop rather than as an
+          item to work through.
+    - system: interview-affect
+      practice: sensitive_biometric_categorisation
+      article: Article 5(1)(g)
+      determination: needs_legal_review
+      action: >
+        Confirm with counsel what the vision provider derives from the recording beyond the affect
+        score, and hold the integration until that answer is in writing.
+      status: suggested
+      refs:
+        - services/screening/src/vision.ts:14
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-20
+        expires_at: 2026-09-20
+        rationale: >
+          The call sends biometric input to a provider whose published documentation lists face
+          attribute outputs we do not request and cannot see from this repository. Genuinely unclear
+          from the code, so it is recorded as needing review rather than as a determination.
+  transparency_obligations:
+    - system: interview-affect
+      trigger: emotion_recognition
+      article: Article 50(3)
+      required_action: inform_natural_person
+      applies_to_role: deployer
+      disclosure:
+        state: absent
+        gap: >
+          Nothing in the scheduling or consent path tells the candidate that their recording is
+          scored for affect. Article 50(3) requires the people exposed to an emotion recognition
+          system to be informed of its operation. This does not cure the Article 5 finding above and
+          must not be treated as the fix for it.
+        searched:
+          - services/screening/src/
+          - services/scheduling/src/templates/
+          - the whole repository, for candidate-facing notice and consent text
+      status: suggested
+      refs:
+        - services/screening/src/affect.ts:29
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-20
+        expires_at: 2027-02-20
+        rationale: >
+          Recorded because it is separately true and separately enforceable. Informing the candidate
+          would not make a prohibited practice permitted, and the two findings are kept apart so
+          nobody reads the disclosure gap as the whole problem.

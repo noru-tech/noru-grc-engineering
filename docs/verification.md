@@ -10,6 +10,7 @@ Run all of it with no dependencies and no network:
 python3 scripts/check_repo.py          # marketplaces, manifests, schema/vocabulary sync, secrets
 python3 scripts/check_vendored_lib.py  # vendored blocks are byte-identical across pieces
 python3 scripts/test_validators.py     # schema fixtures + validator unit tests
+python3 scripts/test_collectors.py     # collectors detect what the pieces claim they detect
 python3 scripts/test_idempotency.py    # a second push is a no-op, end to end
 python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
 ```
@@ -22,6 +23,13 @@ python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
 | Exit codes are `0`/`1`/`2` | each validator is executed with no argument, a missing file, an unknown option, a valid fixture and each invalid fixture |
 | Invalid manifests produce a *useful* message | each invalid fixture declares the substring its output must contain, not just a non-zero exit |
 | Unattributed claims are an error | a fixture with the interpretation block stripped must exit `1`, and must not produce only warnings |
+| An Article 50 trigger cannot be recorded without a disclosure check | a fixture that records the trigger and stops there must exit `1` |
+| The Article 50 disclosure check reports the right state | `test_collectors.py` runs the real collector over purpose-built repositories: a notice in the same file as the model call is `present`, a notice one directory away is `unclear`, no notice anywhere is `absent`, and a visible caption does not satisfy the machine-readable marking duty |
+| A disclosure cannot be called absent without saying where the check looked | a fixture omitting `searched` must exit `1` |
+| Text sentiment analysis is not reported as emotion recognition | `test_collectors.py` scans a sentiment scorer and asserts no Article 50(3) trigger; a face-based one asserts the trigger does fire |
+| The Article 5 screen is visibly running rather than silent | `test_collectors.py` asserts a clean repository still reports which practices were screened |
+| The collector proposes and never asserts | `test_collectors.py` asserts the skeleton never writes `determination: indicated` and flags every finding it proposes `needs_review: true` |
+| Findings are written enforceable-first | `check_repo.py` compares the vocabulary's category order against the schema's declaration order; a manifest written tier-first must exit `1` |
 | `:push` refuses without `--confirm` | executed: exit `2` |
 | `:push` refuses a stale plan | executed: a plan bound to different manifest bytes exits `1`, even with `--confirm` |
 | **A second push is a no-op** | `test_idempotency.py` drives scan → validate → diff → push, builds the org snapshot that would exist if every planned write had landed, and asserts the next diff is all `skip` and the next push makes no calls |
@@ -42,6 +50,13 @@ each is a place where a fixture can be right and reality wrong.
 1. **Run `ai-inventory` against a large real codebase.** Run `:scan` and hand-check the output
    against the AI systems known to exist in it. The collector's recall against a real polyglot
    codebase is unproven; it will certainly miss a provider reached through a hand-rolled HTTP client.
+
+   Check the Article 50 path specifically, and check it in both directions. Every surface a person
+   interacts with must come back as a trigger with a disclosure state attached, and the state must
+   be right: a `present` that is really a disclosure somewhere else in the product, or an `absent`
+   for a notice a design system injects, are the two ways this check fails quietly. The states the
+   collector reports are a repository fact — `test_collectors.py` proves the rule it applies — and
+   whether that fact matches the running product is exactly what has not been checked.
 
 2. **`:diff` against a dev org with a scoped key.** Confirm the delta is correct and non-empty, and
    that nothing is written. In particular confirm the state-snapshot shape the commands document

@@ -1,0 +1,70 @@
+# Fixture: the findings block written tier-first. The order is the substance, not formatting:
+# readers act on what they read first, and leading with a tier leads with the obligation that is
+# furthest away instead of the two that are already enforceable.
+# Expected: exit 1, "categories are out of order".
+version: 0.1.0
+piece: ai-inventory
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: ai-inventory@0.1.0
+providers:
+  - key: example-llm
+    vendor_name: Example LLM Provider
+    refs:
+      - packages/inference/src/client.ts:12
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      rationale: Only model provider reachable from production code paths at this commit.
+ai_systems:
+  - key: support-assistant
+    name: Support chat assistant
+    purpose: Answers customer questions in a chat panel on the support site.
+    provider: example-llm
+    deployment: hosted_api
+    autonomy: assistive
+    refs:
+      - apps/support/src/chat/route.ts:33
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      expires_at: 2027-02-01
+      rationale: Read the chat route with the support engineering lead and confirmed the surface.
+findings:
+  role_and_risk:
+    - system: support-assistant
+      role: deployer
+      role_article: Article 3(4)
+      tier: not_high_risk
+      tier_article: Article 6(2)
+      annex_iii_area: none
+      enforceable_from: 2027-12-02
+      status: suggested
+      refs:
+        - apps/support/src/chat/route.ts:33
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-02
+        expires_at: 2027-02-02
+        rationale: Customer support falls in no Annex III area on the reading we took.
+  transparency_obligations:
+    - system: support-assistant
+      trigger: direct_human_interaction
+      article: Article 50(1)
+      required_action: inform_natural_person
+      disclosure:
+        state: absent
+        gap: Nothing in the chat panel tells the customer they are talking to an AI system.
+        searched:
+          - apps/support/src/chat/
+          - apps/support/src/locales/
+      status: suggested
+      refs:
+        - apps/support/src/chat/route.ts:33
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-02
+        expires_at: 2027-02-02
+        rationale: Customers type into this panel, so the transparency obligation is in play.

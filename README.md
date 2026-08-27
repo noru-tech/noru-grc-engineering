@@ -44,8 +44,12 @@ Every piece is the same three moves, and exactly three commands:
 The pieces target deliberately unalike work — which is what makes the contract a contract rather
 than a description of one plugin. One hits REST, three hit MCP; they share no collector logic.
 
-- `ai-inventory` targets **ISO 42001 and the EU AI Act**: what an AI register needs, discovered from
-  the repository where the answers actually live.
+- `ai-inventory` targets **ISO 42001 and the EU AI Act**: which AI systems a repository actually
+  contains, which of them touch a prohibited practice under Article 5, which trigger the Article 50
+  transparency duties — and whether the disclosure or content marking those duties require is
+  actually present in the code. The Act does not require anyone to keep an AI register; ISO 42001 is
+  what expects the documented inventory. See the piece README for what each instrument does and does
+  not ask for.
 - `evidence-push` targets **whatever your organization's own evidence queue says is unmet** — it
   asks Noru rather than shipping an opinion, so it is not tied to one framework.
 - `governance-records` targets the **records of human decisions**: who met, when, what was decided,
@@ -185,6 +189,7 @@ No build step, no dependencies. Node built-ins and the Python 3 standard library
 python3 scripts/check_repo.py         # marketplaces, schema sync, secret hygiene
 python3 scripts/check_vendored_lib.py # the vendored blocks have not drifted
 python3 scripts/test_validators.py    # schema fixtures + validator unit tests
+python3 scripts/test_collectors.py    # collectors detect what the pieces claim they detect
 python3 scripts/test_idempotency.py   # a second push must be a no-op
 python3 scripts/contract_test.py      # every plugin satisfies requirements 1-9
 ```
