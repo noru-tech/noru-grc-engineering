@@ -140,6 +140,112 @@ to keep idempotent — a repository with four hundred fields is still one write.
 
 | Operation | Transport | Kind | Key |
 |---|---|---|---|
+| `ingestDatamap` | MCP | `server_upsert` | `slug` |
+
+The documented behaviour, from the `Idempotency/Upsert Behavior` section of
+`https://api.noru.tech/llms.txt`:
+
+- **identical content is a no-op** — CI on an unchanged repository pushes the same manifest and
+  nothing happens;
+- **a changed manifest is upserted** — each system, dataset and processing activity it names is
+  created or updated in place on its `fides_key`, and anything the manifest no longer names is
+  **soft-archived** rather than deleted.
+
+So a push *replaces* the data map for that slug rather than merging into it. Two consequences worth
+knowing before you run it:
+
+- **Dropping a table from your schema removes it from the map.** That is the intended behaviour —
+  the map should describe the code — but it means a partial or mistaken scan pushed on top of a good
+  one will archive what it failed to find. `:diff` shows you that before you confirm; read it.
+- **`fides_key` is half the upsert key.** Renaming one archives the old record and creates a new
+  one rather than renaming it in place, so keys are worth choosing once and leaving alone.
+
+The content checksum covers the manifest only — `commitSha` and `branch` are excluded, so re-pushing
+unchanged content from a new commit stays a no-op rather than re-materializing everything.
+
+## When a signature stops counting
+
+Two things anchor a claim, and the pair is the point.
+
+**`structure_digest` pins what a signature was given for.** Every collection carries a digest of its
+field *names* — not their categories — so resolving a classification keeps the signature, and adding,
+removing or renaming a column breaks it:
+
+```
+ERROR dataset[0].collections[0].structure_digest: does not match this collection's fields
+      (stamped 4abfeae8e1be, computed 9c2f0a71d33e) — a column was added, removed or renamed
+      since this was signed, so the signature is no longer a statement about this table.
+      Re-run :scan, review what changed, and sign again
+```
+
+The validator recomputes it rather than trusting the stamp, so editing the fields and editing the
+digest by hand are caught by the same check.
+
+**`expires_at` pins how long nobody has looked.** Required, and measured from `decided_at`:
+
+| The collection holds | It may stand for |
+|---|---|
+| ordinary personal data | 365 days |
+| GDPR Article 9, or Article 10 criminal-offence data | 183 days |
+
+`decided_at` is an honest anchor **here** and is not in most pieces. Elsewhere it rewards signing
+late — a claim about March, signed in August, gets its clock started in August. Here it cannot,
+because what the claim is about is pinned by digest rather than by date: a signature cannot outlive
+the structure it was given for. That is the whole reason the structural anchor is worth its
+bookkeeping, and it is written up in
+[`contract/README.md`](../../contract/README.md) under requirement 8.
+
+Pass `--as-of=YYYY-MM-DD` to turn an already-expired claim into an error. Leave it off and the file
+is judged on its own terms — nothing in the validator reads the clock by itself, so it stays
+deterministic and the staleness check happens where it belongs, in CI or before a release.
+
+## Accuracy
+
+The validator guarantees every key it emits is a **real** Fideslang key. It cannot guarantee the
+judgement is **right**. Classification is a model inference over a lookup table; review the
+`needs_review` items and spot-check the rest before treating the output as authoritative. This
+accelerates a data map. It does not replace privacy review.
+
+## Scopes
+
+Least privilege. Start read-only.
+
+| Capability | Scopes |
+|---|---|
+| `:scan` and `:diff` | `read:datamaps` — and nothing else |
+| `:push` | adds `write:datamaps` |
+
+`read:datamaps` is what Noru's API documentation calls "Read the privacy data map"; it covers
+`getPrivacyTaxonomy`, `getPrivacyDataMap` and `listPrivacyDatasets`, which are the only three
+tools this piece reads. `write:datamaps` is documented as "Push fideslang privacy manifests
+(`.fides/datamap.yml`) from CI" — which is this piece, stated by the API itself.
+
+## Artifact
+
+`.noru/privacy-datamap.yml`, schema at [`contract/privacy-datamap.schema.json`](../../contract/privacy-datamap.schema.json).
+
+Commit it — it is the reviewable artifact. Keep `.noru/.cache/` out of git.
+
+## What it renders
+
+`.fides/datamap.yml` — the same data map in Ethyca's own on-disk format, for the `fides` CLI and
+anything else that reads a Fides manifest.
+
+The two are not the same file and not interchangeable. `.noru/privacy-datamap.yml` is the
+**manifest**: it carries the `file:line` citation behind every field, the interpretation block
+behind every judgement, and the `needs_review` flags that block a push. `.fides/datamap.yml` is
+that content projected down to plain Fideslang with the piece's own bookkeeping stripped out, and
+it is only ever written from a manifest that validated against the repository as it stands right
+now. Edit the manifest, never the export: the next scan overwrites the export and will not warn
+you, because it has no way to tell your edit from its own output.
+
+## Idempotency
+
+One call, every time. `ingestDatamap` takes the whole data map for a source, so there is no fan-out
+to keep idempotent — a repository with four hundred fields is still one write.
+
+| Operation | Transport | Kind | Key |
+|---|---|---|---|
 | `ingestDatamap` | MCP | `server_dedupe` | `slug` + manifest content |
 
 The tool description published at `https://api.noru.tech/v1/mcp` says: *"Idempotent: identical
