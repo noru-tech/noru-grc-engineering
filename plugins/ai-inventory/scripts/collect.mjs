@@ -22,7 +22,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSy
 import { join, relative, sep, basename } from "node:path";
 
 export const PIECE = "ai-inventory";
-export const VERSION = "0.1.0";
+export const VERSION = "0.3.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 const SKIP_DIRS = new Set([
