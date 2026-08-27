@@ -46,9 +46,15 @@ items:
     note: >
       folded text that spans
       two lines
+    rationale: >
+      Reviewed with the platform team and tracked in ticket #4412 until the
+      rollout completes; see https://example.com/adr#retention for the C# port.
+    summary: >-
+      no trailing newline here
   - name: second
     literal: |
       line one
+      # not a comment: inside a block scalar a hash is prose
       line two
     count: 42
     ratio: 1.5
@@ -58,6 +64,9 @@ flags:
   - beta
 """
 
+# Verbatim PyYAML 6.0.3 output for FALLBACK_SAMPLE. Block scalars carry their trailing newline
+# (clip chomping) and everything after a `#` inside them, because that `#` is content, not a
+# comment -- get either wrong and prose is silently stored short on any machine without PyYAML.
 FALLBACK_EXPECTED = {
     "version": "0.1.0",
     "piece": "sample",
@@ -70,11 +79,18 @@ FALLBACK_EXPECTED = {
         {
             "name": "first",
             "tags": ["a", "b", "c"],
-            "note": "folded text that spans two lines",
+            "note": "folded text that spans two lines\n",
+            "rationale": (
+                "Reviewed with the platform team and tracked in ticket #4412 until the "
+                "rollout completes; see https://example.com/adr#retention for the C# port.\n"
+            ),
+            "summary": "no trailing newline here",
         },
         {
             "name": "second",
-            "literal": "line one\nline two",
+            "literal": (
+                "line one\n# not a comment: inside a block scalar a hash is prose\nline two\n"
+            ),
             "count": 42,
             "ratio": 1.5,
             "missing": None,
@@ -129,8 +145,30 @@ def test_fallback_loader(results):
     after_block = module._fallback_load("a: >\n  folded\nb: kept\n")
     results.check(
         "keys after a folded block scalar are not dropped",
-        after_block == {"a": "folded", "b": "kept"},
+        after_block == {"a": "folded\n", "b": "kept"},
         f"got {after_block}",
+    )
+
+    # Content loss is worse than a parse failure, because nothing downstream can detect it: the
+    # manifest validates, the rationale reads as a complete sentence, and the half that cited the
+    # ticket is gone. A sibling key indented under a `-` must not be swallowed by the block either.
+    hashed = module._fallback_load(
+        "items:\n"
+        "  - rationale: >\n"
+        "      tracked in ticket #4412 until the\n"
+        "      rollout completes\n"
+        "    owner: platform\n"
+    )
+    expected_hashed = {
+        "items": [{
+            "rationale": "tracked in ticket #4412 until the rollout completes\n",
+            "owner": "platform",
+        }]
+    }
+    results.check(
+        "a '#' inside a block scalar is prose, not the start of a comment",
+        hashed == expected_hashed,
+        f"got {hashed}",
     )
 
     empty = module._fallback_load("# only a comment\n")
