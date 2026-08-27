@@ -108,6 +108,10 @@ class Results:
         self.rows.append({"test": name, "ok": bool(ok), "detail": detail})
         return ok
 
+    def skip(self, name, reason):
+        """Record a check that could not run here, said out loud rather than counted as a pass."""
+        self.rows.append({"test": name, "ok": True, "skipped": True, "detail": reason})
+
     @property
     def failures(self):
         return [r for r in self.rows if not r["ok"]]
@@ -173,6 +177,27 @@ def test_fallback_loader(results):
 
     empty = module._fallback_load("# only a comment\n")
     results.check("an empty document loads as None rather than raising", empty is None, f"got {empty}")
+
+    # FALLBACK_EXPECTED is PyYAML's output, pinned so the comparison runs on a machine that has no
+    # PyYAML — which is the only machine where the fallback loader actually runs. Pinned values go
+    # stale silently, so where PyYAML *is* importable it is asked directly and the pin re-checked
+    # against it. That closes the loop: the CI matrix runs a leg with PyYAML and one without, so
+    # between them the fallback loader is compared to the real thing on every build.
+    try:
+        import yaml  # noqa: PLC0415
+    except ImportError:
+        results.skip(
+            "the pinned expectations still match what PyYAML produces",
+            "PyYAML is not importable here. The CI matrix runs a leg with it installed, which is "
+            "where this comparison happens.",
+        )
+    else:
+        actual = yaml.safe_load(FALLBACK_SAMPLE)
+        results.check(
+            "the pinned expectations still match what PyYAML produces",
+            actual == FALLBACK_EXPECTED,
+            "" if actual == FALLBACK_EXPECTED else f"PyYAML gave {json.dumps(actual, sort_keys=True)}",
+        )
 
 
 def test_suggestions(results):
@@ -385,6 +410,11 @@ def main(argv):
             print(f"  FAIL  {row['test']}")
             if row["detail"]:
                 print(f"        {row['detail']}")
+        elif row.get("skipped"):
+            # Printed even under --quiet: a check that did not run is the one thing a reader
+            # skimming a passing run still needs to see.
+            print(f"  SKIP  {row['test']}")
+            print(f"        {row['detail']}")
         elif not quiet:
             print(f"  ok    {row['test']}")
     if ok:

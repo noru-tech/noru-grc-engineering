@@ -35,7 +35,7 @@ python3 scripts/test_ci_mode.py        # CI mode fails on drift and on an expire
 | `:push` refuses a stale plan | executed: a plan bound to different manifest bytes exits `1`, even with `--confirm` |
 | **A second push is a no-op** | `test_idempotency.py` drives scan → validate → diff → push, builds the org snapshot that would exist if every planned write had landed, and asserts the next diff is all `skip` and the next push makes no calls |
 | Asset metadata key order does not break idempotency | the snapshot deliberately reverses the key order, because nothing guarantees a JSON object comes back in the order it was sent |
-| **A plan does not depend on which YAML loader parsed the manifest** | `test_idempotency.py` re-spaces every prose string in a validated manifest the way the other loader would have written it, and asserts for all six pieces that the plan — markers, arguments, effects and reasons — is identical, both writing into an empty organization and writing into one the same plan has already been pushed into |
+| **A plan does not depend on which YAML loader parsed the manifest** | `test_idempotency.py` parses the same manifest bytes with PyYAML and with the bundled fallback — both in one interpreter, the fallback forced by hiding PyYAML behind a stub that raises on import — and asserts for all six pieces that the plan (markers, arguments, effects and reasons) is identical, both writing into an empty organization and writing into one the same plan has already been pushed into. Needs PyYAML to have two loaders to compare, so it reports itself skipped where there is none and the CI matrix runs a leg with it |
 | No catalogue is vendored | every plugin file is scanned for catalogue-shaped evidence-item and control ids; fixtures may only use the reserved `E-ZZ-*` / `zz-*` namespaces |
 | No credential leaks into the repository | the tree is scanned for credential-shaped strings |
 | A scaffolded piece satisfies the contract | CI scaffolds one and runs the contract test against it |
@@ -48,6 +48,7 @@ python3 scripts/test_ci_mode.py        # CI mode fails on drift and on an expire
 | CI mode is piece-agnostic | every piece in the marketplace is driven through it green, the orchestrator's source is checked for hardcoded piece names, and CI runs it against a freshly scaffolded piece |
 | No credential reaches a step that does not push | asserted on the helper every step goes through: `NORU_API_KEY` is absent from the child environment except for `:push` |
 | Missing credential degrades, not errors | with no `NORU_API_KEY` the push step reports `skipped` and the build stays green |
+| The bundled loader produces what PyYAML produces | `test_validators.py` compares the fallback loader against pinned PyYAML output on every machine, and re-checks the pin against PyYAML itself wherever it is importable, so a pinned value cannot go stale unnoticed |
 | Both YAML loaders agree in CI mode | the whole CI-mode suite runs under an interpreter with PyYAML and one without, and the orchestrator invokes each validator with its own interpreter so the loader cannot change mid-run |
 
 The CI-mode gates have also been checked in the other direction, which is the only way a gate is
@@ -109,25 +110,14 @@ Run `:diff` before your first `:push`, and read it.
   includes a digest of the rendered record, so re-filed minutes become a second record. For an
   account of a meeting that is arguably correct — an auditor should see both — but it is a
   consequence of having no documented key, not a decision anyone made.
-- **The two YAML loaders still disagree; the pieces no longer care.** The validators use PyYAML
-  where it is importable and a bundled fallback otherwise, and the two do not agree byte for byte on
-  a folded (`>`) block scalar. Measured against PyYAML 6.0.3, the fallback drops the trailing
-  newline the spec calls for, folds a blank line to a space where PyYAML makes a paragraph break,
-  folds a more-indented line instead of keeping it, strips trailing spaces inside a folded line, and
-  ignores the `+` chomping and explicit-indentation indicators. Every one of those is a whitespace
-  difference inside prose, so every piece now normalises manifest free text before it reaches a
-  rendered body, a content digest or a planned argument, and `scripts/test_idempotency.py` asserts
-  for all six that the plan does not move — and for any piece added later, since it reads the pieces
-  off disk. `scripts/templates/diff.mjs.tmpl` carries the same normalisation, so a scaffolded piece
-  has it from birth. The divergence itself is unfixed: the loaders are still not interchangeable, and
-  a piece that reads manifest prose without normalising it would reintroduce the bug. See the note
-  below for the one divergence normalising cannot cover.
-- **The bundled fallback loader silently truncates prose containing a `#`.** It strips comments line
-  by line before it assembles a block scalar, so a rationale reading `tracked in ticket #4412 until
-  the rollout completes` loads as `tracked in ticket rollout completes` without PyYAML, and intact
-  with it. This is a content bug rather than an idempotency one and normalising whitespace does not
-  touch it: the two loaders disagree about the *characters*, not the spacing. A manifest is more
-  likely to hit this than it looks — issue numbers, `C#`, and a `#` in a URL fragment all qualify.
+- **The two YAML loaders agree on block scalars, and not on everything.** The block scalar
+  divergence that used to sit here is closed: the bundled fallback reads `>` and `|` exactly as
+  PyYAML 6.0.3 does, whitespace and content alike, and both gates in the table above hold that line.
+  What is still open is the YAML 1.1 boolean spelling. PyYAML resolves `yes`, `no`, `on` and `off`
+  to booleans; the fallback leaves them as strings. No fixture is written that way, so nothing fails
+  today, but `evals.ci_gated: yes` would be accepted by `ai-inventory` on a machine with PyYAML and
+  rejected on one without — the same shape of bug as the unquoted dates fixed in v0.1.0, and not yet
+  fixed. Quote the value, or spell it `true`, until it is.
 - **The MCP `push` does not perform the writes.** It emits the confirmed call list for the client to
   execute, because a script cannot speak MCP without handling a credential. The gate is enforced in
   the script; the execution is the agent's, and an agent that improvises a call outside the list has

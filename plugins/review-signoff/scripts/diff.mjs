@@ -60,24 +60,9 @@ function loadJson(path, label) {
   }
 }
 
-/**
- * Free text from the manifest, normalised to a single line before it reaches anything digested.
- *
- * This is not cosmetic. The two YAML loaders a validator may use do not agree byte for byte on a
- * folded (`>`) block scalar — one keeps the trailing newline the YAML spec calls for and the bundled
- * fallback does not — so the SAME manifest can parse to two slightly different strings depending on
- * whether PyYAML happened to be importable. Feeding that straight into a content digest would make
- * this piece's identity depend on the machine it ran on: push from a laptop without PyYAML, push
- * again from CI with it, and the second push files a duplicate rather than skipping. Normalising
- * here makes the identity a property of the manifest and nothing else.
- */
-function text(value) {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
-}
-
 function exceptionLine(exception) {
   const resolved = exception.resolved_on ? `, resolved ${exception.resolved_on}` : "";
-  const note = exception.note ? ` — ${text(exception.note)}` : "";
+  const note = exception.note ? ` — ${exception.note}` : "";
   return `  - ${exception.reference}: ${exception.disposition} (owner ${exception.owner}${resolved})${note}`;
 }
 
@@ -89,13 +74,13 @@ export function signoffBody(review, manifest) {
   const src = manifest.source;
   const exceptions = review.exceptions ?? [];
   const lines = [
-    `Review sign-off: ${text(review.title)}`,
+    `Review sign-off: ${review.title}`,
     `Kind: ${review.kind}`,
     `Cadence: ${review.cadence}`,
     `Performed on: ${review.performed_on}`,
     "",
     `Reviewed: ${review.input.file} (sha256 ${review.input.sha256})`,
-    `Produced by: ${review.input.produced_by ? text(review.input.produced_by) : "(not recorded)"}`,
+    `Produced by: ${review.input.produced_by ?? "(not recorded)"}`,
     `Records reviewed: ${review.input.records_reviewed}`,
     `Confirmed: ${review.outcome.confirmed}`,
     `Exceptions: ${review.outcome.exceptions}`,
@@ -106,7 +91,7 @@ export function signoffBody(review, manifest) {
     `Signed off by: ${review.interpretation.owner}`,
     `Signed on: ${review.interpretation.decided_at}`,
     `Valid until: ${review.interpretation.expires_at}`,
-    `Attestation: ${text(review.interpretation.rationale)}`,
+    `Attestation: ${review.interpretation.rationale}`,
     ...(review.supersedes ? ["", `Supersedes evidence: ${review.supersedes}`] : []),
     "",
     "Read from:",
@@ -138,7 +123,7 @@ export function buildOperations(manifest, state) {
   for (const review of manifest.reviews ?? []) {
     const body = signoffBody(review, manifest);
     const marker = signoffMarker(review.key, digest(body));
-    const title = `${text(review.title)} (signed ${review.interpretation.decided_at})`;
+    const title = `${review.title} (signed ${review.interpretation.decided_at})`;
     const existing = evidence.find((e) => String(e.description ?? "").includes(marker));
     const superseded = evidence.find(
       (e) =>

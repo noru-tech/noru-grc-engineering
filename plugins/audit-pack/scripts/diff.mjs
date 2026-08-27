@@ -59,31 +59,16 @@ function loadJson(path, label) {
   }
 }
 
-/**
- * Free text from the manifest, normalised to a single line before it reaches anything digested.
- *
- * This is not cosmetic. The two YAML loaders a validator may use do not agree byte for byte on a
- * folded (`>`) block scalar — one keeps the trailing newline the YAML spec calls for and the bundled
- * fallback does not — so the SAME manifest can parse to two slightly different strings depending on
- * whether PyYAML happened to be importable. Feeding that straight into a content digest would make
- * this piece's identity depend on the machine it ran on: push from a laptop without PyYAML, push
- * again from CI with it, and the second push files a duplicate rather than skipping. Normalising
- * here makes the identity a property of the manifest and nothing else.
- */
-function text(value) {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
-}
-
 function inspectedLine(row) {
   const digestPart = row.sha256 ? ` (sha256 ${row.sha256})` : "";
-  const note = row.note ? ` — ${text(row.note)}` : "";
+  const note = row.note ? ` — ${row.note}` : "";
   return `  - [${row.kind}] ${row.reference}${digestPart}${note}`;
 }
 
 function exceptionLine(exception) {
   const resolved = exception.resolved_on ? `, resolved ${exception.resolved_on}` : "";
   return (
-    `  - ${exception.reference}: ${text(exception.description)} ` +
+    `  - ${exception.reference}: ${exception.description} ` +
     `[${exception.disposition}, owner ${exception.owner}${resolved}]`
   );
 }
@@ -116,14 +101,14 @@ export function workpaperBody(workpaper, manifest) {
   const exceptions = workpaper.exceptions ?? [];
   const lines = [
     `Audit workpaper: ${workpaper.control_id}`,
-    `Pack: ${text(pack.title ?? pack.key)}`,
+    `Pack: ${pack.title ?? pack.key}`,
     `Framework: ${manifest.queue_snapshot.framework_id}`,
     `Window: ${pack.window.from} to ${pack.window.to}`,
     `Prepared by: ${pack.prepared_by}`,
     `Reviewed by: ${pack.reviewed_by ?? "(nobody)"}`,
     "",
     "What was tested:",
-    text(workpaper.scope),
+    workpaper.scope,
     "",
     `Inspected (${inspected.length}):`,
     ...(inspected.length > 0 ? inspected.map(inspectedLine) : ["  (nothing recorded)"]),
@@ -136,7 +121,7 @@ export function workpaperBody(workpaper, manifest) {
     `Conclusion: ${workpaper.conclusion}`,
     `Concluded by: ${workpaper.interpretation.owner} on ${workpaper.interpretation.decided_at}`,
     `Stands until: ${workpaper.interpretation.expires_at}`,
-    `Rationale: ${text(workpaper.interpretation.rationale)}`,
+    `Rationale: ${workpaper.interpretation.rationale}`,
     "",
     "Read from:",
     ...(workpaper.refs ?? []).map((r) => `  - ${r}`),
@@ -168,7 +153,7 @@ export function buildOperations(manifest, state) {
     const body = workpaperBody(workpaper, manifest);
     const marker = workpaperMarker(pack.key, workpaper.key, digest(body));
     const title =
-      `Workpaper: ${workpaper.control_id} — ${text(pack.title ?? pack.key)} ` +
+      `Workpaper: ${workpaper.control_id} — ${pack.title ?? pack.key} ` +
       `(${pack.window.from} to ${pack.window.to})`;
     const existing = evidence.find((e) => String(e.description ?? "").includes(marker));
     const superseded = evidence.find(
