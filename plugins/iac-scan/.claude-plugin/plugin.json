@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "iac-scan",
+  "displayName": "Noru IaC Scan",
+  "version": "0.1.0",
+  "description": "Scan the Terraform, CloudFormation, Kubernetes and CI configuration a repository actually contains, decide what each finding means in this environment, and land the result in Noru as security findings — closing the ones that no longer reproduce.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "iac",
+    "terraform",
+    "kubernetes",
+    "cloudformation",
+    "security-findings",
+    "mcp"
+  ]
+}

@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/iac-scan.schema.json",
+  "title": "Noru infrastructure-configuration scan manifest (.noru/iac-scan.yml)",
+  "description": "Compliance-relevant misconfiguration in the Terraform, CloudFormation, Kubernetes and pipeline configuration a repository actually contains, reviewed by a person and landed in Noru as security findings. The scan proposes; the manifest is where somebody says whether each proposal is real here, how bad it is here, and until when that judgement stands. No matched line text is ever recorded — one of the bundled rules fires on a line that holds a credential, so a finding is a citation and never a copy. Enforced by plugins/iac-scan/scripts/validate_manifest.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "piece", "source", "queue_snapshot", "findings"],
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "piece": { "const": "iac-scan" },
+    "source": { "$ref": "#/$defs/source" },
+    "queue_snapshot": {
+      "description": "What Noru already held at the moment :scan ran: the findings this piece has open, the organization's assets and its risk register. Written from MCP output by the client; never invented by this plugin. The open set is the half of the queue a repository cannot know — a rule that stopped firing leaves a finding open somewhere, and only Noru can say so. Requirement 9.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fetched_at", "via", "source", "open_findings", "assets", "risks"],
+      "properties": {
+        "fetched_at": { "type": "string", "minLength": 10 },
+        "via": {
+          "description": "The MCP tools the snapshot came from.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": ["getSecurityFindings", "getOrganizationAssets", "getOrganizationRisks"]
+          }
+        },
+        "source": {
+          "description": "The finding `source` the snapshot was filtered on. It has to be this piece's own source string, or the open set is somebody else's findings and closing against it would close records this piece never wrote.",
+          "const": "iac-scan"
+        },
+        "open_findings": {
+          "description": "Every finding Noru currently holds for this source, with the fields a close would have to send back. An empty list is a valid answer and means nothing has been landed yet.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/openFinding" }
+        },
+        "assets": { "type": "array", "items": { "$ref": "#/$defs/queueAsset" } },
+        "risks": { "type": "array", "items": { "$ref": "#/$defs/queueRisk" } }
+      }
+    },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "commit_sha", "branch", "generated_by"],
+      "properties": {
+        "slug": { "type": "string", "minLength": 1 },
+        "commit_sha": { "type": "string", "minLength": 7 },
+        "branch": { "type": "string", "minLength": 1 },
+        "generated_by": { "type": "string", "minLength": 1 },
+        "derived_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "ref": { "type": "string", "pattern": "^[^:\\s][^:]*:[0-9]+$" },
+    "interpretation": {
+      "description": "Contract requirement 8. Who decided this finding is real (or is not), when, until when, and why. `expires_at` is required and is measured from `observed_on`, not from `decided_at`: a finding observed in March and signed in August is a claim about March's configuration however recent the signature is.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "decided_at", "expires_at", "rationale"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 3 },
+        "decided_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "expires_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "rationale": { "type": "string", "minLength": 10 },
+        "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } }
+      }
+    },
+    "openFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["external_id", "check_name", "title", "severity", "status", "category"],
+      "properties": {
+        "external_id": { "type": "string", "minLength": 1 },
+        "check_name": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["critical", "high", "medium", "low"] },
+        "status": { "enum": ["open", "in_progress", "resolved", "accepted", "false_positive"] },
+        "category": {
+          "enum": [
+            "identity_access",
+            "vulnerability",
+            "configuration",
+            "compliance",
+            "endpoint_posture"
+          ]
+        }
+      }
+    },
+    "queueAsset": {
+      "description": "An asset the organization already has. A finding may only be attached to one of these: this piece never creates an asset, because it cannot know whether the thing a Terraform block describes is the thing the register already holds.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "external_id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" }
+      }
+    },
+    "queueRisk": {
+      "description": "A risk the organization already carries. A finding may be filed against one of these; this piece never opens a risk.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "check",
+        "technology",
+        "severity",
+        "category",
+        "status",
+        "title",
+        "file",
+        "observed_on",
+        "refs",
+        "interpretation"
+      ],
+      "properties": {
+        "key": {
+          "description": "Stable identity across re-scans: the rule, and a digest of the file and resource it fired against. Deliberately not the line number — moving a block must not close one finding and open another. Combined with the repository slug it becomes the externalId the upsert is keyed on.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "check": {
+          "description": "The bundled rule that fired. Rules describe a property of a configuration file; they carry no framework content.",
+          "type": "string",
+          "minLength": 1
+        },
+        "technology": {
+          "enum": ["terraform", "cloudformation", "kubernetes", "github_actions", "gitlab_ci"]
+        },
+        "severity": {
+          "description": "How bad this is HERE. The rule proposes a default; the reviewer owns the value that lands, and the rationale should say so when it differs.",
+          "enum": ["critical", "high", "medium", "low"]
+        },
+        "category": {
+          "enum": [
+            "identity_access",
+            "vulnerability",
+            "configuration",
+            "compliance",
+            "endpoint_posture"
+          ]
+        },
+        "status": {
+          "description": "What is happening about it. `accepted` and `false_positive` are decisions to leave the configuration alone, which is exactly why they still expire.",
+          "enum": ["open", "in_progress", "resolved", "accepted", "false_positive"]
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "file": {
+          "description": "Repository-relative path of the configuration file. Not absolute, and never outside the repository.",
+          "type": "string",
+          "minLength": 1
+        },
+        "resource": {
+          "description": "The resource the rule fired against — a Terraform address, a Kubernetes kind and name, a template logical id, a workflow job. Null where the rule fired outside any resource.",
+          "type": ["string", "null"]
+        },
+        "observed_on": {
+          "description": "The day this configuration was observed: the commit date of the state that was scanned, not the day someone got round to reviewing it.",
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "refs": {
+          "description": "Where the rule fired, as file:line. The line itself is deliberately not copied here.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/ref" }
+        },
+        "asset_external_id": {
+          "description": "The source-native external id of an asset in queue_snapshot.assets. Sent as assetExternalId so Noru resolves the link its own way.",
+          "type": "string",
+          "minLength": 1
+        },
+        "risk_id": {
+          "description": "The id of a risk in queue_snapshot.risks. Filing a finding against a risk the organization does not carry would invent a register entry.",
+          "type": "string",
+          "minLength": 1
+        },
+        "owner_email": {
+          "description": "Who is expected to act on this. Assignment context only; Noru resolves it against personnel on its own side.",
+          "type": "string",
+          "minLength": 3
+        },
+        "interpretation": { "$ref": "#/$defs/interpretation" },
+        "needs_review": { "type": "boolean" }
+      }
+    }
+  }
+}

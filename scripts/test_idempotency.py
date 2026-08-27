@@ -9,6 +9,12 @@ covering half of them launders an untested piece as tested, which is worse than 
 would write, so this asserts the real thing: **if the writes we planned actually happened, does the
 next run correctly decide there is nothing to do?**
 
+It also asserts a property one machine cannot notice on its own: **the plan must not change because
+a different YAML loader parsed the same manifest.** The validators use PyYAML where it is importable
+and a bundled fallback otherwise, and the two disagree on the whitespace around a folded block
+scalar — so a piece that digests manifest prose into a content marker can have an identity that
+depends on the machine it ran on, and file a duplicate on the second push from somewhere else.
+
 This cannot replace running against a live organization — see the Maturity section of
 docs/verification.md. What it does replace is the class of idempotency bug that survives review
 because nobody re-ran the command twice.
@@ -565,6 +571,514 @@ def test_review_signoff(results, tmp):
     )
 
 
+def state_after_iac_scan(operations, existing=()):
+    """Build the org snapshot that would exist if every planned upsert had succeeded.
+
+    Modelled on the documented behaviour and nothing more: the key is (source, externalId), a write
+    on an existing key updates in place, and a field the call does not send is left alone.
+    """
+    findings = {row["externalId"]: dict(row) for row in existing}
+    for i, op in enumerate(operations):
+        if op["effect"] == "skip":
+            continue
+        args = op["arguments"]
+        record = findings.get(args["externalId"], {"id": f"NORU-FND-{i}"})
+        for field in (
+            "source", "externalId", "title", "severity", "status", "category", "checkName",
+            "description", "observedAt", "assetId", "riskId", "ownerEmail",
+        ):
+            if field in args:
+                record[field] = args[field]
+        findings[args["externalId"]] = record
+    # Deliberately reversed: nothing guarantees a list endpoint returns records in the order they
+    # were written, so the diff must not care.
+    return list(reversed(list(findings.values())))
+
+
+def test_iac_scan(results, tmp):
+    repo, piece, decl, manifest = prepare(tmp, "iac-scan")
+    label = "iac-scan"
+
+    validate_and_parse(piece, manifest, repo, results, label)
+
+    # Seed Noru with a finding this piece filed last time whose rule no longer fires. Closing it is
+    # half of what re-running is for, and it has to be exercised on the first diff, not assumed.
+    stale = {
+        "id": "NORU-FND-STALE",
+        "source": "iac-scan",
+        "externalId": "example-org/example-app:kubernetes-container-runs-privileged.f0e1d2c3b4a5",
+        "title": "Container requests privileged mode",
+        "checkName": "kubernetes-container-runs-privileged",
+        "description": "filed by an earlier scan",
+        "severity": "critical",
+        "status": "open",
+        "category": "configuration",
+        "observedAt": "2026-06-01T00:00:00Z",
+        "assetId": None,
+        "riskId": None,
+        "ownerEmail": None,
+    }
+    # A finding under ANOTHER repository's slug, pushed to the same source. Closing it would be a
+    # bug with real consequences, so the fixture contains one on purpose.
+    other_repo = dict(
+        stale,
+        id="NORU-FND-OTHER",
+        externalId="example-org/other-app:kubernetes-container-runs-privileged.aabbccddeeff",
+    )
+    write_state(
+        repo,
+        {"fetched_at": "2026-08-27T09:14:00Z", "security_findings": [stale, other_repo]},
+    )
+
+    first = diff(piece, repo)
+    if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
+        return
+    plan = json.loads(first.stdout)
+    results.check(
+        f"[{label}] first diff plans real writes",
+        plan["summary"]["create"] > 0,
+        json.dumps(plan["summary"]),
+    )
+    results.check(
+        f"[{label}] every operation declares a server-side upsert key, not a client probe",
+        all(op["idempotency"]["kind"] == "server_upsert" for op in plan["operations"]),
+        json.dumps([op["idempotency"] for op in plan["operations"]]),
+    )
+
+    closes = [
+        op for op in plan["operations"]
+        if op["effect"] != "skip" and op["arguments"].get("status") == "resolved"
+    ]
+    results.check(
+        f"[{label}] a finding whose rule no longer fires is planned for closure",
+        len(closes) == 1 and closes[0]["arguments"]["externalId"] == stale["externalId"],
+        json.dumps([op["arguments"].get("externalId") for op in closes]),
+    )
+    results.check(
+        f"[{label}] ANOTHER repository's finding under the same source is left alone",
+        not any(
+            op["arguments"].get("externalId") == other_repo["externalId"]
+            for op in plan["operations"]
+        ),
+        json.dumps([op["arguments"].get("externalId") for op in plan["operations"]]),
+    )
+    results.check(
+        f"[{label}] every write carries slug, commit and branch provenance",
+        all(
+            {"slug", "commit_sha", "branch"} <= set(op["arguments"].get("raw") or {})
+            for op in plan["operations"]
+            if op["effect"] != "skip"
+        ),
+        json.dumps([op["arguments"].get("raw") for op in plan["operations"]])[:300],
+    )
+
+    push = piece / "scripts" / "push.mjs"
+    refused = run(["node", str(push), f"--repo={repo}"])
+    results.check(
+        f"[{label}] push without --confirm is refused with exit 2",
+        refused.returncode == 2,
+        refused.stderr,
+    )
+
+    first_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    if not results.check(
+        f"[{label}] first push emits the confirmed calls", first_push.returncode == 0,
+        first_push.stderr,
+    ):
+        return
+    calls = json.loads(first_push.stdout)["calls"]
+    results.check(f"[{label}] first push has calls to make", len(calls) > 0, len(calls))
+    results.check(
+        f"[{label}] no call carries a matched line — a finding is a citation, never a copy",
+        "example-placeholder-not-a-credential" not in first_push.stdout,
+        first_push.stdout[:200],
+    )
+
+    # Now pretend every planned write landed, and ask again.
+    findings = state_after_iac_scan(plan["operations"], [stale, other_repo])
+    write_state(repo, {"fetched_at": "2026-08-27T10:00:00Z", "security_findings": findings})
+
+    second = diff(piece, repo)
+    if not results.check(f"[{label}] second diff succeeds", second.returncode == 0, second.stderr):
+        return
+    plan2 = json.loads(second.stdout)
+    non_skip = [op for op in plan2["operations"] if op["effect"] != "skip"]
+    results.check(
+        f"[{label}] SECOND DIFF IS A NO-OP (every operation skipped)",
+        len(non_skip) == 0,
+        "; ".join(f"{op['operation']} {op['effect']} {op['subject']}" for op in non_skip),
+    )
+
+    second_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    results.check(
+        f"[{label}] SECOND PUSH MAKES NO CALLS",
+        second_push.returncode == 0 and len(json.loads(second_push.stdout)["calls"]) == 0,
+        second_push.stdout[:200],
+    )
+
+    # A severity changed by hand in Noru is an update on the same key, never a second record.
+    drifted = [
+        dict(row, severity="low") if row["externalId"].endswith("a1b2c3d4e5f6") else row
+        for row in findings
+    ]
+    write_state(repo, {"fetched_at": "2026-08-27T11:00:00Z", "security_findings": drifted})
+    third = diff(piece, repo)
+    plan3 = json.loads(third.stdout) if third.returncode == 0 else {"operations": []}
+    updates = [op for op in plan3["operations"] if op["effect"] == "update"]
+    results.check(
+        f"[{label}] a field changed in Noru plans an update on the same key, not a new finding",
+        len(updates) == 1
+        and "severity" in updates[0]["reason"]
+        and not any(op["effect"] == "create" for op in plan3["operations"]),
+        json.dumps([f"{op['effect']} {op['reason']}" for op in plan3["operations"]])[:300],
+    )
+    write_state(repo, {"fetched_at": "2026-08-27T10:00:00Z", "security_findings": findings})
+
+    # Editing the manifest must invalidate the reviewed plan.
+    diff(piece, repo)
+    manifest.write_text(manifest.read_text(encoding="utf-8") + "\n# edited after the plan\n",
+                        encoding="utf-8")
+    stale_plan = run(["node", str(push), f"--repo={repo}", "--confirm"])
+    results.check(
+        f"[{label}] editing the manifest invalidates the plan",
+        stale_plan.returncode == 1 and "manifest changed" in stale_plan.stderr,
+        stale_plan.stderr,
+    )
+
+
+def state_after_audit_pack(operations):
+    """Build the org snapshot that would exist if every planned write had succeeded."""
+    evidence = []
+    for i, op in enumerate(operations):
+        if op["effect"] == "skip":
+            continue
+        args = op["arguments"]
+        if op["operation"] == "createEvidence":
+            evidence.append(
+                {
+                    "id": f"NORU-EVD-{i}",
+                    "title": args["title"],
+                    "description": args["description"],
+                    # Deliberately reversed: nothing guarantees the API echoes control links back in
+                    # the order they were sent, so the diff must not care.
+                    "linkedControls": [
+                        {"id": m["controlId"]} for m in reversed(args.get("controlMappings", []))
+                    ],
+                }
+            )
+        elif op["operation"] == "linkEvidenceToControl":
+            target = next((e for e in evidence if e["id"] == args["evidenceId"]), None)
+            if target is not None:
+                target.setdefault("linkedControls", []).append({"id": args["controlId"]})
+    return evidence
+
+
+def test_audit_pack(results, tmp):
+    repo, piece, decl, manifest = prepare(tmp, "audit-pack")
+    label = "audit-pack"
+
+    validate_and_parse(piece, manifest, repo, results, label)
+    write_state(repo, {"fetched_at": "2026-08-27T09:14:00Z", "evidence": []})
+
+    first = diff(piece, repo)
+    if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
+        return
+    plan = json.loads(first.stdout)
+    results.check(
+        f"[{label}] first diff plans real writes",
+        plan["summary"]["create"] > 0,
+        json.dumps(plan["summary"]),
+    )
+
+    creates = [op for op in plan["operations"] if op["operation"] == "createEvidence"]
+    results.check(
+        f"[{label}] one workpaper becomes one record mapped to exactly one control",
+        len(creates) > 0
+        and all(len(op["arguments"]["controlMappings"]) == 1 for op in creates),
+        json.dumps([op["arguments"]["controlMappings"] for op in creates]),
+    )
+    # The pack is a local deliverable. If the index ever ends up inside a call, the piece has quietly
+    # become a second register, which is the non-goal this whole design turns on.
+    results.check(
+        f"[{label}] the rendered pack is NOT pushed — only the tested conclusions are",
+        "## Controls in scope" not in first.stdout and "Assembled by:" not in first.stdout,
+        first.stdout[:200],
+    )
+    results.check(
+        f"[{label}] every conclusion carries the window it is about and when it stops standing",
+        all(
+            " to 2026-06-30" in op["arguments"]["content"]
+            and "Stands until:" in op["arguments"]["content"]
+            for op in creates
+        ),
+        json.dumps([op["arguments"]["content"][:120] for op in creates]),
+    )
+
+    push = piece / "scripts" / "push.mjs"
+    refused = run(["node", str(push), f"--repo={repo}"])
+    results.check(
+        f"[{label}] push without --confirm is refused with exit 2",
+        refused.returncode == 2,
+        refused.stderr,
+    )
+
+    first_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    if not results.check(
+        f"[{label}] first push emits the confirmed calls", first_push.returncode == 0,
+        first_push.stderr,
+    ):
+        return
+    calls = json.loads(first_push.stdout)["calls"]
+    results.check(f"[{label}] first push has calls to make", len(calls) > 0, len(calls))
+
+    # Now pretend every planned write landed, and ask again.
+    evidence = state_after_audit_pack(plan["operations"])
+    write_state(repo, {"fetched_at": "2026-08-27T10:00:00Z", "evidence": evidence})
+
+    second = diff(piece, repo)
+    if not results.check(f"[{label}] second diff succeeds", second.returncode == 0, second.stderr):
+        return
+    plan2 = json.loads(second.stdout)
+    non_skip = [op for op in plan2["operations"] if op["effect"] != "skip"]
+    results.check(
+        f"[{label}] SECOND DIFF IS A NO-OP (every operation skipped)",
+        len(non_skip) == 0,
+        "; ".join(f"{op['operation']} {op['effect']} {op['subject']}" for op in non_skip),
+    )
+
+    second_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    results.check(
+        f"[{label}] SECOND PUSH MAKES NO CALLS",
+        second_push.returncode == 0 and len(json.loads(second_push.stdout)["calls"]) == 0,
+        second_push.stdout[:200],
+    )
+
+    # A record filed with its control link missing plans a link, not a second workpaper. Without this
+    # the second half of the push would be dead code no test ever reaches.
+    unlinked = [dict(record, linkedControls=[]) for record in evidence]
+    write_state(repo, {"fetched_at": "2026-08-27T11:00:00Z", "evidence": unlinked})
+    relink = diff(piece, repo)
+    plan3 = json.loads(relink.stdout) if relink.returncode == 0 else {"operations": []}
+    links = [
+        op for op in plan3["operations"]
+        if op["operation"] == "linkEvidenceToControl" and op["effect"] == "create"
+    ]
+    results.check(
+        f"[{label}] a missing control link plans a link, not a second workpaper",
+        len(links) > 0
+        and all(
+            op["effect"] == "skip"
+            for op in plan3["operations"]
+            if op["operation"] == "createEvidence"
+        ),
+        json.dumps([f"{op['operation']} {op['effect']}" for op in plan3["operations"]]),
+    )
+    write_state(repo, {"fetched_at": "2026-08-27T10:00:00Z", "evidence": evidence})
+
+    # Editing the manifest must invalidate the reviewed plan.
+    diff(piece, repo)
+    manifest.write_text(manifest.read_text(encoding="utf-8") + "\n# edited after the plan\n",
+                        encoding="utf-8")
+    stale = run(["node", str(push), f"--repo={repo}", "--confirm"])
+    results.check(
+        f"[{label}] editing the manifest invalidates the plan",
+        stale.returncode == 1 and "manifest changed" in stale.stderr,
+        stale.stderr,
+    )
+
+
+def _fuzz_prose(node):
+    """Return the document with every prose string re-spaced the way the OTHER loader would have.
+
+    The validators use PyYAML when it is importable and a bundled fallback otherwise, and the two do
+    not agree byte for byte on a folded (`>`) block scalar. Measured against PyYAML 6.0.3, the
+    fallback differs in every one of these ways, not only the first:
+
+      - it drops the trailing newline the YAML spec calls for (`>` and `|`);
+      - it folds a blank line to a space where PyYAML produces a paragraph break;
+      - it folds a more-indented line instead of keeping it as its own line;
+      - it strips the trailing spaces PyYAML keeps inside a folded line;
+      - it ignores the `+` chomping and explicit-indentation indicators.
+
+    Every one of those is a whitespace difference inside prose, so one fuzz covers the class: split
+    a line, indent the remainder, leave trailing spaces, end with a newline. A piece whose plan
+    survives this cannot have an identity that depends on which loader was importable.
+
+    Only prose is touched — 20 characters or more with a space in it — because an id, a date, a
+    path and a digest are never written as block scalars.
+    """
+    if isinstance(node, dict):
+        return {k: _fuzz_prose(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_fuzz_prose(v) for v in node]
+    if isinstance(node, str) and len(node) >= 20 and " " in node:
+        head, _, tail = node.partition(" ")
+        return f"{head}\n  {tail}   \n"
+    return node
+
+
+def _differences(left, right, path="", found=None):
+    """The JSON paths at which two plans disagree, for a failure message worth reading.
+
+    A plan can move in its arguments rather than in its marker — a description, a title, an asset
+    payload that is digested to decide whether anything changed — so reporting only the marker would
+    have printed two identical-looking values next to a failing assertion.
+    """
+    found = [] if found is None else found
+    if len(found) >= 4:
+        return found
+    if type(left) is not type(right):
+        found.append((path, repr(left)[:80], repr(right)[:80]))
+    elif isinstance(left, dict):
+        for key in sorted(set(left) | set(right)):
+            _differences(left.get(key), right.get(key), f"{path}.{key}", found)
+    elif isinstance(left, list):
+        if len(left) != len(right):
+            found.append((path, f"{len(left)} operation(s)", f"{len(right)} operation(s)"))
+        for i, (a, b) in enumerate(zip(left, right)):
+            _differences(a, b, f"{path}[{i}]", found)
+    elif left != right:
+        found.append((path, repr(left)[:80], repr(right)[:80]))
+    return found
+
+
+def _org_after(operations):
+    """An org snapshot in which every planned write has landed, derived from the plan itself.
+
+    Deliberately generic — keyed on the operation names in the plan rather than on a list of pieces —
+    because this is not trying to be a faithful snapshot the way each piece's own idempotency test
+    is. It only has to be rich enough to drive the diff down its "this already exists" branches, and
+    identical for both of the runs being compared. Without it the loader comparison only ever sees an
+    empty organization, and every existence check, skip reason and marker match — which is the code
+    the fix is actually about — goes unexercised.
+    """
+    evidence, assets, vendors, findings = [], [], [], []
+    for i, op in enumerate(operations):
+        args = op.get("arguments") or {}
+        marker = (op.get("idempotency") or {}).get("marker")
+        if marker:
+            form = args.get("form") or {}
+            evidence.append(
+                {
+                    "id": f"NORU-EVD-{i}",
+                    "description": form.get("description", args.get("description", marker)),
+                    "expiresAt": args.get("expiresAt"),
+                    "linkedControls": [
+                        {"id": m.get("controlId")} for m in (args.get("controlMappings") or [])
+                    ],
+                }
+            )
+        if op["operation"] == "createAsset":
+            assets.append({"id": f"NORU-ASSET-{i}", **args})
+        elif op["operation"] == "createVendor":
+            vendors.append({"id": f"NORU-VENDOR-{i}", "name": args.get("name")})
+        elif op["operation"] == "createSecurityFinding":
+            findings.append({"id": f"NORU-SF-{i}", **args})
+    return {
+        "fetched_at": "2026-08-27T09:14:00Z",
+        "evidence": evidence,
+        "assets": assets,
+        "vendors": vendors,
+        "ai_controls": [],
+        "security_findings": findings,
+    }
+
+
+def test_loader_independence(results, tmp):
+    """The plan must not change because a different YAML loader parsed the same manifest.
+
+    A piece that digests manifest prose into a content marker has an identity that depends on which
+    loader ran: push from a laptop without PyYAML, push again from CI with it, and the second push
+    files a duplicate instead of skipping. No amount of re-running on one machine finds that, which
+    is why it is asserted here rather than left to the reviewer.
+
+    Both loaders are not needed to check it, and requiring both would make this test depend on
+    whether PyYAML is installed — exactly the machine dependence it exists to rule out. The
+    difference between the loaders is whitespace inside prose, so the test reproduces that
+    difference directly (see _fuzz_prose) and asks whether the plan moved.
+
+    Every declared piece is checked, not a list maintained here, for the reason given in the module
+    docstring: a gate that reports "the pieces" while covering some of them is worse than no gate.
+    Each one is checked twice — writing into an empty organization, and writing into one the same
+    plan has already been pushed into — because only the second reaches the marker matching and the
+    skip reasons, which is the code a loader-dependent identity actually breaks.
+    """
+    for name in declared_pieces():
+        repo = pathlib.Path(tmp) / f"{name}-loader-repo"
+        shutil.copytree(FIXTURE_REPO, repo)
+        (repo / ".noru" / ".cache").mkdir(parents=True, exist_ok=True)
+        piece = PLUGINS / name
+        decl = json.loads((piece / "piece.json").read_text(encoding="utf-8"))
+        manifest = repo / decl["artifact"]
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(piece / decl["validator"]["fixtures"]["valid"][0], manifest)
+        empty_org = {"fetched_at": "2026-08-27T09:14:00Z", "evidence": [], "security_findings": []}
+        write_state(repo, empty_org)
+
+        parsed = repo / ".noru" / ".cache" / f"{name}.parsed.json"
+        validated = run(
+            [
+                "python3",
+                str(piece / "scripts" / "validate_manifest.py"),
+                str(manifest),
+                f"--emit-parsed={parsed}",
+                "--quiet",
+            ]
+        )
+        if not results.check(
+            f"[{name}] manifest validates before the loader comparison",
+            validated.returncode == 0,
+            validated.stdout[:300],
+        ):
+            continue
+
+        first = diff(piece, repo)
+        if not results.check(f"[{name}] diff succeeds as parsed", first.returncode == 0, first.stderr):
+            continue
+        as_parsed = json.loads(first.stdout)["operations"]
+
+        # Against an empty organization every operation is a create, so that comparison alone never
+        # reaches an existence check, a marker match or a skip reason — which is the half of the code
+        # this is really about. So the plan is compared twice: once writing into an empty
+        # organization, and once writing into one the same plan has already been pushed into.
+        rounds = [("into an empty organization", empty_org)]
+        pushed_org = _org_after(as_parsed)
+        write_state(repo, pushed_org)
+        if results.check(
+            f"[{name}] diff succeeds against an organization already holding the plan",
+            diff(piece, repo).returncode == 0,
+            "",
+        ):
+            rounds.append(("into an organization already holding it", pushed_org))
+
+        document = json.loads(parsed.read_text(encoding="utf-8"))
+        for label, org in rounds:
+            # The plan as this loader parsed it, then the same plan with prose re-spaced the way the
+            # other loader would have written it. Same organization both times.
+            write_state(repo, org)
+            parsed.write_text(json.dumps(document, indent=2), encoding="utf-8")
+            expected = json.loads(diff(piece, repo).stdout)["operations"]
+
+            parsed.write_text(json.dumps(_fuzz_prose(document), indent=2), encoding="utf-8")
+            other = diff(piece, repo)
+            if not results.check(
+                f"[{name}] diff succeeds under the other loader's whitespace, {label}",
+                other.returncode == 0,
+                other.stderr,
+            ):
+                continue
+
+            as_other_loader = json.loads(other.stdout)["operations"]
+            results.check(
+                f"[{name}] THE PLAN IS THE SAME WHICHEVER YAML LOADER PARSED THE MANIFEST ({label})",
+                expected == as_other_loader,
+                "; ".join(
+                    f"operations{path}: {left} != {right}"
+                    for path, left, right in _differences(expected, as_other_loader)
+                ),
+            )
+
+
 # Every piece, and the test that proves re-running it is a no-op. A piece missing from this table is
 # reported as a failure by main() — see the note in the module docstring about gates that overclaim.
 IDEMPOTENCY_TESTS = {
@@ -572,6 +1086,8 @@ IDEMPOTENCY_TESTS = {
     "evidence-push": test_evidence_push,
     "governance-records": test_governance_records,
     "review-signoff": test_review_signoff,
+    "iac-scan": test_iac_scan,
+    "audit-pack": test_audit_pack,
 }
 
 
@@ -626,6 +1142,7 @@ def main(argv):
             results.check(f"[{name}] has an idempotency test", True)
             covered.append(name)
             test(results, tmp)
+        test_loader_independence(results, tmp)
 
     ok = not results.failures
     if output_json:

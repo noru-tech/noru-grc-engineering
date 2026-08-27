@@ -23,6 +23,8 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
   `.noru/governance-records.yml` artifact
 - [`review-signoff.schema.json`](./review-signoff.schema.json) — the `.noru/review-signoff.yml`
   artifact
+- [`audit-pack.schema.json`](./audit-pack.schema.json) — the `.noru/audit-pack.yml` artifact
+- [`iac-scan.schema.json`](./iac-scan.schema.json) — the `.noru/iac-scan.yml` artifact
 
 ## The nine requirements
 
@@ -52,6 +54,39 @@ The contract says *one* idempotent call. Today only one piece can keep that lite
 - The distinction the contract actually cares about is not call count but this: **re-running must
   be a no-op**. `mode: single_call` and `mode: keyed_upsert` are both allowed; an operation with no
   idempotency key is not.
+- `iac-scan` is the first piece whose every write is a documented **`server_upsert`**. Security
+  findings are keyed on `(source, externalId)` server-side, so it embeds no marker, probes nothing,
+  and closes a finding with the same call that files one. It is still `keyed_upsert` — a repository
+  with fifty findings is fifty calls — but the debt is throughput, not correctness, and that is a
+  materially better place to be than the pieces above it.
+
+### What `:push` means for a piece that assembles
+
+`audit-pack` was the first piece that mostly **consumes**. It reads Noru's graph, gathers local
+artifacts, and produces an output bundle for a human to hand over. Read literally, requirement 4 asks
+what such a piece is supposed to push, and the honest answer is *not the bundle*: pushing a rendered
+pack into Noru would duplicate a register Noru already keeps, which the non-goals below rule out.
+
+What resolved it was reading `:push` as a question about **judgements** rather than about artifacts:
+
+> `:push` lands the claims the local work produced. For a collector those claims *are* the artifact.
+> For a piece that assembles, the artifact is a deliverable and the claims are the conclusions inside
+> it — so the bundle stays local and the conclusions land, one per control.
+
+That reading costs nothing for the collector pieces, where the two coincide. It is written down here
+because the next assembling piece will hit the same question, and because "produce an output" is a
+shape the contract's own vocabulary (`collect → validate → push`) does not name.
+
+Two things the contract does **not** currently offer such a piece, and should be revisited before
+there are several of them:
+
+- **A read-only piece has nowhere to go.** `scopes.write` may be empty — the schema says so
+  explicitly — but `push` is mandatory and `push.operations` has `minItems: 1`. A piece that only
+  reported would have to invent a write to satisfy its own declaration. That is an inconsistency in
+  the contract, not in the piece.
+- **A produced artifact is undeclared.** `artifact` names the manifest; there is no field for output
+  a piece writes for a human. `audit-pack` documents its bundle in its README and gates it behind a
+  validated manifest, but nothing in `piece.json` says it exists, so nothing can check it.
 
 Three idempotency kinds, in descending order of strength:
 
@@ -84,7 +119,7 @@ training, board oversight) are legitimately point-in-time on a review cadence; t
 
 That carve-out was written before anything was built on it, and "if the rationale says why" turned
 out to be unenforceable — no validator can read a sentence and decide whether it earned an omission.
-All three pieces that carry claims now sit inside the rule, and each is stricter than the prose was:
+Every piece that carries claims now sits inside the rule, and each is stricter than the prose was:
 
 - `governance-records` accepts an omitted `expires_at` **only** when the record carries
   `next_review_due` instead. Same intent as the carve-out, but a date a validator can check, and a
@@ -98,9 +133,27 @@ All three pieces that carry claims now sit inside the rule, and each is stricter
   written, and the warning was doing nothing: every valid fixture in the piece had an open-ended
   claim in it, and tightening the check is what surfaced them.
 
-The general rule the two agree on: **a claim must name the date it stops being current, in some
+- `iac-scan` makes `expires_at` required and bounds it by the **status** of the finding, measured
+  from `observed_on` rather than from `decided_at`. A finding observed in March and signed in August
+  is a claim about March's configuration however recent the signature is, so anchoring on the
+  signature would let a stale observation be renewed for ever. Accepting a misconfiguration, or
+  calling it a false positive, gets a longer horizon and a hard requirement that the reasoning is
+  written out — an acceptance nobody revisits is how a known misconfiguration becomes permanent.
+- `audit-pack` makes `expires_at` required and measures it from the **end of the audit window**, not
+  from the signature: a workpaper concludes about a period, and signing it late does not extend what
+  it covers. It must also fall *after* the window — a conclusion that expires inside its own period
+  never asserted anything — and a `deficient` or `not_tested` conclusion gets a short horizon,
+  because a control you found broken is not something to sign off for a year.
+
+The general rule they all agree on: **a claim must name the date it stops being current, in some
 field the validator can compare.** Whether that field is `expires_at` or a cadence-shaped substitute
 is the piece's business; having neither is not.
+
+What the later pieces added to it is the **anchor**. `expires_at` alone says when a claim lapses; it
+does not say what it lapses *from*. Anchoring on `decided_at` quietly rewards signing late. Three
+different anchors are now in use — a declared cadence, the day the world was observed, and the end of
+the period a conclusion covers — and each is the honest one for its piece. A new piece should say
+which anchor it uses before it says how long the window is.
 
 `owner` must be a person. A team alias cannot be asked what it was thinking.
 

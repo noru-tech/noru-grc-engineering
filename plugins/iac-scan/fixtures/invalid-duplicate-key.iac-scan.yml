@@ -1,0 +1,82 @@
+# Fixture: two findings sharing one key.
+# Expected: exit 1, "would overwrite each other on every push".
+#
+# The key becomes the externalId the upsert is addressed by, so a duplicate is not untidy — it
+# is two findings taking turns to be the one that exists.
+version: 0.1.0
+piece: iac-scan
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: iac-scan@0.1.0
+queue_snapshot:
+  fetched_at: 2026-08-27T09:14:00Z
+  via:
+    - getSecurityFindings
+    - getOrganizationAssets
+    - getOrganizationRisks
+  source: iac-scan
+  open_findings:
+    - external_id: "example-org/example-app:terraform-credential-literal-in-source.a1b2c3d4e5f6"
+      check_name: terraform-credential-literal-in-source
+      title: Credential appears to be written into the configuration
+      severity: critical
+      status: open
+      category: identity_access
+    - external_id: "example-org/example-app:kubernetes-container-runs-privileged.f0e1d2c3b4a5"
+      check_name: kubernetes-container-runs-privileged
+      title: Container requests privileged mode
+      severity: critical
+      status: open
+      category: configuration
+  assets:
+    - id: EXAMPLE-ASSET-ID
+      external_id: example-account/example-cluster
+      name: Example application cluster
+  risks:
+    - id: EXAMPLE-RISK-ID
+      title: "Example risk: internet-reachable infrastructure"
+findings:
+  - key: terraform-credential-literal-in-source.a1b2c3d4e5f6
+    check: terraform-credential-literal-in-source
+    technology: terraform
+    severity: critical
+    category: identity_access
+    status: in_progress
+    title: Credential appears to be written into the configuration
+    file: infra/storage.tf
+    resource: aws_db_instance.primary
+    observed_on: 2026-08-20
+    refs:
+      - infra/storage.tf:13
+    risk_id: EXAMPLE-RISK-ID
+    owner_email: sam.okafor@example.com
+    interpretation:
+      owner: sam.okafor@example.com
+      decided_at: 2026-08-24
+      expires_at: 2026-10-15
+      rationale: >
+        I opened the cited line. It is a real literal and not a variable reference, so the value is
+        in the history and has to be rotated as well as moved. Filed against the existing risk while
+        the rotation is in flight.
+  - key: terraform-credential-literal-in-source.a1b2c3d4e5f6
+    check: terraform-network-ingress-open-to-the-internet
+    technology: terraform
+    severity: high
+    category: configuration
+    status: open
+    title: Network ingress rule accepts traffic from any address
+    file: infra/network.tf
+    resource: aws_security_group.web
+    observed_on: 2026-08-20
+    refs:
+      - infra/network.tf:10
+    asset_external_id: example-account/example-cluster
+    interpretation:
+      owner: priya.nair@example.com
+      decided_at: 2026-08-24
+      expires_at: 2026-10-15
+      rationale: >
+        The port is genuinely public, but the rule sits in front of the cluster the register already
+        knows about, so the finding is attached to that asset rather than to a new one.

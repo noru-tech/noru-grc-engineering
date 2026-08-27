@@ -1,0 +1,15 @@
+# Fixture Kubernetes manifest for the iac-scan collector. Nothing here is applied anywhere.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-api
+spec:
+  replicas: 1
+  template:
+    spec:
+      hostNetwork: true
+      containers:
+        - name: api
+          image: example/api:1
+          securityContext:
+            privileged: true

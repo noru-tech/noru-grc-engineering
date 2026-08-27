@@ -8,6 +8,25 @@ one version number; the release workflow fails if they disagree.
 
 ### Added
 
+- `audit-pack` — `:scan` / `:diff` / `:push`. Assembles what an auditor asks for, for one framework
+  over one window: the controls in scope with what is expected of each and what is actually linked,
+  the local artifacts an integration cannot reach, the other pieces' committed manifests, and a
+  workpaper per control. Draws a **reproducible** sample seeded from the population file's own
+  digest, so anyone holding that file can redraw it; enforces a floor on sample size for the
+  population it came from. The rendered pack under `.noru/audit-pack/` is a local deliverable and is
+  only ever built from a manifest that validated against the same repository state; what lands in
+  Noru is the tested conclusion for each control, one workpaper to one record to one control.
+- `iac-scan` — `:scan` / `:diff` / `:push`. Reads Terraform, CloudFormation, Kubernetes and
+  pipeline configuration and proposes a security finding for each bundled rule that fires, keyed on
+  the rule and the resource rather than the line so moving a block is not a new problem. Lands
+  through the documented idempotent upsert on `(source, externalId)` — the first piece with no
+  client-side probe anywhere — and **closes** the findings whose rules no longer fire with the same
+  call, scoped to the repository's own slug so two repositories under one source cannot close each
+  other's work. Records a citation and never a copy: one rule fires on lines that hold credentials,
+  so no matched text reaches the manifest.
+- `contract/audit-pack.schema.json`, `contract/iac-scan.schema.json`.
+- `getOrganizationRisks` and `getSecurityFindings` added to the published-tool list in
+  `contract/piece.schema.json`, checked against the tool list the MCP server publishes.
 - `governance-records` — `:scan` / `:diff` / `:push`. Reads the governance documents a repository
   already holds (minutes, ISMS scope, statement of applicability, internal audit plan, report and
   checklist, finding records, corrective action plans), extracts who was present, what was decided
@@ -70,6 +89,19 @@ one version number; the release workflow fails if they disagree.
 
 ### Changed
 
+- `contract/README.md` now records what `:push` means for a piece that **assembles** rather than
+  collects — the artifact stays local and the judgements inside it land — along with two gaps the
+  first such piece exposed: a read-only piece cannot satisfy a mandatory `push`, and a piece that
+  produces an output for a human has nowhere to declare it. It also records that expiry now has
+  three different **anchors** in use (a declared cadence, the day the world was observed, and the end
+  of the period a conclusion covers), and that a new piece should say which anchor it uses before it
+  says how long the window is.
+- `scripts/check_repo.py`, `scripts/test_collectors.py` and `scripts/test_idempotency.py` cover
+  both new pieces. The collector tests assert the two claims each piece rests on: that `iac-scan`
+  never writes a matched line anywhere, and that following `audit-pack`'s written redraw recipe
+  reproduces its sample exactly.
+- `tests/fixture-repo/` gained infrastructure and pipeline configuration, a change-ticket population
+  to sample, and a queue snapshot for each new piece.
 - `contract/README.md` — requirement 8 now spells out the two ways a claim may satisfy the expiry
   rule, after building a piece at each end of it.
 - `scripts/test_idempotency.py` enumerates pieces from disk and **fails** when a piece has no
@@ -103,6 +135,39 @@ one version number; the release workflow fails if they disagree.
   own category. `prohibited` is gone from the tier list for the same reason.
 
 ### Fixed
+
+- **A piece's identity no longer depends on which YAML loader parsed its manifest.**
+  `ai-inventory`, `evidence-push`, `governance-records` and `review-signoff` now normalise every
+  manifest-sourced free-text field before it reaches a rendered body, a content digest or a planned
+  argument, as `audit-pack` and `iac-scan` already did. The two loaders a validator may use — PyYAML
+  where it is importable, the bundled fallback otherwise — disagree on the whitespace inside a folded
+  (`>`) block scalar, so the same manifest produced two different plans depending on the machine:
+  push from a laptop without PyYAML, push again from CI with it, and the second push filed a
+  duplicate instead of skipping. The fix is in each piece rather than in the loader, because the
+  loaders differ in five measured ways and not only in the trailing newline — blank lines,
+  more-indented lines, trailing spaces and the chomping and indentation indicators all differ too —
+  so normalising at the point of use closes the whole class where matching one behaviour would have
+  closed a fifth of it. `scripts/test_idempotency.py::test_loader_independence` now covers every
+  declared piece rather than two, reproduces the full set of differences rather than the trailing
+  newline alone, compares the plan against an organization the plan has already been pushed into as
+  well as an empty one — the marker matching and skip reasons are unreachable otherwise — and reports
+  the JSON path at which two plans diverge. `scripts/templates/diff.mjs.tmpl` normalises too, so a
+  piece scaffolded tomorrow does not reintroduce this.
+
+  **Migration — this changes the marker of records already pushed from a machine that had PyYAML.**
+  Nothing changes for an organization only ever pushed from a machine without it: those markers were
+  already the normalised ones, and a re-push still skips. `evidence-push` is unaffected either way —
+  its marker is the artifact's own digest, never prose. For anything `ai-inventory`,
+  `governance-records` or `review-signoff` pushed *with* PyYAML, the next push files a **new**
+  evidence record beside the old one, which then has to be retired by hand. This is accepted rather
+  than worked around: the alternative is to keep an identity that means different things on different
+  machines, and the pieces already treat changed content as a new account rather than an edit, so the
+  duplicate is the documented behaviour of a content marker rather than a new failure mode. `:diff`
+  names it before it happens — the reason text on those operations reads "covers this system but the
+  content changed". Of the three, only `ai-inventory` has been released; `governance-records` and
+  `review-signoff` are unreleased, so nothing of theirs is in the field. `ai-inventory`'s asset
+  writes are a documented upsert on `(source, externalId)` and are updated in place, so the
+  duplication is confined to evidence.
 
 - The `ai-inventory` documentation no longer implies that the EU AI Act requires an organization to
   keep an AI register. It does not. Articles 49 and 71 are registration into a public Commission

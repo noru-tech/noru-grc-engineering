@@ -29,6 +29,8 @@ directory, no flat-file risk register, no second source of truth to reconcile be
 | [`evidence-push`](./plugins/evidence-push/) | local artifacts, against Noru's own unmet evidence expectations | file evidence with control mappings |
 | [`governance-records`](./plugins/governance-records/) | minutes, ISMS scope, statement of applicability, audit plans and reports, findings, corrective action plans | attributed, dated records as evidence |
 | [`review-signoff`](./plugins/review-signoff/) | a periodic review of machine output, and the human decision about it | a named, dated, expiring sign-off as evidence |
+| [`audit-pack`](./plugins/audit-pack/) | the local artifacts, the sampling and the workpapers for one framework over one audit window | the tested conclusion for each control, as evidence |
+| [`iac-scan`](./plugins/iac-scan/) | compliance-relevant misconfiguration in Terraform, CloudFormation, Kubernetes and pipeline configuration | security findings, keyed and closed by the same call |
 | [`noru`](./plugins/noru/) | — | the hub: `connect`, `doctor`, `context` |
 
 Every piece is the same three moves, and exactly three commands:
@@ -42,7 +44,8 @@ Every piece is the same three moves, and exactly three commands:
 ### What each piece is for
 
 The pieces target deliberately unalike work — which is what makes the contract a contract rather
-than a description of one plugin. One hits REST, three hit MCP; they share no collector logic.
+than a description of one plugin. One hits REST, the rest hit MCP; they share no collector logic;
+one of them mostly assembles rather than discovers.
 
 - `ai-inventory` targets **ISO 42001 and the EU AI Act**: which AI systems a repository actually
   contains, which of them touch a prohibited practice under Article 5, which trigger the Article 50
@@ -58,6 +61,14 @@ than a description of one plugin. One hits REST, three hit MCP; they share no co
 - `review-signoff` targets the recurring **"a human attests to machine output"** pattern: access
   reviews, rule reviews, hardening baselines, asset reconciliation, physical access, vendor reviews.
   Each produces a named, dated, expiring sign-off, and the expiry reaches the record itself.
+- `audit-pack` targets **the handover itself**: the bundle, the sampling and the workpapers an
+  auditor asks for, for one framework over one window. It is the piece that mostly *consumes* — the
+  pack is a local deliverable and what lands in Noru is the tested conclusion per control. Its
+  sample is seeded from the population file's own digest, so anyone holding that file can redraw it.
+- `iac-scan` targets **infrastructure and pipeline configuration**: the module that has not been
+  applied yet, the workflow that runs with the repository's own token, the literal somebody left in
+  a variable block. It is the only piece whose every write is a documented server-side upsert, so
+  filing a finding and closing one are the same call.
 
 ## Install
 
@@ -70,6 +81,8 @@ than a description of one plugin. One hits REST, three hit MCP; they share no co
 /plugin install evidence-push@noru-grc-engineering
 /plugin install governance-records@noru-grc-engineering
 /plugin install review-signoff@noru-grc-engineering
+/plugin install audit-pack@noru-grc-engineering
+/plugin install iac-scan@noru-grc-engineering
 ```
 
 Then configure the Noru MCP connection: [Claude guide](./docs/clients/claude-code.md).
@@ -152,6 +165,9 @@ Use least-privilege scopes:
 | `evidence-push:push` | adds `write:evidence` |
 | `governance-records:push` | adds `write:evidence` |
 | `review-signoff:push` | adds `write:evidence` |
+| `audit-pack:push` | adds `write:evidence` |
+| `iac-scan:scan` and `:diff` | `read:risks`, `read:assets` — and nothing else |
+| `iac-scan:push` | adds `write:risks` |
 
 ## The contract
 
@@ -198,7 +214,9 @@ noru-grc-engineering/
 │   ├── ai-inventory/                   # :scan :diff :push  (MCP)
 │   ├── evidence-push/                  # :scan :diff :push  (REST upload)
 │   ├── governance-records/             # :scan :diff :push  (MCP)
-│   └── review-signoff/                 # :scan :diff :push  (MCP)
+│   ├── review-signoff/                 # :scan :diff :push  (MCP)
+│   ├── audit-pack/                     # :scan :diff :push  (MCP)
+│   └── iac-scan/                       # :scan :diff :push  (MCP)
 ├── .github/actions/noru-ci/            # the CI-mode action: scan, validate, expiry, diff, push
 ├── scripts/                            # scaffolder, contract test, checks — stdlib/built-ins only
 ├── tests/fixture-repo/                 # the repository the collectors are tested against

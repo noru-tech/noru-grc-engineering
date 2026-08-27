@@ -13,12 +13,25 @@ sharpest claim and the easiest to get quietly wrong. It is not enough to find th
 finding is whether the disclosure the paragraph requires is present, and the states it reports
 (present / unclear / absent) mean specific things that are asserted below one at a time.
 
+For `audit-pack` the sharpest claim is that its sample can be redrawn. The pack tells an auditor how
+to reproduce the selection, so the test below follows those written instructions independently rather
+than calling the collector's own function — a sample nobody can reproduce is a list somebody typed,
+and a recipe that does not work is worse than no recipe.
+
+For `iac-scan` the sharpest claim is a negative one: the rule that finds a credential written into
+configuration must never write that credential anywhere. A scanner that quotes what it matched puts
+the secret into a committed file and then into a pull request, so that property is asserted directly
+rather than left to the reviewer of the collector. The other assertions are about identity — a
+finding is keyed on the resource, so moving a block is not a new problem and renaming one is.
+
 Usage:
     python3 scripts/test_collectors.py [--output=json] [--quiet]
 Exit codes: 0 = all tests pass, 1 = a test failed, 2 = usage / setup error.
 """
+import hashlib
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -350,6 +363,492 @@ def test_missing_disclosure_fixture_alerts(results):
     )
 
 
+IAC_SCAN = ROOT / "plugins" / "iac-scan"
+IAC_COLLECTOR = IAC_SCAN / "scripts" / "collect.mjs"
+
+# A queue with nothing in it: enough for the collector to run, so a test can be about the scan and
+# not about the snapshot.
+EMPTY_IAC_QUEUE = {
+    "fetched_at": "2026-08-27T09:14:00Z",
+    "via": ["getSecurityFindings", "getOrganizationAssets", "getOrganizationRisks"],
+    "source": "iac-scan",
+    "open_findings": [],
+    "assets": [],
+    "risks": [],
+}
+
+# The line the credential rule fires on. The value is a placeholder, but the test is that NOTHING
+# resembling it reaches the derived facts or the manifest — which is the property that stops this
+# piece publishing the real thing when it runs on a real repository.
+SECRET_LITERAL = "hunter2-placeholder-not-a-real-credential"
+TF_WITH_LITERAL = f"""\
+resource "aws_db_instance" "primary" {{
+  engine            = "postgres"
+  storage_encrypted = true
+  password          = "{SECRET_LITERAL}"
+}}
+"""
+
+
+def iac_scan_repo(tmp, name, files, queue=None):
+    """Write a throwaway repository, run the real collector over it, return its derived facts."""
+    repo = pathlib.Path(tmp) / f"iac-{name}"
+    for rel, body in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    cache = repo / ".noru" / ".cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "iac-queue.json").write_text(
+        json.dumps(queue or EMPTY_IAC_QUEUE, indent=2), encoding="utf-8"
+    )
+    result = run(["node", str(IAC_COLLECTOR), f"--repo={repo}", "--output=json", "--quiet"])
+    if result.returncode != 0:
+        raise RuntimeError(f"iac-scan collector exited {result.returncode}: {result.stderr[:300]}")
+    derived = json.loads(
+        (cache / "iac-scan.derived.json").read_text(encoding="utf-8")
+    )
+    manifest = repo / ".noru" / "iac-scan.yml"
+    return derived, (manifest.read_text(encoding="utf-8") if manifest.is_file() else "")
+
+
+def iac_checks(derived, check_id):
+    return [f for f in derived["findings"] if f["check"] == check_id]
+
+
+def test_iac_never_copies_the_line(results, tmp):
+    """The rule that fires on a credential must not put that credential anywhere it can be read."""
+    derived, manifest = iac_scan_repo(tmp, "literal", {"infra/db.tf": TF_WITH_LITERAL})
+    hits = iac_checks(derived, "terraform-credential-literal-in-source")
+    results.check(
+        "[iac-scan] a credential written into Terraform is found",
+        len(hits) == 1 and hits[0]["resource"] == "aws_db_instance.primary",
+        json.dumps(derived["findings"]),
+    )
+    results.check(
+        "[iac-scan] the matched value appears in NEITHER the derived facts NOR the manifest",
+        SECRET_LITERAL not in json.dumps(derived) and SECRET_LITERAL not in manifest,
+        "the collector copied what it matched — that is how a scanner commits a secret",
+    )
+    results.check(
+        "[iac-scan] what it writes instead is a citation the reader can open",
+        hits[0]["ref"] == "infra/db.tf:4",
+        json.dumps(hits),
+    )
+
+
+def test_iac_identity_survives_a_move(results, tmp):
+    """A finding is keyed on the resource, not the line: moving a block is not a new problem."""
+    moved = "# a comment added at the top\n# and another\n" + TF_WITH_LITERAL
+    first, _ = iac_scan_repo(tmp, "move-before", {"infra/db.tf": TF_WITH_LITERAL})
+    second, _ = iac_scan_repo(tmp, "move-after", {"infra/db.tf": moved})
+    before = iac_checks(first, "terraform-credential-literal-in-source")[0]
+    after = iac_checks(second, "terraform-credential-literal-in-source")[0]
+    results.check(
+        "[iac-scan] moving a resource down the file keeps the finding's identity",
+        before["key"] == after["key"] and before["ref"] != after["ref"],
+        f"{before['key']} vs {after['key']}, {before['ref']} vs {after['ref']}",
+    )
+
+    renamed, _ = iac_scan_repo(
+        tmp,
+        "renamed",
+        {"infra/db.tf": TF_WITH_LITERAL.replace('"primary"', '"replica"')},
+    )
+    results.check(
+        "[iac-scan] the same rule on a different resource is a different finding",
+        iac_checks(renamed, "terraform-credential-literal-in-source")[0]["key"] != before["key"],
+        iac_checks(renamed, "terraform-credential-literal-in-source")[0]["key"],
+    )
+
+
+def test_iac_absence_is_detectable(results, tmp):
+    """The interesting half of an infrastructure review is what a block does NOT say."""
+    unencrypted = 'resource "aws_db_instance" "primary" {\n  engine = "postgres"\n}\n'
+    derived, _ = iac_scan_repo(tmp, "unencrypted", {"infra/db.tf": unencrypted})
+    results.check(
+        "[iac-scan] a database block declaring no encryption is reported",
+        len(iac_checks(derived, "terraform-managed-database-storage-unencrypted")) == 1,
+        json.dumps(derived["findings"]),
+    )
+
+    encrypted = (
+        'resource "aws_db_instance" "primary" {\n'
+        '  engine            = "postgres"\n'
+        "  storage_encrypted = true\n"
+        "}\n"
+    )
+    derived, _ = iac_scan_repo(tmp, "encrypted", {"infra/db.tf": encrypted})
+    results.check(
+        "[iac-scan] and the same block with encryption declared is NOT reported",
+        iac_checks(derived, "terraform-managed-database-storage-unencrypted") == [],
+        json.dumps(derived["findings"]),
+    )
+
+
+def test_iac_classification(results, tmp):
+    """A rule only ever runs against the kind of document it is written for."""
+    files = {
+        "deploy/app.yaml": (
+            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n"
+            "  template:\n    spec:\n      hostNetwork: true\n"
+        ),
+        ".github/workflows/ci.yml": (
+            "name: ci\non: [push]\npermissions: write-all\njobs:\n  test:\n"
+            "    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n"
+        ),
+        "docs/notes.yaml": "privileged: true\npermissions: write-all\n",
+    }
+    derived, _ = iac_scan_repo(tmp, "classify", files)
+    kinds = {row["file"]: row["technology"] for row in derived["configuration_files"]}
+    results.check(
+        "[iac-scan] a Kubernetes manifest and a workflow are classified, a plain YAML file is not",
+        kinds == {"deploy/app.yaml": "kubernetes", ".github/workflows/ci.yml": "github_actions"},
+        json.dumps(kinds),
+    )
+    results.check(
+        "[iac-scan] no rule fires inside the unclassified file",
+        all(f["file"] != "docs/notes.yaml" for f in derived["findings"]),
+        json.dumps([f["file"] for f in derived["findings"]]),
+    )
+    results.check(
+        "[iac-scan] a workflow step pinned to a mutable reference is reported",
+        len(iac_checks(derived, "github-actions-third-party-action-unpinned")) == 1,
+        json.dumps([f["check"] for f in derived["findings"]]),
+    )
+
+    pinned = files[".github/workflows/ci.yml"].replace(
+        "actions/checkout@v4", "actions/checkout@" + "0" * 40
+    )
+    derived, _ = iac_scan_repo(tmp, "pinned", {".github/workflows/ci.yml": pinned})
+    results.check(
+        "[iac-scan] and a step pinned to a full commit hash is not",
+        iac_checks(derived, "github-actions-third-party-action-unpinned") == [],
+        json.dumps(derived["findings"]),
+    )
+
+
+def test_iac_reports_what_stopped_reproducing(results, tmp):
+    """The half of the queue only Noru knows: a finding that is open and no longer fires."""
+    queue = dict(
+        EMPTY_IAC_QUEUE,
+        open_findings=[
+            {
+                "external_id": "example/app:terraform-object-storage-public-acl.0123456789ab",
+                "check_name": "terraform-object-storage-public-acl",
+                "title": "Object storage bucket is granted a public access control list",
+                "severity": "high",
+                "status": "open",
+                "category": "configuration",
+            }
+        ],
+    )
+    derived, _ = iac_scan_repo(tmp, "stale", {"infra/db.tf": TF_WITH_LITERAL}, queue=queue)
+    results.check(
+        "[iac-scan] an open finding no rule reproduced is named in the scan output",
+        derived["queue_no_longer_reproducing"]
+        == ["example/app:terraform-object-storage-public-acl.0123456789ab"],
+        json.dumps(derived["queue_no_longer_reproducing"]),
+    )
+
+
+def test_iac_skeleton_never_decides(results, tmp):
+    """The collector proposes. Severity, reality and ownership are the reviewer's."""
+    _, manifest = iac_scan_repo(tmp, "skeleton", {"infra/db.tf": TF_WITH_LITERAL})
+    # Counted at the finding's own indentation: the header comment mentions the flag too, and a
+    # test that matches the documentation instead of the data is a test that proves nothing.
+    results.check(
+        "[iac-scan] every finding the skeleton proposes is flagged needs_review",
+        manifest.count("\n    needs_review: true") == manifest.count("\n  - key: ") > 0,
+        f'{manifest.count(chr(10) + "    needs_review: true")} flagged, '
+        f'{manifest.count(chr(10) + "  - key: ")} finding(s)',
+    )
+    results.check(
+        "[iac-scan] the skeleton never invents an owner",
+        "owner: TODO@example.com" in manifest,
+        manifest[:200],
+    )
+
+
+def test_iac_every_status_has_an_expiry_horizon(results):
+    """A status with no horizon would make the expiry check pass without checking anything."""
+    vocab = json.loads(
+        (IAC_SCAN / "references" / "vocabulary.json").read_text(encoding="utf-8")
+    )
+    missing = sorted(set(vocab["finding_status"]) - set(vocab["status_horizon_days"]))
+    results.check(
+        "[iac-scan] every finding status has an expiry horizon in the bundled vocabulary",
+        missing == [],
+        f"no horizon for {missing}",
+    )
+
+
+AUDIT_PACK = ROOT / "plugins" / "audit-pack"
+AP_COLLECTOR = AUDIT_PACK / "scripts" / "collect.mjs"
+AP_VALIDATOR = AUDIT_PACK / "scripts" / "validate_manifest.py"
+
+AP_QUEUE = {
+    "fetched_at": "2026-08-27T09:14:00Z",
+    "via": [
+        "getOrganizationFrameworks",
+        "getOrganizationControls",
+        "getControlContext",
+        "getEvidenceForControl",
+        "getEvidenceItems",
+    ],
+    "framework_id": "zz_framework",
+    "framework_name": "Example framework",
+    "window": {"from": "2026-01-01", "to": "2026-06-30"},
+    "controls": [
+        {
+            "control_id": "zz-01",
+            "name": "Example control",
+            "status": "implemented",
+            "coverage": 50,
+            "testing_guidance_available": True,
+            "expected_evidence_items": [
+                {"id": "E-ZZ-01", "title": "Example Records", "type": "record"},
+                {"id": "E-ZZ-02", "title": "Example Procedure", "type": "procedure"},
+            ],
+            "linked_evidence": [
+                {
+                    "evidence_id": "EXAMPLE-EVIDENCE-ID",
+                    "title": "Example procedure",
+                    "status": "valid",
+                    "type": "procedure",
+                    "evidence_item_id": "E-ZZ-02",
+                }
+            ],
+        }
+    ],
+}
+
+
+def audit_pack_repo(tmp, name, files, queue=None):
+    """Write a throwaway repository, run the real collector over it, return its derived facts."""
+    repo = pathlib.Path(tmp) / f"ap-{name}"
+    for rel, body in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    cache = repo / ".noru" / ".cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "audit-queue.json").write_text(
+        json.dumps(queue or AP_QUEUE, indent=2), encoding="utf-8"
+    )
+    result = run(["node", str(AP_COLLECTOR), f"--repo={repo}", "--output=json", "--quiet"])
+    if result.returncode != 0:
+        raise RuntimeError(f"audit-pack collector exited {result.returncode}: {result.stderr[:300]}")
+    derived = json.loads((cache / "audit-pack.derived.json").read_text(encoding="utf-8"))
+    return repo, derived, json.loads(result.stdout)
+
+
+def population_csv(rows):
+    lines = ["reference,opened"]
+    for i in range(1, rows + 1):
+        lines.append(f"REF-{i:04d},2026-01-{(i % 28) + 1:02d}")
+    return "\n".join(lines) + "\n"
+
+
+def test_audit_pack_sample_is_redrawable(results, tmp):
+    """The pack tells an auditor how to redraw the sample. Follow those instructions and check.
+
+    This is the assertion the whole piece rests on: a sample nobody can reproduce is a list somebody
+    typed. The recipe is written into the workpaper and into the README, so it gets a test that runs
+    the recipe independently rather than calling the collector's own function.
+    """
+    body = population_csv(60)
+    repo, derived, _ = audit_pack_repo(
+        tmp, "sample", {".noru/artifacts/changes.csv": body}
+    )
+    artifact = next(a for a in derived["artifacts"] if a["file"].endswith("changes.csv"))
+    population = artifact["population"]
+
+    results.check(
+        "[audit-pack] a delimited export is recognised as a population and counted",
+        population is not None and population["size"] == 60,
+        json.dumps(artifact),
+    )
+
+    # Independently: the seed is the file's own digest, and the order is sha256(seed|reference).
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    keys = [f"REF-{i:04d}" for i in range(1, 61)]
+    expected_seed = digest[:32]
+    redrawn = sorted(
+        keys, key=lambda k: hashlib.sha256(f"{expected_seed}|{k}".encode("utf-8")).hexdigest()
+    )[: population["suggested_sample_size"]]
+
+    results.check(
+        "[audit-pack] the seed is the population file's own digest, so it needs no random source",
+        population["seed"] == expected_seed,
+        f"{population['seed']} vs {expected_seed}",
+    )
+    results.check(
+        "[audit-pack] REDRAWING the sample from the documented recipe reproduces it exactly",
+        population["suggested_sample"] == redrawn,
+        f"collector {population['suggested_sample'][:4]} vs redrawn {redrawn[:4]}",
+    )
+    results.check(
+        "[audit-pack] the sample is not simply the first rows of the file",
+        population["suggested_sample"] != keys[: population["suggested_sample_size"]],
+        json.dumps(population["suggested_sample"][:5]),
+    )
+
+    # And the floor the validator enforces has to be the floor the collector proposes against.
+    _, derived_small, _ = audit_pack_repo(
+        tmp, "sample-small", {".noru/artifacts/changes.csv": population_csv(3)}
+    )
+    small = next(
+        a for a in derived_small["artifacts"] if a["file"].endswith("changes.csv")
+    )["population"]
+    results.check(
+        "[audit-pack] a population smaller than the floor is tested in full",
+        small["minimum_sample"] == 3 and small["suggested_sample_size"] == 3,
+        json.dumps(small),
+    )
+
+    _, derived_big, _ = audit_pack_repo(
+        tmp, "sample-big", {".noru/artifacts/changes.csv": population_csv(600)}
+    )
+    big = next(
+        a for a in derived_big["artifacts"] if a["file"].endswith("changes.csv")
+    )["population"]
+    results.check(
+        "[audit-pack] a large population raises the floor above the default sample size",
+        big["minimum_sample"] == 45 and big["suggested_sample_size"] == 45,
+        json.dumps({k: v for k, v in big.items() if k != "suggested_sample"}),
+    )
+
+
+def test_audit_pack_gap_analysis(results, tmp):
+    """The gap is the difference between what the framework expects and what is actually linked."""
+    _, derived, _ = audit_pack_repo(tmp, "gaps", {"README.md": "# fixture\n"})
+    control = derived["controls"][0]
+    results.check(
+        "[audit-pack] an expectation with nothing linked to it is reported as unmet",
+        control["unmet_evidence_items"] == ["E-ZZ-01"],
+        json.dumps(control),
+    )
+    results.check(
+        "[audit-pack] an expectation that IS linked is not reported as unmet",
+        "E-ZZ-02" not in control["unmet_evidence_items"],
+        json.dumps(control),
+    )
+
+    expired_queue = json.loads(json.dumps(AP_QUEUE))
+    expired_queue["controls"][0]["linked_evidence"][0]["status"] = "expired"
+    _, derived, _ = audit_pack_repo(
+        tmp, "expired", {"README.md": "# fixture\n"}, queue=expired_queue
+    )
+    results.check(
+        "[audit-pack] a linked record that expired is surfaced separately from an unmet expectation",
+        derived["controls"][0]["expired_evidence"] == ["EXAMPLE-EVIDENCE-ID"],
+        json.dumps(derived["controls"][0]),
+    )
+
+
+def test_audit_pack_assembles_upstream_manifests(results, tmp):
+    """A pack says which reviewed inputs produced what is in Noru, not only what the register says."""
+    repo, derived, _ = audit_pack_repo(
+        tmp,
+        "upstream",
+        {
+            ".noru/review-signoff.yml": "version: 0.1.0\npiece: review-signoff\nreviews: []\n",
+            ".noru/notes.yml": "just: a file\n",
+        },
+    )
+    pieces = [row["piece"] for row in derived["upstream_manifests"]]
+    results.check(
+        "[audit-pack] another piece's committed manifest is digested into the pack",
+        pieces == ["review-signoff"],
+        json.dumps(derived["upstream_manifests"]),
+    )
+    # The pack's own manifest is written into the same directory; digesting it would make the
+    # derived facts depend on their own output.
+    results.check(
+        "[audit-pack] the pack's own manifest is not one of its inputs",
+        all(row["file"] != ".noru/audit-pack.yml" for row in derived["upstream_manifests"]),
+        json.dumps(derived["upstream_manifests"]),
+    )
+
+
+def test_audit_pack_renders_only_a_validated_pack(results, tmp):
+    """A pack built from an unreviewed manifest would look exactly like a real one."""
+    repo, _, summary = audit_pack_repo(
+        tmp, "render", {".noru/artifacts/changes.csv": population_csv(40)}
+    )
+    index = repo / ".noru" / "audit-pack" / "index.md"
+    results.check(
+        "[audit-pack] a scan with no validated manifest renders the scope and says so",
+        summary["bundle"] == [".noru/audit-pack/index.md"]
+        and "has not been reviewed yet" in index.read_text(encoding="utf-8"),
+        json.dumps(summary["bundle"]),
+    )
+    results.check(
+        "[audit-pack] and it writes no workpaper for a conclusion nobody drew",
+        not (repo / ".noru" / "audit-pack" / "workpapers").exists(),
+        "workpapers were rendered from an unvalidated manifest",
+    )
+
+    # Now do it properly: the piece's own valid fixture, re-stamped with this repository's digest.
+    decl = json.loads((AUDIT_PACK / "piece.json").read_text(encoding="utf-8"))
+    fixture = (AUDIT_PACK / decl["validator"]["fixtures"]["valid"][0]).read_text(encoding="utf-8")
+    digest = summary["derived_digest"]
+    manifest = repo / ".noru" / "audit-pack.yml"
+    manifest.write_text(
+        re.sub(
+            r"(\n  generated_by: [^\n]+\n)", rf"\1  derived_digest: {digest}\n", fixture, count=1
+        ),
+        encoding="utf-8",
+    )
+    parsed = repo / ".noru" / ".cache" / "audit-pack.parsed.json"
+    validated = run(
+        ["python3", str(AP_VALIDATOR), str(manifest), f"--emit-parsed={parsed}", "--quiet"]
+    )
+    if not results.check(
+        "[audit-pack] the fixture manifest validates against this repository",
+        validated.returncode == 0,
+        validated.stdout[:300],
+    ):
+        return
+    rendered = run(["node", str(AP_COLLECTOR), f"--repo={repo}", "--output=json", "--quiet"])
+    bundle = json.loads(rendered.stdout)["bundle"]
+    results.check(
+        "[audit-pack] a validated manifest renders a workpaper per control and a sampling worksheet",
+        ".noru/audit-pack/workpapers/change-management.md" in bundle
+        and ".noru/audit-pack/sampling/change-management.csv" in bundle,
+        json.dumps(bundle),
+    )
+    workpaper = (
+        repo / ".noru" / "audit-pack" / "workpapers" / "change-management.md"
+    ).read_text(encoding="utf-8")
+    results.check(
+        "[audit-pack] the workpaper tells the reader how to redraw the sample",
+        "Redraw it" in workpaper and "Seed:" in workpaper,
+        workpaper[:200],
+    )
+    # The framework's testing procedure is Noru's to serve. A pack that copied it would vendor
+    # catalogue content and go stale the moment the framework moved.
+    results.check(
+        "[audit-pack] the pack records that a procedure exists, and never its text",
+        "Testing procedure available from Noru: yes" in workpaper,
+        workpaper[:200],
+    )
+
+
+def test_audit_pack_every_conclusion_has_an_assurance_horizon(results):
+    """A conclusion with no horizon would make the expiry check pass without checking anything."""
+    vocab = json.loads(
+        (AUDIT_PACK / "references" / "vocabulary.json").read_text(encoding="utf-8")
+    )
+    missing = sorted(set(vocab["conclusion"]) - set(vocab["assurance_days"]))
+    results.check(
+        "[audit-pack] every conclusion has an assurance horizon in the bundled vocabulary",
+        missing == [],
+        f"no horizon for {missing}",
+    )
+
+
 def main(argv):
     output_json = False
     quiet = False
@@ -380,7 +879,19 @@ def main(argv):
             test_emotion_recognition_is_biometric(results, tmp)
             test_art5_screen(results, tmp)
             test_skeleton_never_asserts(results, tmp)
+            test_iac_never_copies_the_line(results, tmp)
+            test_iac_identity_survives_a_move(results, tmp)
+            test_iac_absence_is_detectable(results, tmp)
+            test_iac_classification(results, tmp)
+            test_iac_reports_what_stopped_reproducing(results, tmp)
+            test_iac_skeleton_never_decides(results, tmp)
+            test_audit_pack_sample_is_redrawable(results, tmp)
+            test_audit_pack_gap_analysis(results, tmp)
+            test_audit_pack_assembles_upstream_manifests(results, tmp)
+            test_audit_pack_renders_only_a_validated_pack(results, tmp)
         test_missing_disclosure_fixture_alerts(results)
+        test_iac_every_status_has_an_expiry_horizon(results)
+        test_audit_pack_every_conclusion_has_an_assurance_horizon(results)
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"error: {exc}\n")
         return 2

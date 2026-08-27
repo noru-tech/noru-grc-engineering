@@ -1,0 +1,12 @@
+# Fixture workflow for the iac-scan collector. Nothing here runs.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions: write-all
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "publish the thing"

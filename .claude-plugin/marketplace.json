@@ -103,6 +103,48 @@
         "name": "Noru",
         "email": "support@noru.tech"
       }
+    },
+    {
+      "name": "iac-scan",
+      "source": "./plugins/iac-scan",
+      "description": "Scan the Terraform, CloudFormation, Kubernetes and CI configuration a repository actually contains, decide what each finding means in this environment, and land the result in Noru as security findings — closing the ones that no longer reproduce.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "iac",
+        "terraform",
+        "kubernetes",
+        "cloudformation",
+        "security-findings"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
+    },
+    {
+      "name": "audit-pack",
+      "source": "./plugins/audit-pack",
+      "description": "Assemble the evidence bundle, sampling and workpapers an auditor asks for — for one framework over one audit window — from Noru's graph plus the local files an integration cannot reach, and land the tested conclusion for each control back in Noru.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "audit",
+        "workpapers",
+        "sampling",
+        "evidence",
+        "soc2"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
     }
   ]
 }

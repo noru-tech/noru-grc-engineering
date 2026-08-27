@@ -1,0 +1,110 @@
+# Fixture: a control found effective while an exception against it is deferred.
+# Expected: exit 1, "deferred exception is one nobody has dealt with".
+#
+# Either it was not effective, or the exception is not really deferred. Both cannot be true.
+version: 0.1.0
+piece: audit-pack
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: audit-pack@0.1.0
+pack:
+  key: example-framework-2026-h1
+  title: Example framework, first half of 2026
+  window:
+    from: 2026-01-01
+    to: 2026-06-30
+  prepared_by: sam.okafor@example.com
+  reviewed_by: priya.nair@example.com
+queue_snapshot:
+  fetched_at: 2026-08-27T09:14:00Z
+  via:
+    - getOrganizationFrameworks
+    - getOrganizationControls
+    - getControlContext
+    - getEvidenceForControl
+    - getEvidenceItems
+  framework_id: zz_framework
+  framework_name: Example framework
+  controls:
+    - control_id: zz-01
+      display_id: ZZ-01
+      name: Example change management control
+      status: implemented
+      coverage: 66
+      testing_guidance_available: true
+      expected_evidence_items:
+        - id: E-ZZ-01
+          title: Example Change Approval Records
+          type: record
+        - id: E-ZZ-02
+          title: Example Change Management Procedure
+          type: procedure
+      linked_evidence:
+        - evidence_id: EXAMPLE-EVIDENCE-ID
+          title: Example change management procedure
+          status: valid
+          type: procedure
+          expires_at: 2027-01-31T23:59:59Z
+          evidence_item_id: E-ZZ-02
+    - control_id: zz-03
+      display_id: ZZ-03
+      name: Example periodic access review control
+      status: in_progress
+      coverage: 0
+      testing_guidance_available: true
+      expected_evidence_items:
+        - id: E-ZZ-21
+          title: Example Quarterly Access Review
+          type: record
+      linked_evidence:
+        - evidence_id: EXAMPLE-EXPIRED-EVIDENCE-ID
+          title: Example access review, previous period
+          status: expired
+          type: record
+          expires_at: 2026-05-31T23:59:59Z
+          evidence_item_id: E-ZZ-21
+inputs:
+  artifacts:
+    - file: .noru/artifacts/change-tickets-2026h1.csv
+      sha256: 6335fc451a85daabfaa5c3e72e500431521f5c38da91d1c4856062c6bafa56ca
+      size_bytes: 680
+    - file: .noru/artifacts/quarterly-access-review.txt
+      sha256: c3119e0dac64f636e06d82858d5343ba1e9ee032c2581ffae3b658e5b7581994
+      size_bytes: 263
+  manifests:
+    - piece: review-signoff
+      file: .noru/review-signoff.yml
+      sha256: a1ed68f8663a1ca16db789e1b466d30225defc9920caffe2df2596b0cd0679bf
+workpapers:
+  - key: periodic-access-review
+    control_id: zz-03
+    evidence_item_ids:
+      - E-ZZ-21
+    scope: >
+      Tested whether the quarterly access review was carried out for both quarters in the window, by
+      looking for a completed review with a named signer for each.
+    inspected:
+      - kind: artifact
+        reference: .noru/artifacts/quarterly-access-review.txt
+        sha256: c3119e0dac64f636e06d82858d5343ba1e9ee032c2581ffae3b658e5b7581994
+        note: The only completed review found in the window.
+      - kind: evidence
+        reference: EXAMPLE-EXPIRED-EVIDENCE-ID
+        note: The record Noru holds for the previous period, which expired during the window.
+    exceptions:
+      - reference: 2026-Q2
+        description: No access review was carried out for the second quarter of the window.
+        disposition: deferred
+        owner: priya.nair@example.com
+    conclusion: effective
+    refs:
+      - .noru/artifacts/quarterly-access-review.txt:1
+    interpretation:
+      owner: sam.okafor@example.com
+      decided_at: 2026-07-15
+      expires_at: 2026-10-01
+      rationale: >
+        One of the two quarters has no review at all, so the control did not operate across the
+        window. Short horizon on purpose: this is a finding to fix, not an answer to file away.

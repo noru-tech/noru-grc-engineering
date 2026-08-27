@@ -334,6 +334,8 @@
         "getAllFrameworks",
         "getOrganizationFrameworks",
         "getOrganizationControls",
+        "getOrganizationRisks",
+        "getSecurityFindings",
         "getPendingControls",
         "getControlStatus",
         "getControlContext",

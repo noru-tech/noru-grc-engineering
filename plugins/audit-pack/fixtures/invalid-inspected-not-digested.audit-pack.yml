@@ -1,0 +1,124 @@
+# Fixture: a workpaper citing a file the scan never read.
+# Expected: exit 1, "was not digested by this scan".
+#
+# A digest a pack did not take is a digest a pack cannot vouch for.
+version: 0.1.0
+piece: audit-pack
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: audit-pack@0.1.0
+pack:
+  key: example-framework-2026-h1
+  title: Example framework, first half of 2026
+  window:
+    from: 2026-01-01
+    to: 2026-06-30
+  prepared_by: sam.okafor@example.com
+  reviewed_by: priya.nair@example.com
+queue_snapshot:
+  fetched_at: 2026-08-27T09:14:00Z
+  via:
+    - getOrganizationFrameworks
+    - getOrganizationControls
+    - getControlContext
+    - getEvidenceForControl
+    - getEvidenceItems
+  framework_id: zz_framework
+  framework_name: Example framework
+  controls:
+    - control_id: zz-01
+      display_id: ZZ-01
+      name: Example change management control
+      status: implemented
+      coverage: 66
+      testing_guidance_available: true
+      expected_evidence_items:
+        - id: E-ZZ-01
+          title: Example Change Approval Records
+          type: record
+        - id: E-ZZ-02
+          title: Example Change Management Procedure
+          type: procedure
+      linked_evidence:
+        - evidence_id: EXAMPLE-EVIDENCE-ID
+          title: Example change management procedure
+          status: valid
+          type: procedure
+          expires_at: 2027-01-31T23:59:59Z
+          evidence_item_id: E-ZZ-02
+    - control_id: zz-03
+      display_id: ZZ-03
+      name: Example periodic access review control
+      status: in_progress
+      coverage: 0
+      testing_guidance_available: true
+      expected_evidence_items:
+        - id: E-ZZ-21
+          title: Example Quarterly Access Review
+          type: record
+      linked_evidence:
+        - evidence_id: EXAMPLE-EXPIRED-EVIDENCE-ID
+          title: Example access review, previous period
+          status: expired
+          type: record
+          expires_at: 2026-05-31T23:59:59Z
+          evidence_item_id: E-ZZ-21
+inputs:
+  artifacts:
+    - file: .noru/artifacts/change-tickets-2026h1.csv
+      sha256: 6335fc451a85daabfaa5c3e72e500431521f5c38da91d1c4856062c6bafa56ca
+      size_bytes: 680
+    - file: .noru/artifacts/quarterly-access-review.txt
+      sha256: c3119e0dac64f636e06d82858d5343ba1e9ee032c2581ffae3b658e5b7581994
+      size_bytes: 263
+  manifests:
+    - piece: review-signoff
+      file: .noru/review-signoff.yml
+      sha256: a1ed68f8663a1ca16db789e1b466d30225defc9920caffe2df2596b0cd0679bf
+workpapers:
+  - key: change-management
+    control_id: zz-01
+    evidence_item_ids:
+      - E-ZZ-01
+    scope: >
+      Tested that every production change in the window was approved before it was deployed, by
+      drawing a sample from the change export and checking the approver and the two dates on each.
+    inspected:
+      - kind: artifact
+        reference: .noru/artifacts/some-other-export.csv
+        sha256: 6335fc451a85daabfaa5c3e72e500431521f5c38da91d1c4856062c6bafa56ca
+        note: The change export for the window, sampled below.
+      - kind: evidence
+        reference: EXAMPLE-EVIDENCE-ID
+        note: The procedure the sample was tested against.
+      - kind: manifest
+        reference: .noru/review-signoff.yml
+        sha256: a1ed68f8663a1ca16db789e1b466d30225defc9920caffe2df2596b0cd0679bf
+        note: The reviewed sign-offs that produced the linked records in Noru.
+    population:
+      file: .noru/artifacts/change-tickets-2026h1.csv
+      sha256: 6335fc451a85daabfaa5c3e72e500431521f5c38da91d1c4856062c6bafa56ca
+      size: 12
+    sample:
+      method: deterministic_hash
+      seed: 6335fc451a85daabfaa5c3e72e500431
+      size: 5
+      drawn:
+        - CHG-1005
+        - CHG-1003
+        - CHG-1001
+        - CHG-1012
+        - CHG-1006
+    exceptions: []
+    conclusion: effective
+    refs:
+      - .noru/artifacts/change-tickets-2026h1.csv:1
+    interpretation:
+      owner: sam.okafor@example.com
+      decided_at: 2026-07-15
+      expires_at: 2027-06-30
+      rationale: >
+        Every change in the sample carried an approver other than the deployer and an approval date
+        before the deployment date. The control operated as designed across the window.

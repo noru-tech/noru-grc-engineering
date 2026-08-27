@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "Bundled vocabulary for the iac-scan validator (contract requirement 3).",
+    "Kept in sync with contract/iac-scan.schema.json by scripts/check_repo.py.",
+    "",
+    "These are the SHAPES a security finding can take — the technologies this piece can read, and",
+    "the severity/status/category values Noru's own API publishes for a security finding. They are",
+    "not framework content: no control text, no guidance, no evidence-item list. What is already",
+    "open, which assets exist and which risks exist all come from the customer's organization at",
+    "scan time, never from this file. See contract/README.md, requirement 9.",
+    "",
+    "severity, status and category are the published enums for a Noru security finding. Their source",
+    "is the 'Security Findings' entry in the Canonical Values Reference of",
+    "https://api.noru.tech/llms.txt. Do not extend them here: a value this piece invents is a value",
+    "the API rejects at push time, which is the worst moment to find out."
+  ],
+  "technology": ["terraform", "cloudformation", "kubernetes", "github_actions", "gitlab_ci"],
+  "severity": ["critical", "high", "medium", "low"],
+  "finding_status": ["open", "in_progress", "resolved", "accepted", "false_positive"],
+  "category": [
+    "identity_access",
+    "vulnerability",
+    "configuration",
+    "compliance",
+    "endpoint_posture"
+  ],
+  "_status_horizon_days_comment": [
+    "How long an interpretation of a finding may stand, counted in days from the day the",
+    "configuration was observed. The anchor is observed_on and not decided_at on purpose: a finding",
+    "observed in March and signed in August is a claim about March's configuration, however recent",
+    "the signature is.",
+    "",
+    "An open or in-progress finding is a live observation that the next scan refreshes, so the",
+    "window is short. Accepting a misconfiguration, or calling it a false positive, is a human",
+    "decision to leave it in place — it gets a longer window, but never an unbounded one, because",
+    "an acceptance nobody revisits is how a known misconfiguration becomes permanent."
+  ],
+  "status_horizon_days": {
+    "open": 120,
+    "in_progress": 120,
+    "resolved": 120,
+    "accepted": 400,
+    "false_positive": 400
+  },
+  "queue_tools": ["getSecurityFindings", "getOrganizationAssets", "getOrganizationRisks"]
+}
