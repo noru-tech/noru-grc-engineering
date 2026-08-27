@@ -8,6 +8,22 @@ one version number; the release workflow fails if they disagree.
 
 ### Added
 
+- `privacy-datamap` carries over `references/classification-guide.md` from
+  `noru-tech/privacy-taxonomy` — the last thing in that repository the new piece still needed. The
+  skill and the `:scan` command had been pointing at it since it was written; the file was not
+  there. Every one of the 68 taxonomy keys it recommends was checked against the vendored snapshot
+  before it landed, since a guide that suggests a key the validator rejects is worse than no guide.
+
+  Rewritten for where it now sits: `classification.json` holds the names that mean the same thing in
+  every schema and the collector applies it mechanically, so the guide is only for the judgement
+  half — the names that need context (`name`, `id`, `role`, `title`, `notes`), the `data_use` and
+  `data_subjects` the collector cannot know, and where Article 9 data arrives without looking like
+  it (a free-text `reason` on a leave request, a `tags` array on a membership row).
+- `scripts/check_repo.py` fails when a piece's prose points at a `references/` file that does not
+  exist. The skill and the commands are instructions an agent follows literally: a missing guide
+  sends it looking, and the likeliest outcome is that it classifies without the guidance and never
+  mentions it could not find the file. This is how the gap above went unnoticed through three
+  changes.
 - `privacy-datamap` renders `.fides/datamap.yml`, the deliverable declared in its `outputs[]`, and
   gets its skill and commands. The export is gated the way `audit-pack` gates its bundle: only ever
   written from a manifest whose `derived_digest` matches the repository as it stands right now. A
