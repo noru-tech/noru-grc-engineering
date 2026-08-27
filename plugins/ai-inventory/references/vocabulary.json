@@ -5,10 +5,17 @@
     "scripts/check_repo.py; if you change one, change both.",
     "",
     "What is deliberately NOT here: any framework control text or control identifier list.",
-    "ISO/IEC 42001 Annex A references are free text on purpose - this repository vendors no",
-    "standard's control catalogue (see contract/README.md, non-goals). EU AI Act roles and risk",
-    "tiers, and the four NIST AI RMF functions, are named in the public instruments themselves and",
-    "are enumerated here only so a typo gets a 'did you mean ...?' instead of landing in Noru."
+    "ISO/IEC 42001 references are free text on purpose - this repository vendors no standard's",
+    "control catalogue (see contract/README.md, non-goals). The EU AI Act roles, the Article 5(1)",
+    "practices, the Article 50 triggers, the Annex III areas and the four NIST AI RMF functions are",
+    "named in the public instruments themselves and are enumerated here only so that a typo gets a",
+    "'did you mean ...?' instead of landing in Noru.",
+    "",
+    "finding_categories is ordered, and the order carries meaning: prohibited practices have applied",
+    "since 2 February 2025 (Article 113(a)) and transparency since 2 August 2026 (Article 113),",
+    "while the obligations that follow from a risk tier apply from the later date each finding",
+    "states in enforceable_from. The validator rejects a manifest whose findings block is written",
+    "in another order."
   ],
   "deployment": [
     "hosted_api",
@@ -58,32 +65,82 @@
     "vendor_assertion",
     "unverified"
   ],
-  "classification_scheme": [
-    "eu_ai_act_role",
-    "eu_ai_act_tier",
-    "iso_42001",
-    "nist_ai_rmf"
+  "finding_categories": [
+    "prohibited_practices",
+    "transparency_obligations",
+    "role_and_risk",
+    "standards_alignment"
   ],
-  "classification_status": ["suggested", "accepted", "rejected"],
-  "classification_values": {
-    "eu_ai_act_role": [
-      "provider",
-      "deployer",
-      "importer",
-      "distributor",
-      "product_manufacturer",
-      "authorised_representative"
-    ],
-    "eu_ai_act_tier": [
-      "prohibited",
-      "high_risk",
-      "limited_risk",
-      "minimal_risk",
-      "gpai",
-      "gpai_systemic_risk"
-    ],
-    "nist_ai_rmf": ["govern", "map", "measure", "manage"]
+  "finding_status": ["suggested", "accepted", "rejected"],
+  "prohibited_practice": [
+    "subliminal_or_manipulative_techniques",
+    "exploitation_of_vulnerabilities",
+    "social_scoring",
+    "individual_crime_prediction",
+    "untargeted_facial_scraping",
+    "emotion_inference_workplace_or_education",
+    "sensitive_biometric_categorisation",
+    "realtime_remote_biometric_identification"
+  ],
+  "prohibited_practice_article": {
+    "subliminal_or_manipulative_techniques": "Article 5(1)(a)",
+    "exploitation_of_vulnerabilities": "Article 5(1)(b)",
+    "social_scoring": "Article 5(1)(c)",
+    "individual_crime_prediction": "Article 5(1)(d)",
+    "untargeted_facial_scraping": "Article 5(1)(e)",
+    "emotion_inference_workplace_or_education": "Article 5(1)(f)",
+    "sensitive_biometric_categorisation": "Article 5(1)(g)",
+    "realtime_remote_biometric_identification": "Article 5(1)(h)"
   },
-  "schemes_requiring_driver": ["eu_ai_act_role", "eu_ai_act_tier"],
+  "prohibited_determination": ["indicated", "needs_legal_review", "no_indication"],
+  "transparency_trigger": [
+    "direct_human_interaction",
+    "synthetic_content_generation",
+    "emotion_recognition",
+    "biometric_categorisation",
+    "deep_fake",
+    "public_interest_text"
+  ],
+  "required_action": [
+    "inform_natural_person",
+    "machine_readable_marking",
+    "disclose_artificial_content"
+  ],
+  "disclosure_state": ["present", "unclear", "absent"],
+  "eu_ai_act_role": [
+    "provider",
+    "deployer",
+    "importer",
+    "distributor",
+    "product_manufacturer",
+    "authorised_representative"
+  ],
+  "eu_ai_act_tier": [
+    "high_risk_annex_iii",
+    "high_risk_annex_i",
+    "not_high_risk",
+    "gpai",
+    "gpai_systemic_risk",
+    "undetermined"
+  ],
+  "annex_iii_area": [
+    "none",
+    "biometrics",
+    "critical_infrastructure",
+    "education_and_vocational_training",
+    "employment_and_worker_management",
+    "essential_services_access",
+    "law_enforcement",
+    "migration_asylum_border_control",
+    "justice_and_democratic_processes"
+  ],
+  "art_6_3_ground": [
+    "narrow_procedural_task",
+    "improves_prior_human_activity",
+    "detects_decision_patterns_without_replacing_human_review",
+    "preparatory_task"
+  ],
+  "standards_scheme": ["iso_42001", "nist_ai_rmf"],
+  "nist_ai_rmf_function": ["govern", "map", "measure", "manage"],
   "technical_claim_requires_expiry": true
 }

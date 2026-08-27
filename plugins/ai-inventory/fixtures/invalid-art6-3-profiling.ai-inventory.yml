@@ -1,0 +1,55 @@
+# Fixture: the not-high-risk conclusion drawn for a system that profiles natural persons. Article
+# 6(3) does not permit that, so a manifest asserting it is wrong on the text of the Regulation
+# rather than merely unattributed - and it is the kind of wrong a customer's counsel spots at once.
+# Expected: exit 1, "does not allow that conclusion".
+version: 0.1.0
+piece: ai-inventory
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: ai-inventory@0.1.0
+providers:
+  - key: example-llm
+    vendor_name: Example LLM Provider
+    refs:
+      - packages/inference/src/client.ts:12
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      rationale: Only model provider reachable from production code paths at this commit.
+ai_systems:
+  - key: support-assistant
+    name: Support chat assistant
+    purpose: Answers customer questions in a chat panel on the support site.
+    provider: example-llm
+    deployment: hosted_api
+    autonomy: assistive
+    refs:
+      - apps/support/src/chat/route.ts:33
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      expires_at: 2027-02-01
+      rationale: Read the chat route with the support engineering lead and confirmed the surface.
+findings:
+  role_and_risk:
+    - system: support-assistant
+      role: deployer
+      role_article: Article 3(4)
+      tier: not_high_risk
+      tier_article: Article 6(3)
+      annex_iii_area: essential_services_access
+      not_high_risk_assessment:
+        ground: narrow_procedural_task
+        profiling: true
+        article: Article 6(3)
+      enforceable_from: 2027-12-02
+      status: suggested
+      refs:
+        - apps/support/src/chat/route.ts:33
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-02
+        expires_at: 2027-02-02
+        rationale: The task looked narrow enough to us, so we took the derogation.

@@ -25,14 +25,16 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Noru AI Inventory",
-    "shortDescription": "Inventory the AI systems in this repository and land them in Noru.",
-    "longDescription": "Scans a repository for model and provider SDK usage, concrete model ids, agent and prompt definitions, retrieval sources, eval suites and human-oversight points, then produces a reviewable .noru/ai-inventory.yml. Every claim carries the file:line that produced it and a named owner. Pushes to Noru as assets, vendors and evidence with repository provenance.",
+    "shortDescription": "Inventory this repository's AI systems, and find the AI disclosures that are missing.",
+    "longDescription": "Scans a repository for model and provider SDK usage, concrete model ids, agent and prompt definitions, retrieval sources, eval suites and human-oversight points, then produces a reviewable .noru/ai-inventory.yml. Raises EU AI Act Article 5 prohibited-practice signals and Article 50 transparency triggers, and reports whether the disclosure or content marking each trigger requires is actually present in the code. Every claim carries the file:line that produced it and a named owner. Pushes to Noru as assets, vendors and evidence with repository provenance.",
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
       "Repository AI system discovery",
+      "EU AI Act Article 5 prohibited-practice screening",
+      "EU AI Act Article 50 triggers and missing-disclosure detection",
       "Model provider and retention claim provenance",
-      "EU AI Act and ISO 42001 classification suggestions",
+      "ISO 42001 and NIST AI RMF alignment suggestions",
       "Idempotent push to Noru assets, vendors and evidence"
     ],
     "websiteURL": "https://noru.tech",

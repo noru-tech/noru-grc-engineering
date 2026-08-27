@@ -1,0 +1,50 @@
+# Fixture: a risk tier with no date on it. Without `enforceable_from` a reader cannot tell a duty
+# that is live from one that is years away, and an undated tier next to a live Article 50 gap makes
+# the wrong half of the manifest look urgent.
+# Expected: exit 1, "missing required `enforceable_from`".
+version: 0.1.0
+piece: ai-inventory
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: ai-inventory@0.1.0
+providers:
+  - key: example-llm
+    vendor_name: Example LLM Provider
+    refs:
+      - packages/inference/src/client.ts:12
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      rationale: Only model provider reachable from production code paths at this commit.
+ai_systems:
+  - key: support-assistant
+    name: Support chat assistant
+    purpose: Answers customer questions in a chat panel on the support site.
+    provider: example-llm
+    deployment: hosted_api
+    autonomy: assistive
+    refs:
+      - apps/support/src/chat/route.ts:33
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      expires_at: 2027-02-01
+      rationale: Read the chat route with the support engineering lead and confirmed the surface.
+findings:
+  role_and_risk:
+    - system: support-assistant
+      role: deployer
+      role_article: Article 3(4)
+      tier: not_high_risk
+      tier_article: Article 6(2)
+      annex_iii_area: none
+      status: suggested
+      refs:
+        - apps/support/src/chat/route.ts:33
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-02
+        expires_at: 2027-02-02
+        rationale: Customer support falls in no Annex III area on the reading we took.

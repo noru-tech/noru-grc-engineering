@@ -10,6 +10,11 @@ Show what `/ai-inventory:push` would do, before it does it. This command perform
 Use only read scopes: `read:organization`, `read:frameworks`, `read:controls`, `read:evidence`,
 `read:assets`, `read:vendors`.
 
+`diff.mjs` prints any Article 5 finding and any missing or unresolved Article 50 disclosure above
+the plan, and repeats them in `--output=json` under `alerts`. Those are enforceable now; the plan
+below them is about landing them in Noru for someone to accept, not about resolving them. Repeat
+them to the user rather than summarising the plan over the top of them.
+
 ## 1. Validate, and emit the parsed manifest
 
 ```bash

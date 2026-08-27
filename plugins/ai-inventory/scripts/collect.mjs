@@ -102,6 +102,161 @@ const EVAL_DIR_RE = /(^|\/)(evals?|benchmarks?)(\/|$)/i;
 const EVAL_FILE_RE = /\.(eval|evals|bench)\.[cm]?[jt]sx?$|_eval\.py$|test_eval.*\.py$/i;
 const PROMPT_RE = /(^|\/)prompts?(\/|$)|\.prompt(\.|$)|system[-_ ]?prompt/i;
 
+// --- EU AI Act signals ------------------------------------------------------------------------
+//
+// Everything below finds *signals*, not conclusions. A grep hit is not a determination about a
+// customer's regulatory position, and the collector never writes one: signals reach the manifest as
+// findings marked `needs_review: true` with a TODO interpretation, which the validator rejects until
+// a person has decided them.
+//
+// Article 5(1) practices. Deliberately narrow — a false "you may be running a prohibited practice"
+// is expensive to deliver and expensive to withdraw. `also` means the line must match both patterns,
+// which is what keeps workplace emotion inference apart from the word "emotion" in a changelog.
+// Article 5(1)(b), exploitation of vulnerabilities, has no pattern here: it turns on who the users
+// are and what the system does to them, which is not visible in a line of code. It stays in the
+// vocabulary so a person can record it; it is simply not something this scan can raise.
+export const ART5_SIGNATURES = [
+  {
+    practice: "subliminal_or_manipulative_techniques",
+    article: "Article 5(1)(a)",
+    re: /\bsubliminal\b|\bmanipulat(?:e|es|ing|ive)[-_ ]?(?:user|users|behaviou?r)\b/i,
+  },
+  {
+    practice: "social_scoring",
+    article: "Article 5(1)(c)",
+    re: /\b(?:social|citizen|trustworthiness|reputation)[-_ ]?scor(?:e|es|ing)\b/i,
+  },
+  {
+    practice: "individual_crime_prediction",
+    article: "Article 5(1)(d)",
+    re: /\bpredictive[-_ ]?policing\b|\b(?:crime|criminal|recidivism|reoffend(?:ing)?)[-_ ]?(?:predict(?:ion|or)?|risk[-_ ]?scor(?:e|ing))\b/i,
+  },
+  {
+    practice: "untargeted_facial_scraping",
+    article: "Article 5(1)(e)",
+    re: /\b(?:scrape|scraping|crawl|harvest)[-_ ]?(?:face|faces|facial)\b|\bfacial[-_ ]?recognition[-_ ]?(?:database|db|index)\b/i,
+  },
+  {
+    practice: "emotion_inference_workplace_or_education",
+    article: "Article 5(1)(f)",
+    re: /\b(?:emotion|affect|mood)[-_ ]?(?:recognition|detect(?:ion|or)?|infer(?:ence)?|analysis|scor(?:e|ing))\b/i,
+    // No trailing \b on the context tokens: real code writes `candidateVideo`, not `candidate`.
+    // `exam` keeps its boundary, because without one it matches `example` in every repository.
+    also: /\b(?:employees?|workers?|staff|workplace|candidates?|applicants?|interview|students?|pupils?|classroom|proctor)|\bexams?\b/i,
+  },
+  {
+    practice: "sensitive_biometric_categorisation",
+    article: "Article 5(1)(g)",
+    re: /\bbiometric|\bface[-_ ]?(?:attribute|classif|categor)/i,
+    also: /\brac(?:e|ial)|\bethnicit|\breligio(?:n|us)|\bsexual[-_ ]?orientation|\bsex[-_ ]?life|\bpolitical[-_ ]?(?:opinion|affiliation|view)|\btrade[-_ ]?union/i,
+  },
+  {
+    practice: "realtime_remote_biometric_identification",
+    article: "Article 5(1)(h)",
+    re: /\breal[-_ ]?time\b/i,
+    also: /\bremote[-_ ]?biometric|\blive[-_ ]?face[-_ ]?(?:match|recognition|identification)\b|\bpublic[-_ ]?space[-_ ]?(?:camera|surveillance)\b/i,
+  },
+];
+
+// Article 50 triggers, with the paragraph each one comes from and what that paragraph asks for.
+// Informing a person (50(1), 50(3)) and marking an output (50(2)) are different duties and one does
+// not satisfy the other, so the required action travels with the trigger rather than being inferred
+// later.
+export const ART50_TRIGGERS = [
+  {
+    trigger: "direct_human_interaction",
+    article: "Article 50(1)",
+    required_action: "inform_natural_person",
+    applies_to_role: "provider",
+    re: /\buse[-_]?chat\b|\bchat[-_ ]?(?:bot|widget|panel|window|session|thread|route|ui)\b|\bchatbot\b|\bvirtual[-_ ]?(?:assistant|agent)\b|\blive[-_ ]?chat\b|\bconversational[-_ ]?(?:ui|agent|interface)\b|["'`]\/api\/chat/i,
+  },
+  {
+    trigger: "synthetic_content_generation",
+    article: "Article 50(2)",
+    required_action: "machine_readable_marking",
+    applies_to_role: "provider",
+    re: /\bimages?\.generate\b|\bgenerate[-_]?image\b|\btext[-_ ]?to[-_ ]?(?:image|speech|video)\b|\bdall[-_ ]?e\b|\bstable[-_ ]?diffusion\b|\bspeech\.create\b|\belevenlabs\b|\bsynthesi[sz]e[-_ ]?(?:speech|voice|audio)\b|\bvideo[-_ ]?generat/i,
+  },
+  {
+    // Article 3(39) grounds emotion recognition in biometric data, so plain text sentiment analysis
+    // is deliberately not a trigger here. Requiring a biometric-input token on the same line is what
+    // keeps a sentiment score on a support ticket out of this category.
+    trigger: "emotion_recognition",
+    article: "Article 50(3)",
+    required_action: "inform_natural_person",
+    applies_to_role: "deployer",
+    re: /\b(?:emotion|affect|mood)[-_ ]?(?:recognition|detect(?:ion|or)?|infer(?:ence)?|analysis|scor(?:e|ing))\b/i,
+    also: /\b(?:face|facial|voice|speech|audio|video|webcam|camera|gaze|expression|biometric)/i,
+  },
+  {
+    trigger: "biometric_categorisation",
+    article: "Article 50(3)",
+    required_action: "inform_natural_person",
+    applies_to_role: "deployer",
+    re: /\bbiometric[-_ ]?(?:categor|classif|attribute)|\bface[-_ ]?(?:recognition|detect(?:ion|or)?|match|embedding)\b|\bface[-_]?api\b|\brekognition\b|\bvoice[-_ ]?print\b|\bspeaker[-_ ]?(?:id|identification|recognition)\b|\biris[-_ ]?scan\b|\bgait[-_ ]?analysis\b/i,
+  },
+  {
+    trigger: "deep_fake",
+    article: "Article 50(4)",
+    required_action: "disclose_artificial_content",
+    applies_to_role: "deployer",
+    re: /\bdeep[-_ ]?fake\b|\bface[-_ ]?swap\b|\bvoice[-_ ]?clon(?:e|ing)\b|\blip[-_ ]?sync\b/i,
+  },
+  {
+    // The weakest of the six by a distance: whether generated text is "published to inform the
+    // public on matters of public interest" is an editorial fact, not a code fact.
+    trigger: "public_interest_text",
+    article: "Article 50(4)",
+    required_action: "disclose_artificial_content",
+    applies_to_role: "deployer",
+    re: /\bauto[-_ ]?publish\b|\b(?:publish|post)[-_ ]?(?:article|story|news|release)\b/i,
+    also: /\b(?:generat(?:e|ed|ion)|llm|model|completion|prompt)\b/i,
+  },
+];
+
+// What a disclosure or a mark looks like in a repository.
+//
+// `user_disclosure` is text a person reads. The multilingual pattern is a concept-stem pair rather
+// than a phrase list: a synthetic-content token AND a generated-stem token on the same line. That
+// catches "detta svar är AI-genererat" and "généré par IA" without an unmaintainable phrase table,
+// and requiring both tokens keeps the very common bare "ai" from matching everything.
+//
+// `machine_readable_marking` is Article 50(2)'s different question: a mark that travels with the
+// artifact. A caption in the interface is not one.
+export const DISCLOSURE_SIGNATURES = [
+  {
+    kind: "user_disclosure",
+    re: /\bai[-_ ]?(?:disclosure|disclaimer|notice|banner|badge|label)\b|\b(?:is|was)[-_ ]?ai[-_ ]?generated\b|\bgenerated[-_ ]?by[-_ ]?ai\b/i,
+  },
+  {
+    kind: "user_disclosure",
+    re: /\bai[-_ ]?generated\b|\bgenerated (?:by|with|using) (?:ai|artificial intelligence)\b|\bartificially[-_ ]?generated\b|\bnot a (?:human|real person)\b|\byou(?:'re| are) (?:chatting|talking|speaking) (?:with|to) an? (?:ai|bot|assistant|automated)\b|\bthis is an ai\b|\bi(?:'m| am) an ai\b|\bautomated (?:assistant|response|reply)\b|\bpowered by ai\b/i,
+  },
+  {
+    // The multilingual rule, and the reason it is a stem pair rather than a phrase list: a notice
+    // is a notice in Swedish too, and nobody will maintain a table of every way to write one. Both
+    // tokens must be on the same line — bare "ai" matches half a codebase on its own.
+    //
+    // The stem endings are enumerated rather than left open (…[a-z]*) so that "general", "generic"
+    // and "generous" do not read as a disclosure. English generated, Swedish genererad/genererat,
+    // German generiert, Spanish generado, Italian generato, French généré.
+    kind: "user_disclosure",
+    re: /\b(?:ai|ia|ki|artificial|artificiell|artificielle|künstlich(?:e|er)?|kunstig)\b/i,
+    also: /\bg[eé]n[eé]r(?:at|er|ier|ad|é)[a-zà-ÿ]*\b|\bskapad\b|\berstellt\b/i,
+  },
+  {
+    kind: "machine_readable_marking",
+    re: /\bc2pa\b|\bcontent[-_ ]?credentials?\b|\bsynthid\b|\bdigitalsourcetype\b|\btrainedalgorithmicmedia\b|\bprovenance[-_ ]?manifest\b|\bx-ai-generated\b|\bx-generated-by\b/i,
+  },
+  {
+    // Weaker than the provenance standards above: a file named watermark.ts proves intent, not that
+    // every output path is marked. Recorded so a reviewer can look, not treated as settled.
+    kind: "machine_readable_marking",
+    re: /\b(?:invisible[-_ ]?)?watermark(?:ing)?\b|\bsteganograph(?:y|ic)\b/i,
+    weak: true,
+  },
+];
+
 function usage(stream = process.stderr) {
   stream.write(
     "usage: collect.mjs [--repo=<path>] [--check] [--output=json|text] [--quiet]\n"
@@ -191,6 +346,144 @@ function addHit(map, key, ref, extra) {
   return entry;
 }
 
+function matches(signature, line) {
+  if (!signature.re.test(line)) return false;
+  return signature.also ? signature.also.test(line) : true;
+}
+
+export function dirOf(rel) {
+  const cut = rel.lastIndexOf("/");
+  return cut === -1 ? "" : rel.slice(0, cut);
+}
+
+function fileOfRef(ref) {
+  return ref.slice(0, ref.lastIndexOf(":"));
+}
+
+/** Shared leading path segments — how "near" one file is to another, deterministically. */
+function sharedDepth(a, b) {
+  const left = a.split("/");
+  const right = b.split("/");
+  let i = 0;
+  while (i < left.length && i < right.length && left[i] === right[i]) i += 1;
+  return i;
+}
+
+/**
+ * Pair each Article 50 trigger with the disclosure evidence that would satisfy it, and say how far
+ * away that evidence is. This is the piece's highest-value output, so the rule it applies is written
+ * down rather than left implicit:
+ *
+ *   present  the required kind of signal is in the SAME FILE as the trigger — the code that runs
+ *            the model also emits the notice or the mark
+ *   unclear  a signal of the required kind exists in the same directory, or elsewhere in the repo,
+ *            but nothing in the scan ties it to this call site
+ *   absent   no signal of the required kind was found anywhere that was scanned
+ *
+ * `absent` never means "there is no disclosure". It means "not in the files this scan read", which
+ * is why every check carries `searched`: a notice rendered by a design system, a CMS, a mobile
+ * client or another repository is invisible from here, and the manifest has to say so.
+ */
+export function pairDisclosures(triggerHits, disclosureHits) {
+  const byKind = new Map();
+  for (const hit of disclosureHits) {
+    if (!byKind.has(hit.kind)) byKind.set(hit.kind, []);
+    byKind.get(hit.kind).push(hit);
+  }
+
+  const groups = new Map();
+  for (const hit of triggerHits) {
+    const file = fileOfRef(hit.ref);
+    const key = `${hit.trigger}\u0000${file}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        trigger: hit.trigger,
+        article: hit.article,
+        required_action: hit.required_action,
+        applies_to_role: hit.applies_to_role,
+        required_signal: hit.required_action === "machine_readable_marking"
+          ? "machine_readable_marking"
+          : "user_disclosure",
+        file,
+        trigger_refs: [],
+      });
+    }
+    const group = groups.get(key);
+    if (group.trigger_refs.length < 10) group.trigger_refs.push(hit.ref);
+  }
+
+  const checks = [];
+  for (const group of groups.values()) {
+    const candidates = byKind.get(group.required_signal) ?? [];
+    const dir = dirOf(group.file);
+    const sameFile = candidates.filter((c) => fileOfRef(c.ref) === group.file);
+    const sameDir = candidates.filter(
+      (c) => fileOfRef(c.ref) !== group.file && dirOf(fileOfRef(c.ref)) === dir
+    );
+    const elsewhere = candidates
+      .filter((c) => dirOf(fileOfRef(c.ref)) !== dir)
+      .slice()
+      .sort((a, b) => {
+        const near = sharedDepth(fileOfRef(b.ref), group.file) - sharedDepth(fileOfRef(a.ref), group.file);
+        if (near !== 0) return near;
+        return a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0;
+      })
+      .slice(0, 5);
+
+    let state = "absent";
+    let reason =
+      `no ${group.required_signal.replace(/_/g, " ")} signal was found anywhere that was scanned`;
+    let evidence = [];
+    if (sameFile.length > 0) {
+      state = "present";
+      evidence = sameFile.slice(0, 5).map((c) => c.ref);
+      reason = "a signal of the required kind is in the same file as the model call";
+    } else if (sameDir.length > 0) {
+      state = "unclear";
+      evidence = sameDir.slice(0, 5).map((c) => c.ref);
+      reason =
+        "a signal of the required kind is in the same directory but not in the file that calls the " +
+        "model, so nothing in the scan ties it to this surface";
+    } else if (elsewhere.length > 0) {
+      state = "unclear";
+      evidence = elsewhere.map((c) => c.ref);
+      reason =
+        "a signal of the required kind exists elsewhere in the repository, but nothing in the scan " +
+        "ties it to this surface";
+    }
+    if (sameFile.length > 0 && sameFile.every((c) => c.weak === true)) {
+      state = "unclear";
+      reason =
+        "the only signal found is a weak one (a watermarking or steganography reference), which " +
+        "shows intent rather than that every output path is marked";
+    }
+
+    checks.push({
+      trigger: group.trigger,
+      article: group.article,
+      required_action: group.required_action,
+      applies_to_role: group.applies_to_role,
+      required_signal: group.required_signal,
+      file: group.file,
+      trigger_refs: group.trigger_refs,
+      state,
+      reason,
+      evidence_refs: evidence,
+      searched: [
+        dir === "" ? "the repository root" : `${dir}/`,
+        `the whole repository, for ${group.required_signal.replace(/_/g, " ")} signals`,
+      ],
+    });
+  }
+
+  return checks.sort((a, b) => {
+    const key = (c) => `${c.state}\u0000${c.trigger}\u0000${c.file}`;
+    const ka = key(a);
+    const kb = key(b);
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
+}
+
 export function scanRepository(repo) {
   const files = walk(repo);
   const providers = new Map();
@@ -199,6 +492,9 @@ export function scanRepository(repo) {
   const models = new Map();
   const claims = [];
   const oversight = [];
+  const art5 = [];
+  const art50 = [];
+  const disclosures = [];
   const evalSuites = new Map();
   const promptFiles = [];
   const ciFiles = [];
@@ -256,6 +552,39 @@ export function scanRepository(repo) {
           oversight.push({ type: pattern.type, ref, excerpt: line.trim().slice(0, 160) });
         }
       }
+
+      for (const signature of ART5_SIGNATURES) {
+        if (matches(signature, line)) {
+          art5.push({
+            practice: signature.practice,
+            article: signature.article,
+            ref,
+            excerpt: line.trim().slice(0, 160),
+          });
+        }
+      }
+      for (const signature of ART50_TRIGGERS) {
+        if (matches(signature, line)) {
+          art50.push({
+            trigger: signature.trigger,
+            article: signature.article,
+            required_action: signature.required_action,
+            applies_to_role: signature.applies_to_role,
+            ref,
+            excerpt: line.trim().slice(0, 160),
+          });
+        }
+      }
+      for (const signature of DISCLOSURE_SIGNATURES) {
+        if (matches(signature, line)) {
+          disclosures.push({
+            kind: signature.kind,
+            weak: signature.weak === true,
+            ref,
+            excerpt: line.trim().slice(0, 160),
+          });
+        }
+      }
     }
   }
 
@@ -295,6 +624,10 @@ export function scanRepository(repo) {
       .slice(0, limit);
   };
 
+  const art5Signals = capped(art5, 100);
+  const art50Triggers = capped(art50, 200);
+  const disclosureSignals = capped(disclosures, 200);
+
   return {
     piece: PIECE,
     generated_by: GENERATED_BY,
@@ -309,6 +642,13 @@ export function scanRepository(repo) {
     evals_ci_refs: ciRefs,
     claim_sites: capped(claims, 200),
     oversight_sites: capped(oversight, 200),
+    // The Article 5 screen ran. An empty list is the answer, not silence — and it is only ever an
+    // answer about the practices ART5_SIGNATURES can see.
+    art5_screened: ART5_SIGNATURES.map((s) => s.practice).sort(),
+    art5_signals: art5Signals,
+    art50_triggers: art50Triggers,
+    disclosure_signals: disclosureSignals,
+    art50_disclosure_checks: pairDisclosures(art50Triggers, disclosureSignals).slice(0, 100),
   };
 }
 
@@ -409,7 +749,99 @@ export function buildSkeleton(derived, provenance) {
     source: { ...provenance, derived_digest: digestOf(derived) },
     providers,
     ai_systems: systems,
-    classifications: [],
+    findings: buildSkeletonFindings(derived, systems, todo),
+  };
+}
+
+/**
+ * The system a signal most likely belongs to, by file and then by directory. A guess, which is why
+ * every finding the skeleton writes carries needs_review: true — the validator refuses to push a
+ * manifest that still has one.
+ */
+function systemForRef(systems, ref) {
+  if (systems.length === 0) return null;
+  const file = ref.slice(0, ref.lastIndexOf(":"));
+  const inFile = systems.find((s) => (s.refs ?? []).some((r) => r.slice(0, r.lastIndexOf(":")) === file));
+  if (inFile) return inFile.key;
+  const dir = dirOf(file);
+  const inDir = systems.find((s) =>
+    (s.refs ?? []).some((r) => dirOf(r.slice(0, r.lastIndexOf(":"))) === dir)
+  );
+  return inDir ? inDir.key : systems[0].key;
+}
+
+/**
+ * Findings the collector proposes, in the fixed order the schema declares. Two rules it does not
+ * break:
+ *
+ *   * it never writes `determination: indicated`. A pattern match is a reason to look, not a finding
+ *     that a prohibited practice is running, and the difference is the whole reason this is a
+ *     suggestion rather than an assertion.
+ *   * it never writes an Article 50 trigger without the disclosure check that goes with it, because
+ *     a trigger on its own is the failure mode the category exists to prevent.
+ */
+export function buildSkeletonFindings(derived, systems, todo) {
+  const prohibited = [];
+  const seenArt5 = new Set();
+  for (const signal of derived.art5_signals ?? []) {
+    const system = systemForRef(systems, signal.ref);
+    if (!system) break;
+    const key = `${system} ${signal.practice}`;
+    if (seenArt5.has(key)) continue;
+    seenArt5.add(key);
+    prohibited.push({
+      system,
+      practice: signal.practice,
+      article: signal.article,
+      determination: "needs_legal_review",
+      action:
+        "TODO: say what happens next. Article 5 is a prohibition, so if this is confirmed the " +
+        "answer is to stop the practice, not to schedule remediation.",
+      status: "suggested",
+      needs_review: true,
+      refs: (derived.art5_signals ?? [])
+        .filter((s) => s.practice === signal.practice)
+        .slice(0, 5)
+        .map((s) => s.ref),
+      interpretation: { ...todo },
+    });
+  }
+
+  const transparency = [];
+  for (const check of derived.art50_disclosure_checks ?? []) {
+    const system = systemForRef(systems, check.trigger_refs[0]);
+    if (!system) break;
+    const disclosure = { state: check.state };
+    if (check.state === "present") {
+      disclosure.mechanism = `TODO: how the disclosure is produced. The scan found: ${check.reason}`;
+      disclosure.refs = check.evidence_refs;
+    } else {
+      disclosure.gap = `TODO: confirm and say what would close it. The scan found: ${check.reason}`;
+      if (check.state === "absent") disclosure.searched = check.searched;
+      else disclosure.refs = check.evidence_refs;
+    }
+    transparency.push({
+      system,
+      trigger: check.trigger,
+      article: check.article,
+      required_action: check.required_action,
+      applies_to_role: check.applies_to_role,
+      disclosure,
+      status: "suggested",
+      needs_review: true,
+      refs: check.trigger_refs,
+      interpretation: { ...todo },
+    });
+  }
+
+  // role_and_risk and standards_alignment are left empty on purpose: neither is derivable from a
+  // line of code, and a placeholder tier would be exactly the kind of unattributed legal claim this
+  // piece exists to avoid. The keys are still written, in order, so the shape is obvious.
+  return {
+    prohibited_practices: prohibited,
+    transparency_obligations: transparency,
+    role_and_risk: [],
+    standards_alignment: [],
   };
 }
 
@@ -424,6 +856,45 @@ const SKELETON_HEADER = `# .noru/ai-inventory.yml — generated by ${GENERATED_B
 #
 # Run:  python3 <plugin>/scripts/validate_manifest.py .noru/ai-inventory.yml
 `;
+
+/**
+ * The two things a reader must not scroll past, lifted out of the counts and printed above
+ * everything else. Both are enforceable now: Article 5 has applied since 2 February 2025 and
+ * Article 50 since 2 August 2026 (Article 113). Everything else the scan finds can wait for the
+ * manifest review; these two cannot be a row in a table.
+ */
+export function alertsFor(derived) {
+  const alerts = [];
+  const practices = [...new Set((derived.art5_signals ?? []).map((s) => s.practice))].sort();
+  for (const practice of practices) {
+    const first = derived.art5_signals.find((s) => s.practice === practice);
+    alerts.push({
+      severity: "review",
+      category: "prohibited_practices",
+      message:
+        `${first.article} ${practice}: the repository has something that looks like this practice ` +
+        `(${first.ref}). A pattern match is not a finding — but Article 5 is a prohibition, so ` +
+        "settle it before anything else in this scan.",
+    });
+  }
+  for (const check of derived.art50_disclosure_checks ?? []) {
+    if (check.state === "present") continue;
+    alerts.push({
+      severity: check.state === "absent" ? "gap" : "unresolved",
+      category: "transparency_obligations",
+      message:
+        `${check.article} ${check.trigger} at ${check.file}: the required ` +
+        `${check.required_action.replace(/_/g, " ")} is ${check.state} — ${check.reason}.`,
+    });
+  }
+  return alerts;
+}
+
+export function renderAlerts(alerts) {
+  if (alerts.length === 0) return [];
+  const rule = "=".repeat(96);
+  return [rule, ...alerts.map((a) => `  ${a.severity.toUpperCase()}: ${a.message}`), rule, ""];
+}
 
 function readManifestDigest(manifestPath) {
   if (!existsSync(manifestPath)) return null;
@@ -477,6 +948,7 @@ function main(argv) {
     return 2;
   }
 
+  const gaps = (derived.art50_disclosure_checks ?? []).filter((c) => c.state !== "present");
   const summary = {
     piece: PIECE,
     ok: !(opts.check && drift),
@@ -487,6 +959,7 @@ function main(argv) {
     drift,
     wrote_skeleton: wroteSkeleton,
     provenance,
+    alerts: alertsFor(derived),
     counts: {
       files_scanned: derived.files_scanned,
       providers: derived.providers.length,
@@ -496,6 +969,9 @@ function main(argv) {
       eval_suites: derived.eval_suites.length,
       claim_sites: derived.claim_sites.length,
       oversight_sites: derived.oversight_sites.length,
+      art5_signals: derived.art5_signals.length,
+      art50_triggers: derived.art50_disclosure_checks.length,
+      art50_disclosure_gaps: gaps.length,
     },
   };
 
@@ -504,6 +980,7 @@ function main(argv) {
   } else if (!opts.quiet) {
     process.stdout.write(
       [
+        ...renderAlerts(summary.alerts),
         `scanned ${derived.files_scanned} file(s) in ${opts.repo}`,
         `providers:      ${derived.providers.map((p) => p.key).join(", ") || "(none)"}`,
         `frameworks:     ${derived.frameworks.map((f) => f.key).join(", ") || "(none)"}`,
@@ -512,6 +989,13 @@ function main(argv) {
         `eval suites:    ${derived.eval_suites.length} (CI gated: ${derived.evals_ci_gated})`,
         `claim sites:    ${derived.claim_sites.length}`,
         `oversight:      ${derived.oversight_sites.length}`,
+        // Printed whether or not anything was found. "The Article 5 screen ran and found nothing"
+        // is a different statement from silence, and only one of them is worth anything to a
+        // reader who wants to know the check exists.
+        `Art. 5 screen:  ${derived.art5_signals.length} signal(s) across ` +
+          `${derived.art5_screened.length} screened practice(s)`,
+        `Art. 50:        ${derived.art50_disclosure_checks.length} trigger site(s), ` +
+          `${gaps.length} with the required disclosure absent or unclear`,
         `derived facts:  ${summary.derived_facts}`,
         wroteSkeleton ? `wrote skeleton: ${summary.manifest}` : "",
         drift ? "DRIFT: the manifest does not match the repository as it is now" : "",

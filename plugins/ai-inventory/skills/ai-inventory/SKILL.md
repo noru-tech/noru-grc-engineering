@@ -1,7 +1,7 @@
 ---
 name: ai-inventory
 version: 0.1.0
-description: Inventory the AI systems a repository actually contains — model and provider SDK calls, concrete model ids, agents and prompts, retrieval sources, eval suites, human-oversight points and provider retention claims — into a reviewable .noru/ai-inventory.yml, then land it in Noru as assets, vendors and evidence. Use when the user asks for an AI system inventory, an AI register, ISO 42001 or EU AI Act readiness, or which models and providers this codebase calls.
+description: Inventory the AI systems a repository actually contains — model and provider SDK calls, concrete model ids, agents and prompts, retrieval sources, eval suites, human-oversight points and provider retention claims — into a reviewable .noru/ai-inventory.yml, then land it in Noru as assets, vendors and evidence. Raises EU AI Act Article 5 prohibited-practice signals and Article 50 transparency triggers, and reports whether the disclosure or content marking each trigger requires is actually present in the code. Use when the user asks for an AI system inventory, an AI register, ISO 42001 or EU AI Act readiness, whether their AI disclosures are in place, or which models and providers this codebase calls.
 requires:
   bins: ["node", "python3", "git"]
 ---
@@ -42,7 +42,7 @@ regenerate over someone's attributed claims.
 **A system is not a provider.** One provider often serves several systems; one system sometimes uses
 several providers. Model the systems, then the providers they call.
 
-**Autonomy drives the classification.** `assistive` (a person acts on the output), `supervised` (the
+**Autonomy drives the findings.** `assistive` (a person acts on the output), `supervised` (the
 system acts, a person approves first), `autonomous` (no person in the loop). Get it from the code
 path, not from the README.
 
@@ -55,17 +55,64 @@ a vendor claim as the vendor's word with the URL and the date you read it. Never
 assertion into a configuration. Noru has been bitten once by an unverified provider zero-retention
 claim; this field exists because of that.
 
-## Classification is a suggestion, always
+## Findings are suggestions, always — and they are ordered
 
-EU AI Act role and tier, ISO 42001 references, NIST AI RMF tags land as `status: suggested` with:
+`findings` has four categories, written in this order, because the order is what tells a reader
+which obligation is live:
 
-- the `driver` — the provision that produces the value, e.g. `Article 50(1)`
-- `refs[]` — the repository lines that produced it
-- an `interpretation` block with a named owner and an expiry
+1. **`prohibited_practices`** — Article 5(1), applicable since 2 February 2025. The only category
+   where the correct finding is *stop*, not *document*. Never write `determination: indicated` on
+   the strength of a pattern match; the collector proposes `needs_legal_review` and a person
+   decides. Record `no_indication` for practices you screened and cleared — "the screen ran and
+   found nothing" is worth recording, silence is not.
+2. **`transparency_obligations`** — Article 50, applicable since 2 August 2026. **The trigger is not
+   the finding.** The finding is whether the disclosure or marking the paragraph requires is
+   actually in the code. This is the most valuable thing this piece produces today.
+3. **`role_and_risk`** — role, tier, Annex III screening, and the Article 6(3) assessment where the
+   conclusion is not-high-risk. Real, and not the headline: every entry states `enforceable_from`,
+   the date its obligations start to apply, so it is not read as urgent next to the two above it.
+4. **`standards_alignment`** — ISO/IEC 42001 references and NIST AI RMF function tags.
 
-Never emit `accepted`. These are legal-adjacent claims about a customer's regulatory position; a
-human decides in Noru. If the evidence does not support a tier, leave the classification out rather
-than guessing at one.
+Every finding carries the article that drives it, the `refs[]` that produced it, and an
+`interpretation` block with a named owner and an expiry. Never emit `accepted`. These are
+legal-adjacent claims about a customer's regulatory position; a human decides in Noru. If the
+evidence does not support a finding, leave it out rather than guessing at one.
+
+**Do not tell the user the AI Act requires an AI register.** It does not — see the piece README.
+Articles 49 and 71 are registration into a public Commission database by providers of Annex III
+high-risk systems and by public-authority deployers. The defensible claim is that you cannot
+determine your obligations without knowing what you run, and that ISO/IEC 42001 is what expects the
+documented inventory.
+
+## The Article 50 disclosure check
+
+For every trigger, answer the second question too:
+
+| Trigger | Article | What it requires |
+|---|---|---|
+| `direct_human_interaction` | 50(1) | inform the person that they are interacting with an AI system |
+| `synthetic_content_generation` | 50(2) | mark the output in a machine-readable format |
+| `emotion_recognition` | 50(3) | inform the people exposed to it |
+| `biometric_categorisation` | 50(3) | inform the people exposed to it |
+| `deep_fake` | 50(4) | disclose that the content is artificially generated or manipulated |
+| `public_interest_text` | 50(4) | disclose, subject to the editorial-responsibility carve-out |
+
+Then set `disclosure.state`: `present` (the code that runs the model also emits the notice or the
+mark), `unclear` (something disclosure-shaped exists but nothing ties it to this surface), `absent`.
+
+Three rules that keep this honest:
+
+- **You may not call a disclosure absent without saying where you looked.** `searched` is required
+  for `absent`, because a notice rendered by a design system, a CMS, a mobile client or another
+  repository is invisible from here. Ask the user before settling an `absent`.
+- **A visible label is not a machine-readable mark.** Article 50(2) is about the artifact, not the
+  interface. Do not accept a caption as satisfying it.
+- **Emotion recognition is grounded in biometric data** (Art. 3(39)). Text sentiment analysis is not
+  an emotion recognition system. Do not raise it as one.
+
+`present` is not the end of it either: Article 50(5) wants the information given clearly and
+distinguishably at the latest at the time of the first interaction or exposure, and a string in the
+repository does not prove that. Say so in the rationale rather than implying the question is closed.
 
 ## Where it lands
 
@@ -85,7 +132,7 @@ of the same system. Renaming a key creates a second asset.
 
 ## The rule that makes this worth trusting
 
-Every system, provider, provider claim and classification carries `refs[]` and a complete
+Every system, provider, provider claim and finding carries `refs[]` and a complete
 `interpretation` block: `owner` (a person, not a team alias), `decided_at`, `expires_at` (required
 for technical claims), `rationale`. Ask the user who the owner is. Do not use the git author as a
 proxy for a decision they did not make.

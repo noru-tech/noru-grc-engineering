@@ -1,5 +1,11 @@
 # Fixture: a complete, attributed AI inventory. The validator must exit 0 on this file.
 # Everything here is invented for the test; no customer data, no real credentials, no catalogue ids.
+#
+# It is also the worked example of the findings block, which is ordered on purpose:
+#   1. prohibited_practices        Article 5, applicable since 2 February 2025
+#   2. transparency_obligations    Article 50, applicable since 2 August 2026
+#   3. role_and_risk               obligations apply from the date each finding states
+#   4. standards_alignment         ISO/IEC 42001 and NIST AI RMF
 version: 0.1.0
 piece: ai-inventory
 source:
@@ -119,45 +125,154 @@ ai_systems:
       rationale: >
         Walked the triage path end to end with the support engineering lead and confirmed the
         approval gate is the only way an urgent routing reaches a customer.
-classifications:
-  - system: support-triage
-    scheme: eu_ai_act_role
-    value: deployer
-    driver: Article 3(4)
-    status: suggested
+  - key: shift-scheduler
+    name: Shift swap assistant
+    purpose: >
+      Answers employee questions about shift swaps in a chat panel and proposes a swap the roster
+      owner then approves.
+    provider: example-llm
+    models:
+      - gpt-5-mini
+    deployment: hosted_api
+    autonomy: assistive
+    human_oversight:
+      - type: human_approval_gate
+        description: The roster owner approves every proposed swap before it takes effect.
+        refs:
+          - apps/roster/src/swap/approval.ts:52
+    inputs:
+      description: The employee's question and their own roster entries.
+      data_categories:
+        - user.contact.email
+      refs:
+        - apps/roster/src/swap/chat-route.ts:24
+    outputs:
+      description: A chat reply and a proposed swap awaiting approval.
+      refs:
+        - apps/roster/src/swap/chat-route.ts:61
+    evals:
+      suites: []
+      ci_gated: false
+    data_categories:
+      - user.contact.email
     refs:
-      - apps/support/src/triage/handler.ts:41
-    interpretation:
-      owner: sam.okafor@example.com
-      decided_at: 2026-08-02
-      expires_at: 2027-02-02
-      rationale: >
-        We use a third-party model under our own authority rather than placing a system on the
-        market, which is the deployer role; suggested for legal review, not asserted.
-  - system: support-triage
-    scheme: eu_ai_act_tier
-    value: limited_risk
-    driver: Article 50(1)
-    status: suggested
-    refs:
-      - apps/support/src/triage/review-queue.ts:88
-    interpretation:
-      owner: sam.okafor@example.com
-      decided_at: 2026-08-02
-      expires_at: 2027-02-02
-      rationale: >
-        No decision reaches a person without a human approval step and the system does not fall in
-        an Annex III area, so the transparency obligations look like the operative ones.
-  - system: support-triage
-    scheme: nist_ai_rmf
-    value: measure
-    status: suggested
-    refs:
-      - .github/workflows/evals.yml:19
+      - apps/roster/src/swap/chat-route.ts:24
+      - apps/roster/src/swap/chat-route.ts:61
     interpretation:
       owner: dana.reed@example.com
       decided_at: 2026-08-02
       expires_at: 2027-02-02
       rationale: >
-        CI-gated evals are the measurable half of this system's governance; tagged so the gap in
-        the other three functions is visible.
+        Read the chat route with the roster team; the model never writes to the roster directly and
+        every proposal stops at the approval step.
+findings:
+  prohibited_practices:
+    - system: shift-scheduler
+      practice: emotion_inference_workplace_or_education
+      article: Article 5(1)(f)
+      determination: no_indication
+      status: suggested
+      refs:
+        - apps/roster/src/swap/chat-route.ts:24
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-02
+        expires_at: 2027-02-02
+        rationale: >
+          Screened because this is a workplace tool. It reads roster entries and free text, takes no
+          biometric input and infers no emotional state, so the screen ran and found nothing. Recorded
+          rather than left silent so the next reader knows the question was asked.
+    - system: support-triage
+      practice: social_scoring
+      article: Article 5(1)(c)
+      determination: no_indication
+      status: suggested
+      refs:
+        - apps/support/src/triage/handler.ts:41
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-02
+        expires_at: 2027-02-02
+        rationale: >
+          The urgency score applies to a ticket, not to a person, and is not carried across contexts,
+          so the screen found nothing to review.
+  transparency_obligations:
+    - system: shift-scheduler
+      trigger: direct_human_interaction
+      article: Article 50(1)
+      required_action: inform_natural_person
+      applies_to_role: deployer
+      disclosure:
+        state: present
+        mechanism: >
+          The chat panel renders a fixed first message identifying the assistant as AI before any
+          input is accepted, from the same component that mounts the model call.
+        refs:
+          - apps/roster/src/swap/ChatPanel.tsx:31
+          - apps/roster/src/locales/en.json:214
+      status: suggested
+      refs:
+        - apps/roster/src/swap/chat-route.ts:24
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-02
+        expires_at: 2027-02-02
+        rationale: >
+          Employees type into this panel and read what the model writes back, so Article 50(1) is in
+          play. The notice is rendered before the first exchange rather than in a help page, which is
+          what Article 50(5) asks for. Re-check when the panel is restyled.
+  role_and_risk:
+    - system: shift-scheduler
+      role: deployer
+      role_article: Article 3(4)
+      tier: not_high_risk
+      tier_article: Article 6(3)
+      annex_iii_area: employment_and_worker_management
+      not_high_risk_assessment:
+        ground: narrow_procedural_task
+        profiling: false
+        article: Article 6(3)
+        refs:
+          - apps/roster/src/swap/approval.ts:52
+      enforceable_from: 2027-12-02
+      status: suggested
+      refs:
+        - apps/roster/src/swap/chat-route.ts:24
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-02
+        expires_at: 2027-02-02
+        rationale: >
+          Task allocation between employees is an Annex III area, so the derogation has to be argued
+          rather than assumed. It matches a shift proposal to a rule the roster team already applies
+          by hand and stops at their approval, and it builds no profile of anyone. Suggested for
+          counsel; check the applicable date against the current text of the Regulation before
+          treating this as due.
+  standards_alignment:
+    - system: support-triage
+      scheme: nist_ai_rmf
+      value: measure
+      status: suggested
+      refs:
+        - .github/workflows/evals.yml:19
+      interpretation:
+        owner: dana.reed@example.com
+        decided_at: 2026-08-02
+        expires_at: 2027-02-02
+        rationale: >
+          CI-gated evals are the measurable half of this system's governance; tagged so the gap in
+          the other three functions is visible.
+    - system: shift-scheduler
+      scheme: iso_42001
+      value: Documented AI system information and human oversight point
+      reference: See the management system clause on operational planning and control.
+      status: suggested
+      refs:
+        - apps/roster/src/swap/approval.ts:52
+      interpretation:
+        owner: dana.reed@example.com
+        decided_at: 2026-08-02
+        expires_at: 2027-02-02
+        rationale: >
+          The approval step is the oversight the management system expects to see documented; the
+          clause reference is a citation only, since no standard text is carried in this repository.

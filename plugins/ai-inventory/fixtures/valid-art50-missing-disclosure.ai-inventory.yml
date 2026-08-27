@@ -1,0 +1,124 @@
+# Fixture: the case this piece exists to catch. The scan found the generation call AND found that
+# nothing marks the output, so the manifest records the gap rather than a label saying "Article 50
+# applies". A missing disclosure is a finding, not a validation error: the validator must exit 0
+# here and the gap must reach a human in Noru.
+#
+# Note `searched`. It is required whenever a disclosure is called absent, because a notice rendered
+# by a design system, a CMS, a mobile client or another repository is invisible to a repository
+# scan. Saying where the check looked is the difference between a gap and a wrong accusation.
+version: 0.1.0
+piece: ai-inventory
+source:
+  slug: example-org/example-studio
+  commit_sha: 91b0c2d4e6f8a13579bdce024681357999aacbdd
+  branch: main
+  generated_by: ai-inventory@0.1.0
+providers:
+  - key: example-image
+    vendor_name: Example Image Provider
+    category: software_as_a_service
+    refs:
+      - apps/studio/src/compose/client.ts:9
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-20
+      rationale: The only image generation provider reachable from the studio at this commit.
+ai_systems:
+  - key: image-composer
+    name: Campaign image composer
+    purpose: Generates campaign images from a brief a marketer writes, for publication on the site.
+    provider: example-image
+    models:
+      - example-diffusion-2
+    deployment: hosted_api
+    autonomy: assistive
+    human_oversight:
+      - type: human_review_before_action
+        description: A marketer picks one of the generated images before anything is published.
+        refs:
+          - apps/studio/src/compose/review.tsx:44
+    outputs:
+      description: A PNG written to the asset bucket and referenced from a campaign page.
+      refs:
+        - apps/studio/src/compose/generate.ts:63
+    evals:
+      suites: []
+      ci_gated: false
+    refs:
+      - apps/studio/src/compose/generate.ts:38
+      - apps/studio/src/compose/generate.ts:63
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-20
+      expires_at: 2027-02-20
+      rationale: >
+        Read the compose path with the studio team: the brief goes to the provider, the returned
+        image is written straight to the bucket, and a marketer picks one to publish.
+findings:
+  prohibited_practices:
+    - system: image-composer
+      practice: subliminal_or_manipulative_techniques
+      article: Article 5(1)(a)
+      determination: no_indication
+      status: suggested
+      refs:
+        - apps/studio/src/compose/generate.ts:38
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-20
+        expires_at: 2027-02-20
+        rationale: >
+          Screened because the output is persuasive marketing material. The prompt path carries no
+          technique aimed at distorting behaviour beyond a person's awareness, so the screen ran and
+          found nothing.
+  transparency_obligations:
+    - system: image-composer
+      trigger: synthetic_content_generation
+      article: Article 50(2)
+      required_action: machine_readable_marking
+      applies_to_role: provider
+      disclosure:
+        state: absent
+        gap: >
+          The generated image is written to the bucket exactly as the provider returned it. Nothing
+          in this repository attaches a machine-readable marking to the artifact, and no provenance
+          metadata is written alongside it. Closing this means marking the output where it is
+          persisted, not adding a caption in the interface: a visible label is not a machine-readable
+          mark and does not stand in for one.
+        searched:
+          - apps/studio/src/compose/
+          - apps/studio/src/lib/storage/
+          - apps/studio/src/locales/
+          - the whole repository, for content-provenance and watermarking libraries
+      status: suggested
+      refs:
+        - apps/studio/src/compose/generate.ts:38
+        - apps/studio/src/compose/generate.ts:63
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-20
+        expires_at: 2027-02-20
+        rationale: >
+          The system generates synthetic image content, so Article 50(2) is in play and is applicable
+          now rather than later. The gap is what matters here: the scan can see the generation call
+          and can see that nothing marks the artifact, but it cannot see a marking applied outside
+          this repository. Confirm with the studio team before treating the gap as settled.
+  role_and_risk:
+    - system: image-composer
+      role: deployer
+      role_article: Article 3(4)
+      tier: not_high_risk
+      tier_article: Article 6(2)
+      annex_iii_area: none
+      enforceable_from: 2027-12-02
+      status: suggested
+      refs:
+        - apps/studio/src/compose/generate.ts:38
+      interpretation:
+        owner: sam.okafor@example.com
+        decided_at: 2026-08-20
+        expires_at: 2027-02-20
+        rationale: >
+          Campaign imagery falls in no Annex III area, so the high-risk regime is not the operative
+          question for this system. Recorded with its own date so it is not read as urgent next to
+          the Article 50 gap above, which is not in the future.

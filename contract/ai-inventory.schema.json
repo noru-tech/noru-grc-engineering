@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/ai-inventory.schema.json",
   "title": "Noru AI system inventory manifest (.noru/ai-inventory.yml)",
-  "description": "A reviewable, git-committable inventory of the AI systems a repository contains, the model providers it calls, and the classification suggestions those two produce. Every claim carries the repository evidence that produced it (refs) and the human who stands behind it (interpretation). Enforced by plugins/ai-inventory/scripts/validate_manifest.py.",
+  "description": "A reviewable, git-committable inventory of the AI systems a repository contains, the model providers it calls, and the findings those two produce. Every finding carries the repository evidence that produced it (refs) and the human who stands behind it (interpretation). Enforced by plugins/ai-inventory/scripts/validate_manifest.py.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "piece", "source", "ai_systems"],
   "properties": {
     "version": {
-      "description": "Manifest format version. Matches contract_version of the piece that wrote it.",
+      "description": "Manifest format version, written by the piece that produced the derived section.",
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+$"
     },
@@ -22,11 +22,7 @@
       "type": "array",
       "items": { "$ref": "#/$defs/provider" }
     },
-    "classifications": {
-      "description": "Regulatory and standards classification. Always suggestions with citations, never silent assertions: they land in Noru for a human to accept or reject.",
-      "type": "array",
-      "items": { "$ref": "#/$defs/classification" }
-    }
+    "findings": { "$ref": "#/$defs/findings" }
   },
   "$defs": {
     "source": {
@@ -317,7 +313,277 @@
         }
       }
     },
-    "classification": {
+    "findingStatus": {
+      "description": "Always starts as suggested. A human moves it to accepted or rejected; the piece never sets those itself.",
+      "enum": ["suggested", "accepted", "rejected"]
+    },
+    "needsReview": {
+      "description": "Set by the collector on a finding it proposed but could not decide. A manifest is not ready to push while this is true.",
+      "type": "boolean"
+    },
+    "articleRef": {
+      "description": "The provision that drives this finding, cited as it appears in the instrument, for example 'Article 50(1)'. Free text within a shape: this repository bundles no framework control text, only the citation.",
+      "type": "string",
+      "pattern": "^Article \\d+(\\([0-9a-z]+\\))*$"
+    },
+    "findings": {
+      "description": "Findings, in the order a reader should work them. The order is the point: 1) prohibited practices, applicable since 2 February 2025 (Article 113(a)), where the answer is stop rather than document; 2) transparency obligations, applicable since 2 August 2026 (Article 113), and the only category whose gap a repository scan can see directly; 3) role and risk tier, whose obligations apply from a later date the finding must state; 4) management-system and framework alignment. Every entry is a suggestion with citations for a human to accept or reject in Noru, never an assertion.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prohibited_practices": {
+          "description": "Article 5. Rare, and the only category where the correct outcome is to stop, not to document.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/prohibitedPracticeFinding" }
+        },
+        "transparency_obligations": {
+          "description": "Article 50. A trigger alone is not the finding: the finding is whether the required disclosure or content marking is actually present.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/transparencyFinding" }
+        },
+        "role_and_risk": {
+          "description": "Role under the Regulation and risk tier. Kept, but not led with: its obligations apply from the date each finding states in enforceable_from.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/roleAndRiskFinding" }
+        },
+        "standards_alignment": {
+          "description": "ISO/IEC 42001 references and NIST AI RMF function tags.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/standardsFinding" }
+        }
+      }
+    },
+    "prohibitedPracticeFinding": {
+      "description": "One Article 5(1) practice, screened against one AI system. `determination: no_indication` is a legitimate and useful finding: it records that the screen ran rather than leaving silence.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "system",
+        "practice",
+        "article",
+        "determination",
+        "status",
+        "refs",
+        "interpretation"
+      ],
+      "properties": {
+        "system": {
+          "description": "key of an entry in ai_systems[].",
+          "type": "string"
+        },
+        "practice": {
+          "description": "The practice screened for, named after the point of Article 5(1) it comes from.",
+          "enum": [
+            "subliminal_or_manipulative_techniques",
+            "exploitation_of_vulnerabilities",
+            "social_scoring",
+            "individual_crime_prediction",
+            "untargeted_facial_scraping",
+            "emotion_inference_workplace_or_education",
+            "sensitive_biometric_categorisation",
+            "realtime_remote_biometric_identification"
+          ]
+        },
+        "article": {
+          "description": "The point of Article 5(1) the practice comes from, for example 'Article 5(1)(f)'.",
+          "type": "string",
+          "pattern": "^Article 5\\(1\\)\\([a-h]\\)$"
+        },
+        "determination": {
+          "description": "indicated = the repository shows something that looks like this practice and the system must stop until counsel says otherwise. needs_legal_review = a signal was found and it is genuinely unclear. no_indication = the screen ran and found nothing.",
+          "enum": ["indicated", "needs_legal_review", "no_indication"]
+        },
+        "action": {
+          "description": "What happens next. Required unless the determination is no_indication, because 'stop' is an instruction and an instruction needs an addressee.",
+          "type": "string",
+          "minLength": 10
+        },
+        "status": { "$ref": "#/$defs/findingStatus" },
+        "needs_review": { "$ref": "#/$defs/needsReview" },
+        "refs": { "$ref": "#/$defs/refs" },
+        "interpretation": { "$ref": "#/$defs/interpretation" }
+      }
+    },
+    "transparencyFinding": {
+      "description": "One Article 50 trigger, plus the thing that is actually enforceable: whether the disclosure or marking the trigger requires is present in the code.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "system",
+        "trigger",
+        "article",
+        "required_action",
+        "disclosure",
+        "status",
+        "refs",
+        "interpretation"
+      ],
+      "properties": {
+        "system": {
+          "description": "key of an entry in ai_systems[].",
+          "type": "string"
+        },
+        "trigger": {
+          "description": "What brings the system inside Article 50. emotion_recognition and biometric_categorisation are the Regulation's defined terms, which are grounded in biometric data — sentiment analysis of text is not one of them.",
+          "enum": [
+            "direct_human_interaction",
+            "synthetic_content_generation",
+            "emotion_recognition",
+            "biometric_categorisation",
+            "deep_fake",
+            "public_interest_text"
+          ]
+        },
+        "article": { "$ref": "#/$defs/articleRef" },
+        "required_action": {
+          "description": "What the cited paragraph requires. Marking under Article 50(2) is machine-readable and about the output; informing under Article 50(1) and 50(3) is about the person. A visible label is not a machine-readable mark, and the two are not interchangeable.",
+          "enum": [
+            "inform_natural_person",
+            "machine_readable_marking",
+            "disclose_artificial_content"
+          ]
+        },
+        "applies_to_role": {
+          "description": "Which role the cited paragraph puts the duty on.",
+          "enum": ["provider", "deployer"]
+        },
+        "disclosure": { "$ref": "#/$defs/disclosureCheck" },
+        "status": { "$ref": "#/$defs/findingStatus" },
+        "needs_review": { "$ref": "#/$defs/needsReview" },
+        "refs": { "$ref": "#/$defs/refs" },
+        "interpretation": { "$ref": "#/$defs/interpretation" }
+      }
+    },
+    "disclosureCheck": {
+      "description": "Whether the required disclosure or marking is present. This is the piece's highest-value output and the reason an Article 50 finding is not just a label.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": {
+          "description": "present = the code that runs the model also emits the disclosure or the mark. unclear = something that looks like a disclosure exists somewhere, but nothing ties it to this surface. absent = nothing was found in the places listed under searched.",
+          "enum": ["present", "unclear", "absent"]
+        },
+        "mechanism": {
+          "description": "How the disclosure or mark is produced, in a sentence. Required when the state is present.",
+          "type": "string",
+          "minLength": 5
+        },
+        "gap": {
+          "description": "What is missing, and what would close it. Required when the state is absent or unclear.",
+          "type": "string",
+          "minLength": 10
+        },
+        "searched": {
+          "description": "Where the check looked. Required when the state is absent, because 'absent' is only ever absent from somewhere: a disclosure rendered by a design system, a CMS, a mobile client or another repository is invisible to a repository scan, and saying so is the difference between a gap and a wrong accusation.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "refs": {
+          "description": "file:line of the disclosure or marking evidence found. Required when the state is present or unclear.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      }
+    },
+    "roleAndRiskFinding": {
+      "description": "Role and risk tier for one system. Real, and deliberately not the headline: the obligations that follow apply from enforceable_from, which every finding must state so that a future deadline is not read as a present one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "system",
+        "role",
+        "role_article",
+        "tier",
+        "tier_article",
+        "enforceable_from",
+        "status",
+        "refs",
+        "interpretation"
+      ],
+      "properties": {
+        "system": {
+          "description": "key of an entry in ai_systems[].",
+          "type": "string"
+        },
+        "role": {
+          "description": "The role this organization plays for this system. Most organizations deploying a third-party model under their own authority are deployers.",
+          "enum": [
+            "provider",
+            "deployer",
+            "importer",
+            "distributor",
+            "product_manufacturer",
+            "authorised_representative"
+          ]
+        },
+        "role_article": { "$ref": "#/$defs/articleRef" },
+        "tier": {
+          "description": "The terms 'limited risk' and 'minimal risk' are commentary shorthand rather than terms of the Regulation, so they are not here: the transparency duties they usually stand for are their own finding category.",
+          "enum": [
+            "high_risk_annex_iii",
+            "high_risk_annex_i",
+            "not_high_risk",
+            "gpai",
+            "gpai_systemic_risk",
+            "undetermined"
+          ]
+        },
+        "tier_article": { "$ref": "#/$defs/articleRef" },
+        "annex_iii_area": {
+          "description": "Which Annex III area the system falls in, or none where the screen concluded it falls in no area.",
+          "enum": [
+            "none",
+            "biometrics",
+            "critical_infrastructure",
+            "education_and_vocational_training",
+            "employment_and_worker_management",
+            "essential_services_access",
+            "law_enforcement",
+            "migration_asylum_border_control",
+            "justice_and_democratic_processes"
+          ]
+        },
+        "not_high_risk_assessment": { "$ref": "#/$defs/notHighRiskAssessment" },
+        "enforceable_from": {
+          "description": "The date from which the obligations that follow from this tier apply to this system. Required, and the rationale should cite the provision that sets it. This field exists so that a finding serving a future deadline cannot be presented as due today.",
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "status": { "$ref": "#/$defs/findingStatus" },
+        "needs_review": { "$ref": "#/$defs/needsReview" },
+        "refs": { "$ref": "#/$defs/refs" },
+        "interpretation": { "$ref": "#/$defs/interpretation" }
+      }
+    },
+    "notHighRiskAssessment": {
+      "description": "The Article 6(3) assessment, required where the conclusion is that an Annex III system is not high-risk. Recording the ground and the profiling answer is what makes the conclusion reviewable rather than asserted.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ground", "profiling", "article"],
+      "properties": {
+        "ground": {
+          "description": "Which of the Article 6(3) conditions the conclusion rests on.",
+          "enum": [
+            "narrow_procedural_task",
+            "improves_prior_human_activity",
+            "detects_decision_patterns_without_replacing_human_review",
+            "preparatory_task"
+          ]
+        },
+        "profiling": {
+          "description": "Whether the system performs profiling of natural persons. Article 6(3) does not allow the not-high-risk conclusion where it does, so this is a gate rather than a note.",
+          "type": "boolean"
+        },
+        "article": { "$ref": "#/$defs/articleRef" },
+        "refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      }
+    },
+    "standardsFinding": {
+      "description": "A management-system or framework alignment tag. No control text is vendored here; the reference is a citation the reader resolves in the standard itself.",
       "type": "object",
       "additionalProperties": false,
       "required": ["system", "scheme", "value", "status", "refs", "interpretation"],
@@ -326,16 +592,18 @@
           "description": "key of an entry in ai_systems[].",
           "type": "string"
         },
-        "scheme": { "enum": ["eu_ai_act_role", "eu_ai_act_tier", "iso_42001", "nist_ai_rmf"] },
-        "value": { "type": "string", "minLength": 1 },
-        "driver": {
-          "description": "The specific provision that drives the value, for example 'Article 50(1)'. Free text: this repository deliberately bundles no framework control text.",
+        "scheme": { "enum": ["iso_42001", "nist_ai_rmf"] },
+        "value": {
+          "description": "For nist_ai_rmf, one of the four functions. For iso_42001, free text naming what the system evidences.",
+          "type": "string",
+          "minLength": 1
+        },
+        "reference": {
+          "description": "The clause or annex reference in the standard, as a citation only.",
           "type": "string"
         },
-        "status": {
-          "description": "Always starts as suggested. A human moves it to accepted or rejected; the piece never sets those itself.",
-          "enum": ["suggested", "accepted", "rejected"]
-        },
+        "status": { "$ref": "#/$defs/findingStatus" },
+        "needs_review": { "$ref": "#/$defs/needsReview" },
         "refs": { "$ref": "#/$defs/refs" },
         "interpretation": { "$ref": "#/$defs/interpretation" }
       }

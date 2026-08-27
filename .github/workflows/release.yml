@@ -36,6 +36,7 @@ jobs:
           python3 scripts/check_repo.py
           python3 scripts/check_vendored_lib.py
           python3 scripts/test_validators.py
+          python3 scripts/test_collectors.py
           python3 scripts/test_idempotency.py
           python3 scripts/contract_test.py
           python3 scripts/test_ci_mode.py

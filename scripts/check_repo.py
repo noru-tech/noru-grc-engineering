@@ -31,7 +31,11 @@ from jsonschema_mini import unsupported_keywords  # noqa: E402
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MCP_URL = "https://api.noru.tech/v1/mcp"
 
-# (piece, vocabulary key, schema file, dotted path into the schema, comparison)
+# (piece, vocabulary key, dotted path into the schema, comparison)
+#
+# "set" compares membership. "keys" compares the vocabulary list against the *declaration order* of
+# a schema object's properties — used for the findings categories, where the order is the substance
+# and not a formatting preference: what is enforceable today comes before what is enforceable later.
 VOCAB_SYNC = [
     ("ai-inventory", "deployment", "$defs.aiSystem.properties.deployment.enum", "set"),
     ("ai-inventory", "autonomy", "$defs.aiSystem.properties.autonomy.enum", "set"),
@@ -40,8 +44,23 @@ VOCAB_SYNC = [
     ("ai-inventory", "provider_category", "$defs.provider.properties.category.enum", "set"),
     ("ai-inventory", "claim_kind", "$defs.providerClaim.properties.kind.enum", "set"),
     ("ai-inventory", "claim_source_type", "$defs.claimSource.properties.type.enum", "set"),
-    ("ai-inventory", "classification_scheme", "$defs.classification.properties.scheme.enum", "set"),
-    ("ai-inventory", "classification_status", "$defs.classification.properties.status.enum", "set"),
+    ("ai-inventory", "finding_categories", "$defs.findings.properties", "keys"),
+    ("ai-inventory", "finding_status", "$defs.findingStatus.enum", "set"),
+    ("ai-inventory", "prohibited_practice",
+     "$defs.prohibitedPracticeFinding.properties.practice.enum", "set"),
+    ("ai-inventory", "prohibited_determination",
+     "$defs.prohibitedPracticeFinding.properties.determination.enum", "set"),
+    ("ai-inventory", "transparency_trigger",
+     "$defs.transparencyFinding.properties.trigger.enum", "set"),
+    ("ai-inventory", "required_action",
+     "$defs.transparencyFinding.properties.required_action.enum", "set"),
+    ("ai-inventory", "disclosure_state", "$defs.disclosureCheck.properties.state.enum", "set"),
+    ("ai-inventory", "eu_ai_act_role", "$defs.roleAndRiskFinding.properties.role.enum", "set"),
+    ("ai-inventory", "eu_ai_act_tier", "$defs.roleAndRiskFinding.properties.tier.enum", "set"),
+    ("ai-inventory", "annex_iii_area",
+     "$defs.roleAndRiskFinding.properties.annex_iii_area.enum", "set"),
+    ("ai-inventory", "art_6_3_ground", "$defs.notHighRiskAssessment.properties.ground.enum", "set"),
+    ("ai-inventory", "standards_scheme", "$defs.standardsFinding.properties.scheme.enum", "set"),
     ("evidence-push", "mime_types", "$defs.upload.properties.mime_type.enum", "set"),
     ("evidence-push", "max_file_bytes", "$defs.upload.properties.size_bytes.maximum", "value"),
     ("evidence-push", "queue_tools",
@@ -195,7 +214,15 @@ def check_vocab_sync(problems):
         if expected is None:
             problems.append(f"[{piece}] {schema_rel} has nothing at {path} to compare with '{key}'")
             continue
-        if mode == "set":
+        if mode == "keys":
+            declared = list(expected) if isinstance(expected, dict) else None
+            if declared != list(actual or []):
+                problems.append(
+                    f"[{piece}] vocabulary '{key}' is {actual} but {schema_rel} {path} declares "
+                    f"{declared} — these are ordered, and the order is what says which obligation "
+                    "is enforceable now and which is not"
+                )
+        elif mode == "set":
             if set(expected) != set(actual or []):
                 problems.append(
                     f"[{piece}] vocabulary '{key}' and {schema_rel} {path} have drifted: "

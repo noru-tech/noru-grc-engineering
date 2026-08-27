@@ -46,6 +46,144 @@ export function evidenceMarker(systemKey, contentDigest) {
   return `[${EVIDENCE_MARKER_PREFIX}#${systemKey}@${contentDigest.slice(0, 16)}]`;
 }
 
+/** The four finding categories, in the order the schema declares and a reader should work them. */
+const FINDING_CATEGORIES = [
+  "prohibited_practices",
+  "transparency_obligations",
+  "role_and_risk",
+  "standards_alignment",
+];
+
+function findingsFor(manifest, systemKey) {
+  const findings = manifest.findings ?? {};
+  const out = {};
+  for (const category of FINDING_CATEGORIES) {
+    out[category] = (findings[category] ?? []).filter((f) => f.system === systemKey);
+  }
+  return out;
+}
+
+/**
+ * Findings as a person reads them in Noru, ordered by what is enforceable rather than by what is
+ * interesting. Article 5 leads and is set apart: it is the one category whose answer is to stop, and
+ * a reader must not have to find it among the risk-tier rows.
+ */
+export function renderFindings(byCategory) {
+  const lines = [];
+
+  const prohibited = byCategory.prohibited_practices ?? [];
+  const raised = prohibited.filter((f) => f.determination !== "no_indication");
+  const screened = prohibited.filter((f) => f.determination === "no_indication");
+  if (raised.length > 0) {
+    lines.push("!! ARTICLE 5 — PROHIBITED PRACTICE RAISED. Read this before anything below.");
+    for (const f of raised) {
+      lines.push(`   ${f.article} ${f.practice}: ${f.determination}`);
+      if (f.action) lines.push(`   Action: ${f.action.trim()}`);
+      lines.push(`   Cited: ${(f.refs ?? []).join(", ")}`);
+    }
+    lines.push("");
+  }
+  if (screened.length > 0) {
+    // "The screen ran and found nothing" is a different statement from silence, and it is the one
+    // an auditor asks for. It is recorded, but it never leads.
+    lines.push(
+      `Article 5 screened, no indication found: ${screened.map((f) => f.practice).join(", ")}`,
+      ""
+    );
+  }
+
+  const transparency = byCategory.transparency_obligations ?? [];
+  if (transparency.length > 0) {
+    lines.push("Article 50 transparency (applicable since 2 August 2026):");
+    for (const f of transparency) {
+      const disclosure = f.disclosure ?? {};
+      lines.push(
+        `  ${f.article} ${f.trigger} — requires ${f.required_action}` +
+          `${f.applies_to_role ? ` (${f.applies_to_role})` : ""}`,
+        `    disclosure: ${disclosure.state ?? "NOT CHECKED"}`
+      );
+      if (disclosure.mechanism) lines.push(`    how: ${disclosure.mechanism.trim()}`);
+      if (disclosure.gap) lines.push(`    GAP: ${disclosure.gap.trim()}`);
+      if ((disclosure.searched ?? []).length > 0) {
+        lines.push(`    searched: ${disclosure.searched.join("; ")}`);
+      }
+      if ((disclosure.refs ?? []).length > 0) {
+        lines.push(`    evidence: ${disclosure.refs.join(", ")}`);
+      }
+      lines.push(`    cited: ${(f.refs ?? []).join(", ")}`);
+    }
+    lines.push("");
+  }
+
+  const roles = byCategory.role_and_risk ?? [];
+  if (roles.length > 0) {
+    lines.push("Role and risk tier:");
+    for (const f of roles) {
+      lines.push(
+        `  role ${f.role} (${f.role_article}), tier ${f.tier} (${f.tier_article})`,
+        `    Annex III area: ${f.annex_iii_area ?? "not screened"}`,
+        `    obligations apply from: ${f.enforceable_from}`
+      );
+      if (f.not_high_risk_assessment) {
+        const a = f.not_high_risk_assessment;
+        lines.push(
+          `    ${a.article} assessment: ground ${a.ground}, ` +
+            `profiling ${a.profiling === true ? "yes" : "no"}`
+        );
+      }
+      lines.push(`    cited: ${(f.refs ?? []).join(", ")}`);
+    }
+    lines.push("");
+  }
+
+  const standards = byCategory.standards_alignment ?? [];
+  if (standards.length > 0) {
+    lines.push("Standards alignment:");
+    for (const f of standards) {
+      lines.push(`  ${f.scheme}: ${f.value}${f.reference ? ` — ${f.reference}` : ""}`);
+    }
+    lines.push("");
+  }
+
+  if (lines.length === 0) return ["No findings recorded for this system.", ""];
+  return [
+    "All of the below are SUGGESTIONS with citations, for a person to accept or reject in Noru.",
+    "",
+    ...lines,
+  ];
+}
+
+/**
+ * The two alerts lifted above the plan. :diff is where a person decides whether to write, so an
+ * obligation that is already enforceable must not arrive as one row among the createAsset calls.
+ */
+export function planAlerts(manifest) {
+  const alerts = [];
+  const findings = manifest.findings ?? {};
+  for (const f of findings.prohibited_practices ?? []) {
+    if (f.determination === "no_indication") continue;
+    alerts.push({
+      severity: f.determination === "indicated" ? "stop" : "review",
+      category: "prohibited_practices",
+      system: f.system,
+      message: `${f.article} ${f.practice} — ${f.determination} on '${f.system}'.`,
+    });
+  }
+  for (const f of findings.transparency_obligations ?? []) {
+    const state = f.disclosure?.state;
+    if (state !== "absent" && state !== "unclear") continue;
+    alerts.push({
+      severity: state === "absent" ? "gap" : "unresolved",
+      category: "transparency_obligations",
+      system: f.system,
+      message:
+        `${f.article} ${f.trigger} on '${f.system}': the required ` +
+        `${f.required_action} is ${state}.`,
+    });
+  }
+  return alerts;
+}
+
 export function evidenceBody(system, manifest) {
   const src = manifest.source;
   const lines = [
@@ -60,6 +198,8 @@ export function evidenceBody(system, manifest) {
     }`,
     `Evals CI-gated: ${system.evals?.ci_gated === true ? "yes" : "no"}`,
     "",
+    "Findings:",
+    ...renderFindings(findingsFor(manifest, system.key)).map((l) => (l ? `  ${l}` : "")),
     `Interpretation owner: ${system.interpretation.owner}`,
     `Decided: ${system.interpretation.decided_at}`,
     `Expires: ${system.interpretation.expires_at ?? "(not set)"}`,
@@ -163,6 +303,10 @@ export function buildOperations(manifest, state) {
         models: system.models ?? [],
         human_oversight: (system.human_oversight ?? []).map((o) => o.type),
         evals_ci_gated: system.evals?.ci_gated ?? false,
+        // The findings travel with the asset, in the same order everything else prints them, so
+        // that what is enforceable now is legible on the record itself and not only in the evidence
+        // body next to it.
+        findings: findingsFor(manifest, system.key),
         refs: system.refs ?? [],
         interpretation: system.interpretation,
         slug,
@@ -302,10 +446,27 @@ function main(argv) {
     summary: summarize(operations),
   });
 
+  // The alert list rides on stdout rather than in the plan file: the plan is the contract-shaped
+  // artifact :push verifies, and it stays exactly what the shared writer produces.
+  const alerts = planAlerts(manifest);
+
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify(plan, null, opts.quiet ? 0 : 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ ...plan, alerts }, null, opts.quiet ? 0 : 2)}\n`
+    );
   } else if (!opts.quiet) {
-    process.stdout.write(`${renderPlanText(plan)}\n`);
+    const banner =
+      alerts.length === 0
+        ? ""
+        : [
+            "=".repeat(96),
+            ...alerts.map((a) => `  ${a.severity.toUpperCase()}: ${a.message}`),
+            "  These are enforceable now. The plan below is about landing them in Noru for review,",
+            "  not about resolving them.",
+            "=".repeat(96),
+            "",
+          ].join("\n") + "\n";
+    process.stdout.write(`${banner}${renderPlanText(plan)}\n`);
   }
   return 0;
 }

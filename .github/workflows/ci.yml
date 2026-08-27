@@ -126,6 +126,8 @@ jobs:
           WANT: ${{ matrix.yaml }}
       - name: schema fixtures and validator unit tests
         run: python3 scripts/test_validators.py
+      - name: collectors detect what the pieces say they detect
+        run: python3 scripts/test_collectors.py
       - name: a second push must be a no-op
         run: python3 scripts/test_idempotency.py
       - name: every plugin satisfies contract requirements 1-9
