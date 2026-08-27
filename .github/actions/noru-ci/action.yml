@@ -82,6 +82,15 @@ inputs:
     description: "Write a job summary. Set to false for a quieter log."
     required: false
     default: "true"
+  report-path:
+    description: >
+      Where to write the JSON report. Defaults to $RUNNER_TEMP/noru-ci-<piece>.json, which is
+      derived from the piece name alone — so two invocations for the same piece in one job
+      overwrite each other. Set this explicitly when a job calls the action more than once,
+      because a gated run's findings can only be read from its report (a failing composite
+      action does not propagate outputs).
+    required: false
+    default: ""
 
 outputs:
   status:
@@ -157,6 +166,7 @@ runs:
         NORU_CI_STATE: ${{ inputs.state }}
         NORU_CI_ON_MISSING: ${{ inputs.on-missing-prerequisite }}
         NORU_CI_PLUGINS: ${{ inputs.plugins }}
+        NORU_CI_REPORT_PATH: ${{ inputs.report-path }}
       run: |
         set -uo pipefail
         # The toolkit ships with this action, so find its root by walking up from the action path.
@@ -169,7 +179,8 @@ runs:
           exit 1
         fi
 
-        report="${RUNNER_TEMP:-/tmp}/noru-ci-${NORU_CI_PIECE}.json"
+        report="${NORU_CI_REPORT_PATH:-${RUNNER_TEMP:-/tmp}/noru-ci-${NORU_CI_PIECE}.json}"
+        mkdir -p "$(dirname "$report")"
         args=(
           "--piece=$NORU_CI_PIECE"
           "--repo=$NORU_CI_REPO"

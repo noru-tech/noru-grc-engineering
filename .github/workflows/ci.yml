@@ -211,6 +211,7 @@ jobs:
           mode: gate
           as-of: ${{ env.NORU_CI_AS_OF }}
           summary: "false"
+          report-path: ${{ runner.temp }}/report-drift.json
 
       - name: warn-only mode reports the same finding and does not fail
         id: warn
@@ -221,6 +222,7 @@ jobs:
           mode: warn
           as-of: ${{ env.NORU_CI_AS_OF }}
           summary: "false"
+          report-path: ${{ runner.temp }}/report-warn.json
 
       - name: an interpretation that expired must fail the gate too
         id: expired
@@ -251,7 +253,7 @@ jobs:
           # A composite action that fails does not propagate its declared outputs, so a gated
           # run's findings must be read from the report file, not from steps.<id>.outputs.
           # `outcome` is still set, and the report is written before the action exits non-zero.
-          report="${{ runner.temp }}/noru-ci-ai-inventory.json"
+          report="${{ runner.temp }}/report-drift.json"
           drift_code=""; drift_flag=""
           if [ -f "$report" ]; then
             drift_code="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("exit_code",""))' "$report")"

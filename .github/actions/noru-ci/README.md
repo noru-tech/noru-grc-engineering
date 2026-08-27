@@ -44,8 +44,10 @@ to inspect. Two ways to read a failing run:
 
 - **`mode: warn`** — identical checks, findings labelled `would-fail`, exit 0, outputs populated.
 - **The report file**, which is written *before* the action exits and survives the failure. Its
-  path is `${{ runner.temp }}/noru-ci-<piece>.json` and it carries `exit_code`, `status` and
-  `counts`:
+  default path is `${{ runner.temp }}/noru-ci-<piece>.json` and it carries `exit_code`,
+  `status` and `counts`. That default is derived from the piece name alone, so **two
+  invocations for the same piece in one job overwrite each other** — pass `report-path`
+  explicitly when a job calls this action more than once:
 
   ```yaml
   - id: gate

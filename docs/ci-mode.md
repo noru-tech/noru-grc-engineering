@@ -346,6 +346,7 @@ Written down here rather than discovered later.
 
 When the action fails the job, its declared outputs are not propagated — a GitHub composite-action
 behaviour that `continue-on-error` does not change. `steps.<id>.outcome` still reports `failure`.
-Read a failing run from the JSON report at `${{ runner.temp }}/noru-ci-<piece>.json`, which is
-written before the action exits, or run in `mode: warn` where outputs are populated. See the
+Read a failing run from the JSON report — `${{ runner.temp }}/noru-ci-<piece>.json` by default,
+written before the action exits. That default is per-piece, not per-invocation, so set
+`report-path` when one job calls the action twice or the second run overwrites the first; or run in `mode: warn` where outputs are populated. See the
 action's own README for a worked example.
