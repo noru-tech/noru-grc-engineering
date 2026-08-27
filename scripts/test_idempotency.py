@@ -888,21 +888,100 @@ def test_audit_pack(results, tmp):
 
 
 def _fuzz_prose(node):
-    """Return the document with a trailing newline on every prose string.
+    """Return the document with every prose string re-spaced the way the OTHER loader would have.
 
-    This is what the OTHER YAML loader would have produced. The validators use PyYAML when it is
-    importable and a bundled fallback otherwise, and the two do not agree byte for byte on a folded
-    (`>`) block scalar: PyYAML keeps the trailing newline the YAML spec calls for, and the fallback
-    does not. Only prose is touched — 20 characters or more with a space in it — because an id, a
-    date, a path and a digest are never written as block scalars.
+    The validators use PyYAML when it is importable and a bundled fallback otherwise, and the two do
+    not agree byte for byte on a folded (`>`) block scalar. Measured against PyYAML 6.0.3, the
+    fallback differs in every one of these ways, not only the first:
+
+      - it drops the trailing newline the YAML spec calls for (`>` and `|`);
+      - it folds a blank line to a space where PyYAML produces a paragraph break;
+      - it folds a more-indented line instead of keeping it as its own line;
+      - it strips the trailing spaces PyYAML keeps inside a folded line;
+      - it ignores the `+` chomping and explicit-indentation indicators.
+
+    Every one of those is a whitespace difference inside prose, so one fuzz covers the class: split
+    a line, indent the remainder, leave trailing spaces, end with a newline. A piece whose plan
+    survives this cannot have an identity that depends on which loader was importable.
+
+    Only prose is touched — 20 characters or more with a space in it — because an id, a date, a
+    path and a digest are never written as block scalars.
     """
     if isinstance(node, dict):
         return {k: _fuzz_prose(v) for k, v in node.items()}
     if isinstance(node, list):
         return [_fuzz_prose(v) for v in node]
     if isinstance(node, str) and len(node) >= 20 and " " in node:
-        return node + "\n"
+        head, _, tail = node.partition(" ")
+        return f"{head}\n  {tail}   \n"
     return node
+
+
+def _differences(left, right, path="", found=None):
+    """The JSON paths at which two plans disagree, for a failure message worth reading.
+
+    A plan can move in its arguments rather than in its marker — a description, a title, an asset
+    payload that is digested to decide whether anything changed — so reporting only the marker would
+    have printed two identical-looking values next to a failing assertion.
+    """
+    found = [] if found is None else found
+    if len(found) >= 4:
+        return found
+    if type(left) is not type(right):
+        found.append((path, repr(left)[:80], repr(right)[:80]))
+    elif isinstance(left, dict):
+        for key in sorted(set(left) | set(right)):
+            _differences(left.get(key), right.get(key), f"{path}.{key}", found)
+    elif isinstance(left, list):
+        if len(left) != len(right):
+            found.append((path, f"{len(left)} operation(s)", f"{len(right)} operation(s)"))
+        for i, (a, b) in enumerate(zip(left, right)):
+            _differences(a, b, f"{path}[{i}]", found)
+    elif left != right:
+        found.append((path, repr(left)[:80], repr(right)[:80]))
+    return found
+
+
+def _org_after(operations):
+    """An org snapshot in which every planned write has landed, derived from the plan itself.
+
+    Deliberately generic — keyed on the operation names in the plan rather than on a list of pieces —
+    because this is not trying to be a faithful snapshot the way each piece's own idempotency test
+    is. It only has to be rich enough to drive the diff down its "this already exists" branches, and
+    identical for both of the runs being compared. Without it the loader comparison only ever sees an
+    empty organization, and every existence check, skip reason and marker match — which is the code
+    the fix is actually about — goes unexercised.
+    """
+    evidence, assets, vendors, findings = [], [], [], []
+    for i, op in enumerate(operations):
+        args = op.get("arguments") or {}
+        marker = (op.get("idempotency") or {}).get("marker")
+        if marker:
+            form = args.get("form") or {}
+            evidence.append(
+                {
+                    "id": f"NORU-EVD-{i}",
+                    "description": form.get("description", args.get("description", marker)),
+                    "expiresAt": args.get("expiresAt"),
+                    "linkedControls": [
+                        {"id": m.get("controlId")} for m in (args.get("controlMappings") or [])
+                    ],
+                }
+            )
+        if op["operation"] == "createAsset":
+            assets.append({"id": f"NORU-ASSET-{i}", **args})
+        elif op["operation"] == "createVendor":
+            vendors.append({"id": f"NORU-VENDOR-{i}", "name": args.get("name")})
+        elif op["operation"] == "createSecurityFinding":
+            findings.append({"id": f"NORU-SF-{i}", **args})
+    return {
+        "fetched_at": "2026-08-27T09:14:00Z",
+        "evidence": evidence,
+        "assets": assets,
+        "vendors": vendors,
+        "ai_controls": [],
+        "security_findings": findings,
+    }
 
 
 def test_loader_independence(results, tmp):
@@ -913,10 +992,18 @@ def test_loader_independence(results, tmp):
     files a duplicate instead of skipping. No amount of re-running on one machine finds that, which
     is why it is asserted here rather than left to the reviewer.
 
-    Both loaders are not needed to check it. The difference between them is whitespace around a
-    block scalar, so the test reproduces that difference directly and asks whether the plan moved.
+    Both loaders are not needed to check it, and requiring both would make this test depend on
+    whether PyYAML is installed — exactly the machine dependence it exists to rule out. The
+    difference between the loaders is whitespace inside prose, so the test reproduces that
+    difference directly (see _fuzz_prose) and asks whether the plan moved.
+
+    Every declared piece is checked, not a list maintained here, for the reason given in the module
+    docstring: a gate that reports "the pieces" while covering some of them is worse than no gate.
+    Each one is checked twice — writing into an empty organization, and writing into one the same
+    plan has already been pushed into — because only the second reaches the marker matching and the
+    skip reasons, which is the code a loader-dependent identity actually breaks.
     """
-    for name in ("audit-pack", "iac-scan"):
+    for name in declared_pieces():
         repo = pathlib.Path(tmp) / f"{name}-loader-repo"
         shutil.copytree(FIXTURE_REPO, repo)
         (repo / ".noru" / ".cache").mkdir(parents=True, exist_ok=True)
@@ -925,10 +1012,8 @@ def test_loader_independence(results, tmp):
         manifest = repo / decl["artifact"]
         manifest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(piece / decl["validator"]["fixtures"]["valid"][0], manifest)
-        write_state(
-            repo,
-            {"fetched_at": "2026-08-27T09:14:00Z", "evidence": [], "security_findings": []},
-        )
+        empty_org = {"fetched_at": "2026-08-27T09:14:00Z", "evidence": [], "security_findings": []}
+        write_state(repo, empty_org)
 
         parsed = repo / ".noru" / ".cache" / f"{name}.parsed.json"
         validated = run(
@@ -952,27 +1037,46 @@ def test_loader_independence(results, tmp):
             continue
         as_parsed = json.loads(first.stdout)["operations"]
 
-        document = json.loads(parsed.read_text(encoding="utf-8"))
-        parsed.write_text(json.dumps(_fuzz_prose(document), indent=2), encoding="utf-8")
-        second = diff(piece, repo)
-        if not results.check(
-            f"[{name}] diff succeeds under the other loader's whitespace",
-            second.returncode == 0,
-            second.stderr,
+        # Against an empty organization every operation is a create, so that comparison alone never
+        # reaches an existence check, a marker match or a skip reason — which is the half of the code
+        # this is really about. So the plan is compared twice: once writing into an empty
+        # organization, and once writing into one the same plan has already been pushed into.
+        rounds = [("into an empty organization", empty_org)]
+        pushed_org = _org_after(as_parsed)
+        write_state(repo, pushed_org)
+        if results.check(
+            f"[{name}] diff succeeds against an organization already holding the plan",
+            diff(piece, repo).returncode == 0,
+            "",
         ):
-            continue
-        as_other_loader = json.loads(second.stdout)["operations"]
+            rounds.append(("into an organization already holding it", pushed_org))
 
-        results.check(
-            f"[{name}] THE PLAN IS THE SAME WHICHEVER YAML LOADER PARSED THE MANIFEST",
-            as_parsed == as_other_loader,
-            "; ".join(
-                f"{a.get('subject')}: {json.dumps(a.get('idempotency'))} vs "
-                f"{json.dumps(b.get('idempotency'))}"
-                for a, b in zip(as_parsed, as_other_loader)
-                if a != b
-            )[:400],
-        )
+        document = json.loads(parsed.read_text(encoding="utf-8"))
+        for label, org in rounds:
+            # The plan as this loader parsed it, then the same plan with prose re-spaced the way the
+            # other loader would have written it. Same organization both times.
+            write_state(repo, org)
+            parsed.write_text(json.dumps(document, indent=2), encoding="utf-8")
+            expected = json.loads(diff(piece, repo).stdout)["operations"]
+
+            parsed.write_text(json.dumps(_fuzz_prose(document), indent=2), encoding="utf-8")
+            other = diff(piece, repo)
+            if not results.check(
+                f"[{name}] diff succeeds under the other loader's whitespace, {label}",
+                other.returncode == 0,
+                other.stderr,
+            ):
+                continue
+
+            as_other_loader = json.loads(other.stdout)["operations"]
+            results.check(
+                f"[{name}] THE PLAN IS THE SAME WHICHEVER YAML LOADER PARSED THE MANIFEST ({label})",
+                expected == as_other_loader,
+                "; ".join(
+                    f"operations{path}: {left} != {right}"
+                    for path, left, right in _differences(expected, as_other_loader)
+                ),
+            )
 
 
 # Every piece, and the test that proves re-running it is a no-op. A piece missing from this table is

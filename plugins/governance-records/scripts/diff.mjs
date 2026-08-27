@@ -49,16 +49,31 @@ function loadJson(path, label) {
   }
 }
 
+/**
+ * Free text from the manifest, normalised to a single line before it reaches anything digested.
+ *
+ * This is not cosmetic. The two YAML loaders a validator may use do not agree byte for byte on a
+ * folded (`>`) block scalar — one keeps the trailing newline the YAML spec calls for and the bundled
+ * fallback does not — so the SAME manifest can parse to two slightly different strings depending on
+ * whether PyYAML happened to be importable. Feeding that straight into a content digest would make
+ * this piece's identity depend on the machine it ran on: push from a laptop without PyYAML, push
+ * again from CI with it, and the second push files a duplicate rather than skipping. Normalising
+ * here makes the identity a property of the manifest and nothing else.
+ */
+function text(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
 function participantLine(participant) {
-  const role = participant.role ? ` (${participant.role})` : "";
+  const role = participant.role ? ` (${text(participant.role)})` : "";
   const attendance = participant.attendance ?? "present";
-  return `  - ${participant.name}${role} [${attendance}]`;
+  return `  - ${text(participant.name)}${role} [${attendance}]`;
 }
 
 function actionLine(action) {
   const due = action.due_on ? `, due ${action.due_on}` : ", no due date";
   const status = action.status ? ` [${action.status}]` : "";
-  return `  - ${action.description} — owner ${action.owner}${due}${status}`;
+  return `  - ${text(action.description)} — owner ${action.owner}${due}${status}`;
 }
 
 /**
@@ -71,7 +86,7 @@ export function recordBody(record, manifest) {
   const decisions = record.decisions ?? [];
   const actions = record.actions ?? [];
   const lines = [
-    `Governance record: ${record.title}`,
+    `Governance record: ${text(record.title)}`,
     `Kind: ${record.kind}`,
     `Occurred on: ${record.occurred_on}`,
     `Approved on: ${record.approved_on ?? "(not recorded)"}`,
@@ -82,7 +97,7 @@ export function recordBody(record, manifest) {
     ...(participants.length > 0 ? participants.map(participantLine) : ["  (none recorded)"]),
     "",
     `Decisions (${decisions.length}):`,
-    ...(decisions.length > 0 ? decisions.map((d) => `  - ${d}`) : ["  (none recorded)"]),
+    ...(decisions.length > 0 ? decisions.map((d) => `  - ${text(d)}`) : ["  (none recorded)"]),
     "",
     `Actions (${actions.length}):`,
     ...(actions.length > 0 ? actions.map(actionLine) : ["  (none recorded)"]),
@@ -90,7 +105,7 @@ export function recordBody(record, manifest) {
     `Interpretation owner: ${record.interpretation.owner}`,
     `Decided: ${record.interpretation.decided_at}`,
     `Expires: ${record.interpretation.expires_at ?? `(not set; next review due ${record.next_review_due})`}`,
-    `Rationale: ${record.interpretation.rationale}`,
+    `Rationale: ${text(record.interpretation.rationale)}`,
     "",
     `Source document: ${record.document.file} (sha256 ${record.document.sha256})`,
     "Read from:",
@@ -122,7 +137,7 @@ export function buildOperations(manifest, state) {
   for (const record of manifest.records ?? []) {
     const body = recordBody(record, manifest);
     const marker = recordMarker(record.key, digest(body));
-    const title = `${record.title} (${record.occurred_on})`;
+    const title = `${text(record.title)} (${record.occurred_on})`;
     const existing = evidence.find((e) => String(e.description ?? "").includes(marker));
     const superseded = evidence.find(
       (e) =>

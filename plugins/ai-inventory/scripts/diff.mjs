@@ -46,6 +46,38 @@ export function evidenceMarker(systemKey, contentDigest) {
   return `[${EVIDENCE_MARKER_PREFIX}#${systemKey}@${contentDigest.slice(0, 16)}]`;
 }
 
+/**
+ * Free text from the manifest, normalised to a single line before it reaches anything digested.
+ *
+ * This is not cosmetic. The two YAML loaders a validator may use do not agree byte for byte on a
+ * folded (`>`) block scalar — one keeps the trailing newline the YAML spec calls for and the bundled
+ * fallback does not — so the SAME manifest can parse to two slightly different strings depending on
+ * whether PyYAML happened to be importable. Feeding that straight into a content digest would make
+ * this piece's identity depend on the machine it ran on: push from a laptop without PyYAML, push
+ * again from CI with it, and the second push files a duplicate rather than skipping. Normalising
+ * here makes the identity a property of the manifest and nothing else.
+ */
+function text(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The same normalisation, applied to every string inside a manifest subtree that travels verbatim
+ * into a payload. `metadata` is digested to decide whether an asset already carries what the
+ * manifest says, so prose sitting inside it has to be loader-independent for exactly the reason the
+ * rendered evidence body does. Normalising every string rather than a named list of prose fields is
+ * deliberate: on a key, a date, an article number, an enum or a `file:line` citation `text()` is the
+ * identity function, so there is no list to maintain and no field to miss when the schema grows one.
+ */
+function normalizeStrings(value) {
+  if (typeof value === "string") return text(value);
+  if (Array.isArray(value)) return value.map(normalizeStrings);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, normalizeStrings(v)]));
+  }
+  return value;
+}
+
 /** The four finding categories, in the order the schema declares and a reader should work them. */
 const FINDING_CATEGORIES = [
   "prohibited_practices",
@@ -78,7 +110,7 @@ export function renderFindings(byCategory) {
     lines.push("!! ARTICLE 5 — PROHIBITED PRACTICE RAISED. Read this before anything below.");
     for (const f of raised) {
       lines.push(`   ${f.article} ${f.practice}: ${f.determination}`);
-      if (f.action) lines.push(`   Action: ${f.action.trim()}`);
+      if (f.action) lines.push(`   Action: ${text(f.action)}`);
       lines.push(`   Cited: ${(f.refs ?? []).join(", ")}`);
     }
     lines.push("");
@@ -102,10 +134,10 @@ export function renderFindings(byCategory) {
           `${f.applies_to_role ? ` (${f.applies_to_role})` : ""}`,
         `    disclosure: ${disclosure.state ?? "NOT CHECKED"}`
       );
-      if (disclosure.mechanism) lines.push(`    how: ${disclosure.mechanism.trim()}`);
-      if (disclosure.gap) lines.push(`    GAP: ${disclosure.gap.trim()}`);
+      if (disclosure.mechanism) lines.push(`    how: ${text(disclosure.mechanism)}`);
+      if (disclosure.gap) lines.push(`    GAP: ${text(disclosure.gap)}`);
       if ((disclosure.searched ?? []).length > 0) {
-        lines.push(`    searched: ${disclosure.searched.join("; ")}`);
+        lines.push(`    searched: ${disclosure.searched.map(text).join("; ")}`);
       }
       if ((disclosure.refs ?? []).length > 0) {
         lines.push(`    evidence: ${disclosure.refs.join(", ")}`);
@@ -140,7 +172,7 @@ export function renderFindings(byCategory) {
   if (standards.length > 0) {
     lines.push("Standards alignment:");
     for (const f of standards) {
-      lines.push(`  ${f.scheme}: ${f.value}${f.reference ? ` — ${f.reference}` : ""}`);
+      lines.push(`  ${f.scheme}: ${text(f.value)}${f.reference ? ` — ${text(f.reference)}` : ""}`);
     }
     lines.push("");
   }
@@ -187,8 +219,8 @@ export function planAlerts(manifest) {
 export function evidenceBody(system, manifest) {
   const src = manifest.source;
   const lines = [
-    `AI system: ${system.name}`,
-    `Purpose: ${system.purpose}`,
+    `AI system: ${text(system.name)}`,
+    `Purpose: ${text(system.purpose)}`,
     `Deployment: ${system.deployment}`,
     `Autonomy: ${system.autonomy}`,
     `Provider: ${system.provider ?? "(none declared)"}`,
@@ -203,7 +235,7 @@ export function evidenceBody(system, manifest) {
     `Interpretation owner: ${system.interpretation.owner}`,
     `Decided: ${system.interpretation.decided_at}`,
     `Expires: ${system.interpretation.expires_at ?? "(not set)"}`,
-    `Rationale: ${system.interpretation.rationale}`,
+    `Rationale: ${text(system.interpretation.rationale)}`,
     "",
     "Repository evidence:",
     ...(system.refs ?? []).map((r) => `  - ${r}`),
@@ -259,21 +291,24 @@ export function buildOperations(manifest, state) {
   const slug = manifest.source.slug;
 
   for (const provider of manifest.providers ?? []) {
+    // Normalised on both sides of the comparison: the stored name came from a previous push of
+    // this same field, and matching a raw manifest string against it would miss on whitespace.
+    const vendorName = text(provider.vendor_name);
     const existing = vendors.find(
-      (v) => String(v.name ?? "").toLowerCase() === provider.vendor_name.toLowerCase()
+      (v) => String(v.name ?? "").toLowerCase() === vendorName.toLowerCase()
     );
     operations.push({
       operation: "createVendor",
       transport: "mcp",
       scope: "write:vendors",
-      subject: provider.vendor_name,
+      subject: vendorName,
       effect: existing ? "skip" : "create",
       reason: existing
-        ? `a vendor named "${provider.vendor_name}" already exists (id ${existing.id}); nothing to create`
+        ? `a vendor named "${vendorName}" already exists (id ${existing.id}); nothing to create`
         : "no vendor with this name exists yet",
       idempotency: { kind: "server_dedupe", key: ["organizationId", "name"] },
       arguments: {
-        name: provider.vendor_name,
+        name: vendorName,
         category: provider.category ?? "software_as_a_service",
         description:
           `Model provider discovered by ${manifest.source.generated_by} in ${slug}. ` +
@@ -289,13 +324,13 @@ export function buildOperations(manifest, state) {
       (a) => a.source === ASSET_SOURCE && a.externalId === externalId
     );
     const args = {
-      name: system.name,
+      name: text(system.name),
       type: "software",
       source: ASSET_SOURCE,
       externalId,
-      description: system.purpose,
+      description: text(system.purpose),
       dataTypes: system.data_categories ?? [],
-      metadata: {
+      metadata: normalizeStrings({
         piece: PIECE,
         deployment: system.deployment,
         autonomy: system.autonomy,
@@ -312,7 +347,7 @@ export function buildOperations(manifest, state) {
         slug,
         commitSha: manifest.source.commit_sha,
         branch: manifest.source.branch,
-      },
+      }),
     };
     const unchanged =
       Boolean(existing) &&
@@ -323,7 +358,7 @@ export function buildOperations(manifest, state) {
       operation: "createAsset",
       transport: "mcp",
       scope: "write:assets",
-      subject: `${system.name} (${externalId})`,
+      subject: `${text(system.name)} (${externalId})`,
       effect: unchanged ? "skip" : existing ? "update" : "create",
       reason: unchanged
         ? "the asset already carries exactly this payload"
@@ -338,7 +373,7 @@ export function buildOperations(manifest, state) {
   for (const system of manifest.ai_systems ?? []) {
     const body = evidenceBody(system, manifest);
     const marker = evidenceMarker(system.key, digest(body));
-    const title = `AI system inventory: ${system.name}`;
+    const title = `AI system inventory: ${text(system.name)}`;
     const existing = evidence.find((e) => String(e.description ?? "").includes(marker));
     const stale = evidence.find(
       (e) =>

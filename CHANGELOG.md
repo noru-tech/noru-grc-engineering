@@ -136,6 +136,39 @@ one version number; the release workflow fails if they disagree.
 
 ### Fixed
 
+- **A piece's identity no longer depends on which YAML loader parsed its manifest.**
+  `ai-inventory`, `evidence-push`, `governance-records` and `review-signoff` now normalise every
+  manifest-sourced free-text field before it reaches a rendered body, a content digest or a planned
+  argument, as `audit-pack` and `iac-scan` already did. The two loaders a validator may use — PyYAML
+  where it is importable, the bundled fallback otherwise — disagree on the whitespace inside a folded
+  (`>`) block scalar, so the same manifest produced two different plans depending on the machine:
+  push from a laptop without PyYAML, push again from CI with it, and the second push filed a
+  duplicate instead of skipping. The fix is in each piece rather than in the loader, because the
+  loaders differ in five measured ways and not only in the trailing newline — blank lines,
+  more-indented lines, trailing spaces and the chomping and indentation indicators all differ too —
+  so normalising at the point of use closes the whole class where matching one behaviour would have
+  closed a fifth of it. `scripts/test_idempotency.py::test_loader_independence` now covers every
+  declared piece rather than two, reproduces the full set of differences rather than the trailing
+  newline alone, compares the plan against an organization the plan has already been pushed into as
+  well as an empty one — the marker matching and skip reasons are unreachable otherwise — and reports
+  the JSON path at which two plans diverge. `scripts/templates/diff.mjs.tmpl` normalises too, so a
+  piece scaffolded tomorrow does not reintroduce this.
+
+  **Migration — this changes the marker of records already pushed from a machine that had PyYAML.**
+  Nothing changes for an organization only ever pushed from a machine without it: those markers were
+  already the normalised ones, and a re-push still skips. `evidence-push` is unaffected either way —
+  its marker is the artifact's own digest, never prose. For anything `ai-inventory`,
+  `governance-records` or `review-signoff` pushed *with* PyYAML, the next push files a **new**
+  evidence record beside the old one, which then has to be retired by hand. This is accepted rather
+  than worked around: the alternative is to keep an identity that means different things on different
+  machines, and the pieces already treat changed content as a new account rather than an edit, so the
+  duplicate is the documented behaviour of a content marker rather than a new failure mode. `:diff`
+  names it before it happens — the reason text on those operations reads "covers this system but the
+  content changed". Of the three, only `ai-inventory` has been released; `governance-records` and
+  `review-signoff` are unreleased, so nothing of theirs is in the field. `ai-inventory`'s asset
+  writes are a documented upsert on `(source, externalId)` and are updated in place, so the
+  duplication is confined to evidence.
+
 - The `ai-inventory` documentation no longer implies that the EU AI Act requires an organization to
   keep an AI register. It does not. Articles 49 and 71 are registration into a public Commission
   database by providers of Annex III high-risk systems, and by deployers only where they are public
