@@ -6,7 +6,31 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Changed
+
+- `privacy-datamap`'s push is now declared **`server_upsert` keyed on `slug`**, and the
+  `idempotency.gap` is gone (#15). The behaviour was always an upsert — everything the manifest
+  names is created or updated in place on its `fides_key`, and anything it no longer names is
+  soft-archived rather than deleted — but only "identical content is a no-op" was documented, and
+  requirement 4 wants a citation a reader can open, not a claim about code they cannot see. The
+  behaviour is now published in the `Idempotency/Upsert Behavior` section of
+  `https://api.noru.tech/llms.txt`, so the stronger claim is provable.
+
+  This makes it the first piece here whose push is both `single_call` and `server_upsert` — the
+  shape `contract/README.md` requirement 4 describes and has until now admitted no piece achieved.
+
+  The piece README gains the two consequences that follow from replace-not-merge, because they are
+  the ones that bite: dropping a table removes it from the map (intended, but a partial scan pushed
+  over a good one will archive what it failed to find), and `fides_key` is half the upsert key, so
+  renaming one archives the old record rather than renaming it.
+
 ### Fixed
+
+- `piece.json` and `diff.mjs` each carried the operation's idempotency and nothing compared them.
+  They disagreed the moment the declaration moved to `server_upsert` and the plan kept emitting
+  `server_dedupe`. The plan is what a human reads before confirming a write, so a plan that
+  misstates how the write settles is worse than one that says nothing. `test_idempotency.py` now
+  asserts the two agree.
 
 - **The collector's own version is no longer part of the derived digest** (#17). `generated_by` was
   inside the object every `digestOf()` hashes, so bumping a plugin changed the digest of every

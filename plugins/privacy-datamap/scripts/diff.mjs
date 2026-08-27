@@ -91,8 +91,8 @@ export function buildOperations(manifest, state) {
           ? "Noru holds no data map for this source yet"
           : "the data map Noru holds differs from the one in this repository",
       idempotency: {
-        kind: "server_dedupe",
-        key: ["slug", "manifest content"],
+        kind: "server_upsert",
+        key: ["slug"],
         content_sha256: want,
       },
       arguments: {

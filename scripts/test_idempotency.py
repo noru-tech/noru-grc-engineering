@@ -1147,6 +1147,19 @@ def test_privacy_datamap(results, tmp):
     )
     # The argument names are the tool's own, from its published schema. Getting one wrong is a
     # runtime failure no local test would otherwise catch.
+    # piece.json declares the idempotency and diff.mjs emits it into the plan, independently. They
+    # disagreed once already — the declaration moved to server_upsert and the plan kept saying
+    # server_dedupe — and nothing noticed, because nothing compared them. The plan is what a human
+    # reads before confirming a write, so a plan that misstates how the write settles is worse than
+    # one that says nothing.
+    declared = decl["push"]["operations"][0]["idempotency"]
+    results.check(
+        f"[{label}] the plan's idempotency matches what piece.json declares",
+        op["idempotency"]["kind"] == declared["kind"]
+        and op["idempotency"]["key"] == declared["key"],
+        f"plan says {op['idempotency'].get('kind')}/{op['idempotency'].get('key')}, "
+        f"declaration says {declared.get('kind')}/{declared.get('key')}",
+    )
     results.check(
         f"[{label}] the call carries slug, manifest, commitSha and branch",
         sorted(op["arguments"]) == ["branch", "commitSha", "manifest", "slug"],
