@@ -209,6 +209,36 @@ def check_pieces_registered(problems, plugin_names):
             )
 
 
+
+def check_reference_files_exist(problems):
+    """A piece's prose may only point at reference files that are actually there.
+
+    The skill and the commands are instructions an agent follows literally. "Read
+    references/classification-guide.md" against a file that does not exist sends it looking, and
+    what it does next is anybody's guess — most likely classify without the guidance and never
+    mention that it could not find it. Cheap to check, and invisible in review otherwise.
+    """
+    plugins = ROOT / "plugins"
+    if not plugins.is_dir():
+        return
+    pattern = re.compile(r"references/([A-Za-z0-9._/-]+\.(?:md|json|ya?ml|txt))")
+    for piece in sorted(plugins.iterdir()):
+        if not piece.is_dir() or piece.name.startswith("."):
+            continue
+        for prose in sorted(piece.rglob("*.md")) + sorted(piece.glob("references/*.json")):
+            if "/references/taxonomy/" in prose.as_posix():
+                continue
+            try:
+                text = prose.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for rel in sorted(set(pattern.findall(text))):
+                if not (piece / "references" / rel).is_file():
+                    problems.append(
+                        f"[{piece.name}] {prose.relative_to(ROOT)} points at "
+                        f"references/{rel}, which does not exist"
+                    )
+
 def check_vocab_sync(problems):
     for piece, key, path, mode in VOCAB_SYNC:
         vocab_path = ROOT / "plugins" / piece / "references" / "vocabulary.json"
@@ -320,6 +350,7 @@ def main(argv):
     try:
         plugin_names = check_marketplaces(problems)
         check_pieces_registered(problems, plugin_names)
+        check_reference_files_exist(problems)
         check_vocab_sync(problems)
         check_schemas_evaluable(problems)
         check_skills(problems, plugin_names)
