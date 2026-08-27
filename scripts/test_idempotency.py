@@ -9,6 +9,12 @@ covering half of them launders an untested piece as tested, which is worse than 
 would write, so this asserts the real thing: **if the writes we planned actually happened, does the
 next run correctly decide there is nothing to do?**
 
+It also asserts a property one machine cannot notice on its own: **the plan must not change because
+a different YAML loader parsed the same manifest.** The validators use PyYAML where it is importable
+and a bundled fallback otherwise, and the two disagree on the whitespace around a folded block
+scalar — so a piece that digests manifest prose into a content marker can have an identity that
+depends on the machine it ran on, and file a duplicate on the second push from somewhere else.
+
 This cannot replace running against a live organization — see the Maturity section of
 docs/verification.md. What it does replace is the class of idempotency bug that survives review
 because nobody re-ran the command twice.
@@ -881,6 +887,94 @@ def test_audit_pack(results, tmp):
     )
 
 
+def _fuzz_prose(node):
+    """Return the document with a trailing newline on every prose string.
+
+    This is what the OTHER YAML loader would have produced. The validators use PyYAML when it is
+    importable and a bundled fallback otherwise, and the two do not agree byte for byte on a folded
+    (`>`) block scalar: PyYAML keeps the trailing newline the YAML spec calls for, and the fallback
+    does not. Only prose is touched — 20 characters or more with a space in it — because an id, a
+    date, a path and a digest are never written as block scalars.
+    """
+    if isinstance(node, dict):
+        return {k: _fuzz_prose(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_fuzz_prose(v) for v in node]
+    if isinstance(node, str) and len(node) >= 20 and " " in node:
+        return node + "\n"
+    return node
+
+
+def test_loader_independence(results, tmp):
+    """The plan must not change because a different YAML loader parsed the same manifest.
+
+    A piece that digests manifest prose into a content marker has an identity that depends on which
+    loader ran: push from a laptop without PyYAML, push again from CI with it, and the second push
+    files a duplicate instead of skipping. No amount of re-running on one machine finds that, which
+    is why it is asserted here rather than left to the reviewer.
+
+    Both loaders are not needed to check it. The difference between them is whitespace around a
+    block scalar, so the test reproduces that difference directly and asks whether the plan moved.
+    """
+    for name in ("audit-pack", "iac-scan"):
+        repo = pathlib.Path(tmp) / f"{name}-loader-repo"
+        shutil.copytree(FIXTURE_REPO, repo)
+        (repo / ".noru" / ".cache").mkdir(parents=True, exist_ok=True)
+        piece = PLUGINS / name
+        decl = json.loads((piece / "piece.json").read_text(encoding="utf-8"))
+        manifest = repo / decl["artifact"]
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(piece / decl["validator"]["fixtures"]["valid"][0], manifest)
+        write_state(
+            repo,
+            {"fetched_at": "2026-08-27T09:14:00Z", "evidence": [], "security_findings": []},
+        )
+
+        parsed = repo / ".noru" / ".cache" / f"{name}.parsed.json"
+        validated = run(
+            [
+                "python3",
+                str(piece / "scripts" / "validate_manifest.py"),
+                str(manifest),
+                f"--emit-parsed={parsed}",
+                "--quiet",
+            ]
+        )
+        if not results.check(
+            f"[{name}] manifest validates before the loader comparison",
+            validated.returncode == 0,
+            validated.stdout[:300],
+        ):
+            continue
+
+        first = diff(piece, repo)
+        if not results.check(f"[{name}] diff succeeds as parsed", first.returncode == 0, first.stderr):
+            continue
+        as_parsed = json.loads(first.stdout)["operations"]
+
+        document = json.loads(parsed.read_text(encoding="utf-8"))
+        parsed.write_text(json.dumps(_fuzz_prose(document), indent=2), encoding="utf-8")
+        second = diff(piece, repo)
+        if not results.check(
+            f"[{name}] diff succeeds under the other loader's whitespace",
+            second.returncode == 0,
+            second.stderr,
+        ):
+            continue
+        as_other_loader = json.loads(second.stdout)["operations"]
+
+        results.check(
+            f"[{name}] THE PLAN IS THE SAME WHICHEVER YAML LOADER PARSED THE MANIFEST",
+            as_parsed == as_other_loader,
+            "; ".join(
+                f"{a.get('subject')}: {json.dumps(a.get('idempotency'))} vs "
+                f"{json.dumps(b.get('idempotency'))}"
+                for a, b in zip(as_parsed, as_other_loader)
+                if a != b
+            )[:400],
+        )
+
+
 # Every piece, and the test that proves re-running it is a no-op. A piece missing from this table is
 # reported as a failure by main() — see the note in the module docstring about gates that overclaim.
 IDEMPOTENCY_TESTS = {
@@ -944,6 +1038,7 @@ def main(argv):
             results.check(f"[{name}] has an idempotency test", True)
             covered.append(name)
             test(results, tmp)
+        test_loader_independence(results, tmp)
 
     ok = not results.failures
     if output_json:
