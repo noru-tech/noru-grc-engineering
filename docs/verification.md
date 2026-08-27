@@ -35,6 +35,7 @@ python3 scripts/test_ci_mode.py        # CI mode fails on drift and on an expire
 | `:push` refuses a stale plan | executed: a plan bound to different manifest bytes exits `1`, even with `--confirm` |
 | **A second push is a no-op** | `test_idempotency.py` drives scan → validate → diff → push, builds the org snapshot that would exist if every planned write had landed, and asserts the next diff is all `skip` and the next push makes no calls |
 | Asset metadata key order does not break idempotency | the snapshot deliberately reverses the key order, because nothing guarantees a JSON object comes back in the order it was sent |
+| **A plan does not depend on which YAML loader parsed the manifest** | `test_idempotency.py` re-spaces every prose string in a validated manifest the way the other loader would have written it, and asserts for all six pieces that the plan — markers, arguments, effects and reasons — is identical, both writing into an empty organization and writing into one the same plan has already been pushed into |
 | No catalogue is vendored | every plugin file is scanned for catalogue-shaped evidence-item and control ids; fixtures may only use the reserved `E-ZZ-*` / `zz-*` namespaces |
 | No credential leaks into the repository | the tree is scanned for credential-shaped strings |
 | A scaffolded piece satisfies the contract | CI scaffolds one and runs the contract test against it |
@@ -108,17 +109,25 @@ Run `:diff` before your first `:push`, and read it.
   includes a digest of the rendered record, so re-filed minutes become a second record. For an
   account of a meeting that is arguably correct — an auditor should see both — but it is a
   consequence of having no documented key, not a decision anyone made.
-- **A piece's content marker can depend on which YAML loader parsed the manifest.** The validators
-  use PyYAML where it is importable and a bundled fallback otherwise, and the two do not agree on
-  the whitespace around a folded (`>`) block scalar: PyYAML keeps the trailing newline the YAML spec
-  calls for, the fallback drops it. Any piece that digests manifest prose into a marker therefore
-  has an identity that depends on the machine — push from a laptop without PyYAML, push again from
-  CI with it, and the second push files a duplicate instead of skipping. `audit-pack` and `iac-scan`
-  normalise free text before it reaches a digest, and `scripts/test_idempotency.py` reproduces the
-  difference and asserts their plans do not move. **`ai-inventory`, `evidence-push`,
-  `governance-records` and `review-signoff` do not yet**: the same check run against them by hand
-  shows their plans change. Fixing them changes the markers of anything already pushed, so it is
-  called out here rather than done quietly alongside something else.
+- **The two YAML loaders still disagree; the pieces no longer care.** The validators use PyYAML
+  where it is importable and a bundled fallback otherwise, and the two do not agree byte for byte on
+  a folded (`>`) block scalar. Measured against PyYAML 6.0.3, the fallback drops the trailing
+  newline the spec calls for, folds a blank line to a space where PyYAML makes a paragraph break,
+  folds a more-indented line instead of keeping it, strips trailing spaces inside a folded line, and
+  ignores the `+` chomping and explicit-indentation indicators. Every one of those is a whitespace
+  difference inside prose, so every piece now normalises manifest free text before it reaches a
+  rendered body, a content digest or a planned argument, and `scripts/test_idempotency.py` asserts
+  for all six that the plan does not move — and for any piece added later, since it reads the pieces
+  off disk. `scripts/templates/diff.mjs.tmpl` carries the same normalisation, so a scaffolded piece
+  has it from birth. The divergence itself is unfixed: the loaders are still not interchangeable, and
+  a piece that reads manifest prose without normalising it would reintroduce the bug. See the note
+  below for the one divergence normalising cannot cover.
+- **The bundled fallback loader silently truncates prose containing a `#`.** It strips comments line
+  by line before it assembles a block scalar, so a rationale reading `tracked in ticket #4412 until
+  the rollout completes` loads as `tracked in ticket rollout completes` without PyYAML, and intact
+  with it. This is a content bug rather than an idempotency one and normalising whitespace does not
+  touch it: the two loaders disagree about the *characters*, not the spacing. A manifest is more
+  likely to hit this than it looks — issue numbers, `C#`, and a `#` in a URL fragment all qualify.
 - **The MCP `push` does not perform the writes.** It emits the confirmed call list for the client to
   execute, because a script cannot speak MCP without handling a credential. The gate is enforced in
   the script; the execution is the agent's, and an agent that improvises a call outside the list has

@@ -45,6 +45,21 @@ function loadJson(path, label) {
 }
 
 /**
+ * Free text from the manifest, normalised to a single line before it reaches the planned write.
+ *
+ * This piece's marker is the artifact's own digest rather than a digest of prose, so unlike its
+ * sibling pieces its identity was never loader-dependent. What was loader-dependent is the record
+ * it writes. The two YAML loaders a validator may use do not agree byte for byte on a folded (`>`)
+ * block scalar — one keeps the trailing newline the YAML spec calls for and the bundled fallback
+ * does not — so the SAME manifest produced two different descriptions depending on whether PyYAML
+ * happened to be importable, and a plan reviewed on a laptop was not the plan CI would have
+ * written. Normalising here makes the whole plan a property of the manifest and nothing else.
+ */
+function text(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
  * The state snapshot is untrusted tool output. It is compared against, never obeyed.
  */
 export function buildOperations(manifest, state, repo) {
@@ -83,14 +98,14 @@ export function buildOperations(manifest, state, repo) {
         mimeType: upload.mime_type,
         sizeBytes: upload.size_bytes,
         form: {
-          title: upload.title,
+          title: text(upload.title),
           description:
-            `${marker} ${upload.description ?? ""} ` +
+            `${marker} ${text(upload.description)} ` +
             `Interpretation: ${upload.interpretation.owner} on ${upload.interpretation.decided_at}` +
             (upload.interpretation.expires_at
               ? `, review by ${upload.interpretation.expires_at}`
               : "") +
-            `. ${upload.interpretation.rationale} ` +
+            `. ${text(upload.interpretation.rationale)} ` +
             `Source: ${src.slug} @ ${src.commit_sha} (${src.branch}).`,
           tags: (upload.tags ?? []).join(","),
           // controlMappings is the preferred field; the legacy controlIds field is never sent.

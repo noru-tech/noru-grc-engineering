@@ -213,6 +213,12 @@ Within a run, the orchestrator invokes each validator with the **same interprete
 never with whatever `python3` resolves to at that moment, so the loader cannot change between the
 step that validated a manifest and the step that read it.
 
+Pinning the loader is still worth doing even though no piece's *plan* depends on it any more — every
+piece normalises manifest prose before it reaches a marker, and `scripts/test_idempotency.py` holds
+that line. The loaders themselves remain non-interchangeable: the bundled fallback strips a `#` and
+everything after it from inside a block scalar, so a rationale citing a ticket number loads shorter
+without PyYAML than with it. See the Known gaps in [verification.md](./verification.md).
+
 ## The push half, and why it is a separate job
 
 `:diff` compares the manifest against the organization, and `:push` writes to it. Neither is
