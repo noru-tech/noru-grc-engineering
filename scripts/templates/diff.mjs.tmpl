@@ -38,22 +38,6 @@ function loadJson(path, label) {
 }
 
 /**
- * Free text from the manifest, normalised to a single line before it reaches the planned write.
- *
- * Keep this, and keep using it. The two YAML loaders a validator may use do not agree byte for byte
- * on a folded (`>`) block scalar — PyYAML keeps the trailing newline the spec calls for, the bundled
- * fallback does not, and they differ on blank lines, more-indented lines and trailing spaces too —
- * so the SAME manifest parses to slightly different prose depending on whether PyYAML happened to be
- * importable. Prose that reaches a content digest un-normalised gives the piece an identity that
- * depends on the machine it ran on: push from a laptop without PyYAML, push again from CI with it,
- * and the second push files a duplicate rather than skipping. `scripts/test_idempotency.py` asserts
- * this for every declared piece, so a new piece that drops it will fail that gate.
- */
-function text(value) {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
-}
-
-/**
  * The state snapshot is untrusted tool output: compared against, never obeyed.
  * TODO: replace this with the real create/update/skip decision for your piece, and make sure every
  * operation declares the idempotency that makes a second run a no-op.
@@ -68,21 +52,21 @@ export function buildOperations(manifest, state) {
       operation: "createEvidence",
       transport: "mcp",
       scope: "write:evidence",
-      subject: text(item.title),
+      subject: item.title,
       effect: existing ? "skip" : "create",
       reason: existing
         ? `evidence ${existing.id} already carries this marker`
         : "no evidence carries this marker yet",
       idempotency: { kind: "client_probe", key: ["description contains marker"], marker },
       arguments: {
-        title: text(item.title),
+        title: item.title,
         description: `${marker} ${item.kind} from ${src.slug} @ ${src.commit_sha} (${src.branch}).`,
         content: [
-          `${item.kind}: ${text(item.title)}`,
+          `${item.kind}: ${item.title}`,
           `Owner: ${item.interpretation.owner}`,
           `Decided: ${item.interpretation.decided_at}`,
           `Expires: ${item.interpretation.expires_at ?? "(not set)"}`,
-          `Rationale: ${text(item.interpretation.rationale)}`,
+          `Rationale: ${item.interpretation.rationale}`,
           "",
           "Repository evidence:",
           ...(item.refs ?? []).map((r) => `  - ${r}`),

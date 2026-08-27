@@ -11,9 +11,11 @@ next run correctly decide there is nothing to do?**
 
 It also asserts a property one machine cannot notice on its own: **the plan must not change because
 a different YAML loader parsed the same manifest.** The validators use PyYAML where it is importable
-and a bundled fallback otherwise, and the two disagree on the whitespace around a folded block
-scalar — so a piece that digests manifest prose into a content marker can have an identity that
-depends on the machine it ran on, and file a duplicate on the second push from somewhere else.
+and a bundled fallback otherwise, so a piece that renders manifest prose into a content marker could
+have an identity that depends on the machine it ran on, and file a duplicate on the second push from
+somewhere else. Both loaders are run here and their plans compared, which needs PyYAML to be
+importable to have two of them; the comparison reports itself skipped rather than passing when it is
+not, and the CI matrix runs a leg with it installed.
 
 This cannot replace running against a live organization — see the Maturity section of
 docs/verification.md. What it does replace is the class of idempotency bug that survives review
@@ -23,7 +25,9 @@ Usage:
     python3 scripts/test_idempotency.py [--output=json] [--quiet]
 Exit codes: 0 = pass, 1 = a piece is not idempotent, 2 = usage / setup error.
 """
+import importlib.util
 import json
+import os
 import pathlib
 import shutil
 import subprocess
@@ -43,14 +47,18 @@ class Results:
         self.rows.append({"test": name, "ok": bool(ok), "detail": str(detail)[:400]})
         return ok
 
+    def skip(self, name, reason):
+        """Record a check that could not run here, said out loud rather than counted as a pass."""
+        self.rows.append(
+            {"test": name, "ok": True, "skipped": True, "detail": str(reason)[:400]}
+        )
+
     @property
     def failures(self):
         return [r for r in self.rows if not r["ok"]]
 
 
 def run(cmd, env=None):
-    import os
-
     merged = dict(os.environ)
     merged.pop("NORU_API_KEY", None)
     if env:
@@ -887,34 +895,20 @@ def test_audit_pack(results, tmp):
     )
 
 
-def _fuzz_prose(node):
-    """Return the document with every prose string re-spaced the way the OTHER loader would have.
+def _fallback_only_env(tmp):
+    """An environment in which `import yaml` fails, so load_yaml takes the bundled fallback.
 
-    The validators use PyYAML when it is importable and a bundled fallback otherwise, and the two do
-    not agree byte for byte on a folded (`>`) block scalar. Measured against PyYAML 6.0.3, the
-    fallback differs in every one of these ways, not only the first:
-
-      - it drops the trailing newline the YAML spec calls for (`>` and `|`);
-      - it folds a blank line to a space where PyYAML produces a paragraph break;
-      - it folds a more-indented line instead of keeping it as its own line;
-      - it strips the trailing spaces PyYAML keeps inside a folded line;
-      - it ignores the `+` chomping and explicit-indentation indicators.
-
-    Every one of those is a whitespace difference inside prose, so one fuzz covers the class: split
-    a line, indent the remainder, leave trailing spaces, end with a newline. A piece whose plan
-    survives this cannot have an identity that depends on which loader was importable.
-
-    Only prose is touched — 20 characters or more with a space in it — because an id, a date, a
-    path and a digest are never written as block scalars.
+    Forcing the loader inside this interpreter beats asking for two of them: the comparison then
+    runs wherever the suite runs, and needs nothing installed that is not already here. The stub is
+    a module named `yaml` that raises on import, which is the exact condition load_yaml branches on.
     """
-    if isinstance(node, dict):
-        return {k: _fuzz_prose(v) for k, v in node.items()}
-    if isinstance(node, list):
-        return [_fuzz_prose(v) for v in node]
-    if isinstance(node, str) and len(node) >= 20 and " " in node:
-        head, _, tail = node.partition(" ")
-        return f"{head}\n  {tail}   \n"
-    return node
+    stub = pathlib.Path(tmp) / "no-pyyaml"
+    stub.mkdir(exist_ok=True)
+    (stub / "yaml.py").write_text(
+        'raise ImportError("PyYAML hidden so the bundled fallback loader runs")\n', encoding="utf-8"
+    )
+    existing = os.environ.get("PYTHONPATH")
+    return {"PYTHONPATH": f"{stub}{os.pathsep}{existing}" if existing else str(stub)}
 
 
 def _differences(left, right, path="", found=None):
@@ -987,22 +981,38 @@ def _org_after(operations):
 def test_loader_independence(results, tmp):
     """The plan must not change because a different YAML loader parsed the same manifest.
 
-    A piece that digests manifest prose into a content marker has an identity that depends on which
+    A piece that renders manifest prose into a content marker has an identity that depends on which
     loader ran: push from a laptop without PyYAML, push again from CI with it, and the second push
     files a duplicate instead of skipping. No amount of re-running on one machine finds that, which
     is why it is asserted here rather than left to the reviewer.
 
-    Both loaders are not needed to check it, and requiring both would make this test depend on
-    whether PyYAML is installed — exactly the machine dependence it exists to rule out. The
-    difference between the loaders is whitespace inside prose, so the test reproduces that
-    difference directly (see _fuzz_prose) and asks whether the plan moved.
+    Both loaders run here, in this interpreter — PyYAML as the validator would pick it up, and the
+    bundled fallback forced by hiding PyYAML behind a stub that raises on import. This used to
+    simulate the difference instead, by re-spacing prose the way the other loader would have written
+    it, because the pieces defended themselves by normalising whitespace out of everything they
+    digested. They no longer do: the loaders agree, so the plan is compared under both rather than
+    against a guess at what one of them would have produced.
+
+    Having two loaders to compare means having PyYAML importable, so this reports itself skipped
+    where it is not, rather than passing while checking nothing. The CI matrix runs a leg with it
+    installed, and `scripts/test_validators.py` pins the fallback loader's output to PyYAML's on
+    every machine including that one.
 
     Every declared piece is checked, not a list maintained here, for the reason given in the module
-    docstring: a gate that reports "the pieces" while covering some of them is worse than no gate.
-    Each one is checked twice — writing into an empty organization, and writing into one the same
+    docstring. Each one is checked twice — writing into an empty organization, and into one the same
     plan has already been pushed into — because only the second reaches the marker matching and the
     skip reasons, which is the code a loader-dependent identity actually breaks.
     """
+    if importlib.util.find_spec("yaml") is None:
+        results.skip(
+            "the plan is the same whichever YAML loader parsed the manifest",
+            "PyYAML is not importable here, so there is only one loader and nothing to compare. "
+            "The CI matrix runs a leg with it installed; test_validators.py checks the fallback "
+            "loader against pinned PyYAML output on every machine, including this one.",
+        )
+        return
+
+    fallback_env = _fallback_only_env(tmp)
     for name in declared_pieces():
         repo = pathlib.Path(tmp) / f"{name}-loader-repo"
         shutil.copytree(FIXTURE_REPO, repo)
@@ -1016,22 +1026,42 @@ def test_loader_independence(results, tmp):
         write_state(repo, empty_org)
 
         parsed = repo / ".noru" / ".cache" / f"{name}.parsed.json"
-        validated = run(
-            [
-                "python3",
-                str(piece / "scripts" / "validate_manifest.py"),
-                str(manifest),
-                f"--emit-parsed={parsed}",
-                "--quiet",
-            ]
-        )
-        if not results.check(
-            f"[{name}] manifest validates before the loader comparison",
-            validated.returncode == 0,
-            validated.stdout[:300],
-        ):
+        documents = {}
+        for loader, env in (("PyYAML", None), ("the bundled fallback", fallback_env)):
+            validated = run(
+                [
+                    "python3",
+                    str(piece / "scripts" / "validate_manifest.py"),
+                    str(manifest),
+                    f"--emit-parsed={parsed}",
+                    "--quiet",
+                ],
+                env=env,
+            )
+            if not results.check(
+                f"[{name}] manifest validates under {loader}",
+                validated.returncode == 0,
+                validated.stdout[:300],
+            ):
+                break
+            documents[loader] = json.loads(parsed.read_text(encoding="utf-8"))
+        if len(documents) != 2:
             continue
 
+        # Not the point of this test, but a free and much sharper failure message when it does go
+        # wrong: a plan can only move because the documents did.
+        results.check(
+            f"[{name}] both loaders parse the manifest to the same document",
+            documents["PyYAML"] == documents["the bundled fallback"],
+            "; ".join(
+                f"{path}: {left} != {right}"
+                for path, left, right in _differences(
+                    documents["PyYAML"], documents["the bundled fallback"]
+                )
+            ),
+        )
+
+        parsed.write_text(json.dumps(documents["PyYAML"], indent=2), encoding="utf-8")
         first = diff(piece, repo)
         if not results.check(f"[{name}] diff succeeds as parsed", first.returncode == 0, first.stderr):
             continue
@@ -1051,30 +1081,31 @@ def test_loader_independence(results, tmp):
         ):
             rounds.append(("into an organization already holding it", pushed_org))
 
-        document = json.loads(parsed.read_text(encoding="utf-8"))
         for label, org in rounds:
-            # The plan as this loader parsed it, then the same plan with prose re-spaced the way the
-            # other loader would have written it. Same organization both times.
+            # The plan as PyYAML parsed the manifest, then as the fallback loader parsed the same
+            # bytes. Same organization both times.
             write_state(repo, org)
-            parsed.write_text(json.dumps(document, indent=2), encoding="utf-8")
+            parsed.write_text(json.dumps(documents["PyYAML"], indent=2), encoding="utf-8")
             expected = json.loads(diff(piece, repo).stdout)["operations"]
 
-            parsed.write_text(json.dumps(_fuzz_prose(document), indent=2), encoding="utf-8")
+            parsed.write_text(
+                json.dumps(documents["the bundled fallback"], indent=2), encoding="utf-8"
+            )
             other = diff(piece, repo)
             if not results.check(
-                f"[{name}] diff succeeds under the other loader's whitespace, {label}",
+                f"[{name}] diff succeeds as the fallback loader parsed it, {label}",
                 other.returncode == 0,
                 other.stderr,
             ):
                 continue
 
-            as_other_loader = json.loads(other.stdout)["operations"]
+            as_fallback = json.loads(other.stdout)["operations"]
             results.check(
                 f"[{name}] THE PLAN IS THE SAME WHICHEVER YAML LOADER PARSED THE MANIFEST ({label})",
-                expected == as_other_loader,
+                expected == as_fallback,
                 "; ".join(
                     f"operations{path}: {left} != {right}"
-                    for path, left, right in _differences(expected, as_other_loader)
+                    for path, left, right in _differences(expected, as_fallback)
                 ),
             )
 
@@ -1166,6 +1197,11 @@ def main(argv):
             print(f"  FAIL  {row['test']}")
             if row["detail"]:
                 print(f"        {row['detail']}")
+        elif row.get("skipped"):
+            # Printed even under --quiet. A check that did not run is the one thing a reader
+            # skimming a passing run still needs to see.
+            print(f"  SKIP  {row['test']}")
+            print(f"        {row['detail']}")
         elif not quiet:
             print(f"  ok    {row['test']}")
     if ok:

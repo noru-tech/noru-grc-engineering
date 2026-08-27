@@ -136,38 +136,52 @@ one version number; the release workflow fails if they disagree.
 
 ### Fixed
 
-- **A piece's identity no longer depends on which YAML loader parsed its manifest.**
-  `ai-inventory`, `evidence-push`, `governance-records` and `review-signoff` now normalise every
-  manifest-sourced free-text field before it reaches a rendered body, a content digest or a planned
-  argument, as `audit-pack` and `iac-scan` already did. The two loaders a validator may use — PyYAML
-  where it is importable, the bundled fallback otherwise — disagree on the whitespace inside a folded
-  (`>`) block scalar, so the same manifest produced two different plans depending on the machine:
-  push from a laptop without PyYAML, push again from CI with it, and the second push filed a
-  duplicate instead of skipping. The fix is in each piece rather than in the loader, because the
-  loaders differ in five measured ways and not only in the trailing newline — blank lines,
-  more-indented lines, trailing spaces and the chomping and indentation indicators all differ too —
-  so normalising at the point of use closes the whole class where matching one behaviour would have
-  closed a fifth of it. `scripts/test_idempotency.py::test_loader_independence` now covers every
-  declared piece rather than two, reproduces the full set of differences rather than the trailing
-  newline alone, compares the plan against an organization the plan has already been pushed into as
-  well as an empty one — the marker matching and skip reasons are unreachable otherwise — and reports
-  the JSON path at which two plans diverge. `scripts/templates/diff.mjs.tmpl` normalises too, so a
-  piece scaffolded tomorrow does not reintroduce this.
+- **The bundled YAML loader no longer truncates prose containing a `#`.** It stripped comments line
+  by line before assembling a block scalar, so a `#` preceded by a space ended the line even inside
+  a `>` or `|` block: a rationale reading `tracked in ticket #4412 until the rollout completes`
+  loaded as `tracked in ticket rollout completes` on any machine without PyYAML, and intact on one
+  with it. Nothing downstream could detect it — the manifest still validated and the sentence still
+  read as a complete one. Issue numbers, `C#` and a `#` in a URL fragment all hit it.
 
-  **Migration — this changes the marker of records already pushed from a machine that had PyYAML.**
-  Nothing changes for an organization only ever pushed from a machine without it: those markers were
-  already the normalised ones, and a re-push still skips. `evidence-push` is unaffected either way —
-  its marker is the artifact's own digest, never prose. For anything `ai-inventory`,
-  `governance-records` or `review-signoff` pushed *with* PyYAML, the next push files a **new**
-  evidence record beside the old one, which then has to be retired by hand. This is accepted rather
-  than worked around: the alternative is to keep an identity that means different things on different
-  machines, and the pieces already treat changed content as a new account rather than an edit, so the
-  duplicate is the documented behaviour of a content marker rather than a new failure mode. `:diff`
-  names it before it happens — the reason text on those operations reads "covers this system but the
-  content changed". Of the three, only `ai-inventory` has been released; `governance-records` and
-  `review-signoff` are unreleased, so nothing of theirs is in the field. `ai-inventory`'s asset
-  writes are a documented upsert on `(source, externalId)` and are updated in place, so the
-  duplication is confined to evidence.
+  Block scalars are now resolved while the document is still raw text, where their extent is
+  knowable, so their content escapes comment stripping entirely. The rest of the construct came with
+  it: indentation is detected from the first content line, folding respects blank and more-indented
+  lines, and the chomping (`-`, `+`) and explicit-indentation indicators are honoured in either
+  order. Checked against PyYAML 6.0.3 over 660 block-scalar documents and every manifest and fixture
+  in the repository.
+
+- **A piece's identity no longer depends on which YAML loader parsed its manifest.** The two
+  loaders a validator may use — PyYAML where it is importable, the bundled fallback otherwise —
+  disagreed on the whitespace inside a folded (`>`) block scalar, so the same manifest produced two
+  different plans depending on the machine: push from a laptop without PyYAML, push again from CI
+  with it, and the second push filed a duplicate instead of skipping.
+
+  This was first fixed in each piece, by normalising every manifest-sourced free-text field before
+  it reached a rendered body, a content digest or a planned argument. It is now fixed in the loader
+  instead, and the normalisation is gone: the bundled fallback reads a block scalar exactly as
+  PyYAML does, so there is nothing left for the pieces to defend themselves against. The pieces
+  render manifest prose as written again — a `|` block keeps its line breaks in an evidence body
+  rather than being flattened to one line.
+
+  `scripts/test_idempotency.py::test_loader_independence` no longer simulates the difference by
+  re-spacing prose. It parses the same manifest bytes with both loaders — in one interpreter, the
+  fallback forced by hiding PyYAML behind a stub that raises on import — and compares the resulting
+  plans for every declared piece, against an empty organization and against one the plan has already
+  been pushed into. Having two loaders to compare means having PyYAML, so it reports itself skipped
+  where there is none rather than passing while checking nothing; the CI matrix runs a leg with it.
+  `scripts/test_validators.py` pins the fallback loader's output to PyYAML's on every machine, and
+  re-checks that pin against PyYAML itself wherever it is importable.
+
+  **Migration — nothing moves for anything pushed from a machine that had PyYAML**, which includes
+  every push from CI. Each piece's whole plan is byte-identical to what the released code produced
+  under PyYAML. What does move is the opposite case: for an organization only ever pushed from a
+  machine *without* PyYAML, the markers of `ai-inventory`, `audit-pack`, `governance-records` and
+  `review-signoff` records change, because the prose they digest is now the complete text rather
+  than the truncated, re-spaced text that loader used to return. The next push files a **new**
+  evidence record beside the old one, which then has to be retired by hand; `:diff` names it before
+  it happens, with a reason reading "covers this system but the content changed". `evidence-push` is
+  unaffected — its marker is the artifact's own digest, never prose. Of the four, only
+  `ai-inventory` has been released.
 
 - The `ai-inventory` documentation no longer implies that the EU AI Act requires an organization to
   keep an AI register. It does not. Articles 49 and 71 are registration into a public Commission
