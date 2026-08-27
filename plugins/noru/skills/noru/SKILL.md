@@ -1,6 +1,6 @@
 ---
 name: noru
-version: 0.1.0
+version: 0.2.0
 description: Run Noru's last-mile GRC pieces — collect compliance facts locally from a repository, CI or laptop, review them as a committed manifest, and land them in Noru with provenance and idempotency. Use when the user wants to inventory AI systems, upload evidence against a control, connect to Noru over MCP, or author a new last-mile piece.
 requires:
   bins: ["node", "python3", "git"]
