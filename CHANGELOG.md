@@ -6,6 +6,25 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.2.0 — 2026-08-27
+
+The release that adds `audit-pack`, `iac-scan`, `governance-records`, `review-signoff` and
+`privacy-datamap`, and CI mode. The first release with a tag: `0.1.0` was published to the
+marketplace but never tagged, which is why `noru-ci@v0.2.0` in the README and in
+[`docs/ci-mode.md`](./docs/ci-mode.md) resolves for the first time here.
+
+### A note on versions
+
+The plugin manifests, the marketplace entries and the skills move to `0.2.0`. The `VERSION`
+constant inside each collector deliberately **stays at `0.1.0`**.
+
+Those are two different things. The first is what you install. The second is stamped into every
+manifest as `generated_by: <piece>@<version>` and is part of the derived digest, so bumping it would
+change the digest of every repository that has already run `:scan` — making a plugin upgrade
+indistinguishable from a schema change, reporting drift where nothing drifted, and failing CI mode
+with exit `3` for every user on upgrade day. That the two are entangled at all is a design problem
+rather than a policy, and it is tracked in #17.
+
 ### Added
 
 - `privacy-datamap` carries over `references/classification-guide.md` from

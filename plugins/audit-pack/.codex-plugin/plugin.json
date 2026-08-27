@@ -1,6 +1,6 @@
 {
   "name": "audit-pack",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Assemble the evidence bundle, sampling and workpapers an auditor asks for — for one framework over one audit window — from Noru's graph plus the local files an integration cannot reach, and land the tested conclusion for each control back in Noru.",
   "author": {
     "name": "Noru",
