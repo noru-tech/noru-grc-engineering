@@ -31,3 +31,32 @@ clear message if either is missing, and prints which YAML loader the runner will
 secret — `NORU_API_KEY: ${{ secrets.NORU_API_KEY }}` — only in a job that has secrets, and only for
 the opt-in `steps: all` push. The action never reads the value; it checks only whether the variable
 is present, and the piece's own push entrypoint reads it at the point of use.
+
+## Reading results when the gate fails
+
+A composite action that exits non-zero does not propagate its declared `outputs`. GitHub sets
+`steps.<id>.outcome` to `failure`, but `steps.<id>.outputs.status`, `.exit-code`, `.drift` and
+`.expired` all come back **empty** — including when the caller sets `continue-on-error: true`.
+That is runner behaviour, not something this action can work around while still failing the job.
+
+So outputs are reliable on a passing or warning run, and absent on exactly the run you most want
+to inspect. Two ways to read a failing run:
+
+- **`mode: warn`** — identical checks, findings labelled `would-fail`, exit 0, outputs populated.
+- **The report file**, which is written *before* the action exits and survives the failure. Its
+  path is `${{ runner.temp }}/noru-ci-<piece>.json` and it carries `exit_code`, `status` and
+  `counts`:
+
+  ```yaml
+  - id: gate
+    continue-on-error: true
+    uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.2.0
+    with: { piece: ai-inventory, repo: . }
+  - if: steps.gate.outcome == 'failure'
+    run: |
+      python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["status"], d["counts"])' \
+        "${{ runner.temp }}/noru-ci-ai-inventory.json"
+  ```
+
+This repository's own `ci-mode` job asserts a gated run that way, because the earlier version
+asserted on outputs and went red for this exact reason.

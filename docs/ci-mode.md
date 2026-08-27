@@ -341,3 +341,11 @@ Written down here rather than discovered later.
   `--max-age-days` is the blunt instrument that puts a ceiling on that, and the manifest-declared
   cadence check in `review-signoff` is the sharp one — which is why a cadence field is worth having
   in more pieces.
+
+## A note on Action outputs
+
+When the action fails the job, its declared outputs are not propagated — a GitHub composite-action
+behaviour that `continue-on-error` does not change. `steps.<id>.outcome` still reports `failure`.
+Read a failing run from the JSON report at `${{ runner.temp }}/noru-ci-<piece>.json`, which is
+written before the action exits, or run in `mode: warn` where outputs are populated. See the
+action's own README for a worked example.
