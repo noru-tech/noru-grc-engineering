@@ -8,6 +8,25 @@ one version number; the release workflow fails if they disagree.
 
 ### Added
 
+- `audit-pack` — `:scan` / `:diff` / `:push`. Assembles what an auditor asks for, for one framework
+  over one window: the controls in scope with what is expected of each and what is actually linked,
+  the local artifacts an integration cannot reach, the other pieces' committed manifests, and a
+  workpaper per control. Draws a **reproducible** sample seeded from the population file's own
+  digest, so anyone holding that file can redraw it; enforces a floor on sample size for the
+  population it came from. The rendered pack under `.noru/audit-pack/` is a local deliverable and is
+  only ever built from a manifest that validated against the same repository state; what lands in
+  Noru is the tested conclusion for each control, one workpaper to one record to one control.
+- `iac-scan` — `:scan` / `:diff` / `:push`. Reads Terraform, CloudFormation, Kubernetes and
+  pipeline configuration and proposes a security finding for each bundled rule that fires, keyed on
+  the rule and the resource rather than the line so moving a block is not a new problem. Lands
+  through the documented idempotent upsert on `(source, externalId)` — the first piece with no
+  client-side probe anywhere — and **closes** the findings whose rules no longer fire with the same
+  call, scoped to the repository's own slug so two repositories under one source cannot close each
+  other's work. Records a citation and never a copy: one rule fires on lines that hold credentials,
+  so no matched text reaches the manifest.
+- `contract/audit-pack.schema.json`, `contract/iac-scan.schema.json`.
+- `getOrganizationRisks` and `getSecurityFindings` added to the published-tool list in
+  `contract/piece.schema.json`, checked against the tool list the MCP server publishes.
 - `governance-records` — `:scan` / `:diff` / `:push`. Reads the governance documents a repository
   already holds (minutes, ISMS scope, statement of applicability, internal audit plan, report and
   checklist, finding records, corrective action plans), extracts who was present, what was decided
@@ -70,6 +89,19 @@ one version number; the release workflow fails if they disagree.
 
 ### Changed
 
+- `contract/README.md` now records what `:push` means for a piece that **assembles** rather than
+  collects — the artifact stays local and the judgements inside it land — along with two gaps the
+  first such piece exposed: a read-only piece cannot satisfy a mandatory `push`, and a piece that
+  produces an output for a human has nowhere to declare it. It also records that expiry now has
+  three different **anchors** in use (a declared cadence, the day the world was observed, and the end
+  of the period a conclusion covers), and that a new piece should say which anchor it uses before it
+  says how long the window is.
+- `scripts/check_repo.py`, `scripts/test_collectors.py` and `scripts/test_idempotency.py` cover
+  both new pieces. The collector tests assert the two claims each piece rests on: that `iac-scan`
+  never writes a matched line anywhere, and that following `audit-pack`'s written redraw recipe
+  reproduces its sample exactly.
+- `tests/fixture-repo/` gained infrastructure and pipeline configuration, a change-ticket population
+  to sample, and a queue snapshot for each new piece.
 - `contract/README.md` — requirement 8 now spells out the two ways a claim may satisfy the expiry
   rule, after building a piece at each end of it.
 - `scripts/test_idempotency.py` enumerates pieces from disk and **fails** when a piece has no

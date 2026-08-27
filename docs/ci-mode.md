@@ -332,15 +332,16 @@ Written down here rather than discovered later.
   satisfied, whether the evidence is still linked, whether someone deleted the record last week —
   none of that is visible offline. CI mode checks that the *repository's own record* is true and
   current. It does not check that Noru agrees with it.
-- **A queue-driven piece has almost nothing to check offline.** `evidence-push`,
-  `governance-records` and `review-signoff` build their manifests from a queue Noru serves. Without
-  that queue the collector cannot run at all, and the job reports `skipped`, not `pass`. The expiry
-  half still works on a committed manifest; the drift half does not.
+- **A queue-driven piece has almost nothing to check offline.** Every piece except `ai-inventory`
+  builds its manifest from a queue Noru serves. Without that queue the collector cannot run at all,
+  and the job reports `skipped`, not `pass`. The expiry half still works on a committed manifest;
+  the drift half does not.
 - **Expiry is only as good as the dates people write.** Nothing offline can tell whether an
   `expires_at` was chosen thoughtfully or set to two years out to stop the build complaining.
-  `--max-age-days` is the blunt instrument that puts a ceiling on that, and the manifest-declared
-  cadence check in `review-signoff` is the sharp one — which is why a cadence field is worth having
-  in more pieces.
+  `--max-age-days` is the blunt instrument that puts a ceiling on that. The sharp one is the anchor
+  a piece declares for itself — a cadence in `review-signoff`, the day the configuration was observed
+  in `iac-scan`, the end of the audit window in `audit-pack` — which is why such a field is worth
+  having in more pieces.
 
 ## A note on Action outputs
 

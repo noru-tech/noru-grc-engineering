@@ -71,6 +71,13 @@ at production scale. Treat a first run as something to check, not something to t
 - `governance-records`' extractor has only met documents written to its own conventions. A real
   minute book will not be.
 - The filename-to-expectation matcher in `evidence-push` has only met fixture catalogues.
+- `iac-scan`'s rules are text-and-block matchers, not a parser. They will miss a misconfiguration
+  expressed through a module input, a variable default or a generated template, and they will fire
+  on a resource that a later override makes safe. Read the citation before you accept the finding —
+  which is the workflow the piece is built around, but it is a real recall and precision ceiling.
+- `audit-pack` has only ever assembled a scope of two controls. A real framework is a hundred or
+  more, and neither the pack's readability at that size nor the push's call count at that size has
+  been seen.
 
 Run `:diff` before your first `:push`, and read it.
 
@@ -83,7 +90,16 @@ Run `:diff` before your first `:push`, and read it.
   in each `piece.json` with what a documented key would let the piece drop.
 - **No piece is `mode: single_call`.** Every one fans out several individually-keyed writes because
   the published API offers no single ingest operation for these artifacts. Every one declares
-  `collapses_to`.
+  `collapses_to`. `iac-scan` is the closest: its writes are documented server-side upserts, so the
+  remaining debt there is one call per finding rather than any question about correctness.
+- **`audit-pack` produces an output the contract does not describe.** `piece.json` declares the
+  manifest a piece writes; there is no field for a deliverable it renders for a human. The pack
+  under `.noru/audit-pack/` is documented in the piece README and is only ever rendered from a
+  validated manifest, but nothing machine-readable says it exists, so nothing checks it.
+- **`iac-scan` closes a finding when no rule reproduces it, which is not the same as fixed.** A rule
+  that was renamed, a file that moved out of scope, and a misconfiguration that was genuinely
+  remediated all look identical from here. The plan says so in its reason text and the push command
+  tells the user to say which kind of close it was; nothing automates that distinction.
 - **`review-signoff` sets its expiry in a second, dependent call.** The published `createEvidence`
   input fields do not carry an expiry, so the record is created first and the expiry applied to it
   afterwards. A push interrupted between the two leaves a sign-off without its expiry; re-running
@@ -107,10 +123,11 @@ Run `:diff` before your first `:push`, and read it.
   still satisfied, whether the evidence is still linked, or whether someone deleted the record last
   week. A fork pull request gets the two local gates and nothing else, which is the honest ceiling
   of a check with no credential.
-- **A queue-driven piece has little to check offline.** `evidence-push`, `governance-records` and
-  `review-signoff` build their manifests from a queue Noru serves, so without it the collector
-  cannot run and CI mode reports `skipped`. The expiry half still works on a committed manifest; the
+- **A queue-driven piece has little to check offline.** Every piece except `ai-inventory` builds its
+  manifest from a queue Noru serves, so without it the collector cannot run and CI mode reports
+  `skipped`. The expiry half still works on a committed manifest; the
   drift half does not.
 - **Nothing offline can tell a considered expiry from a convenient one.** An `expires_at` set two
   years out to stop a build complaining passes every check here. `--max-age-days` is the blunt
-  ceiling; a manifest-declared `cadence`, which only `review-signoff` has, is the sharp one.
+  ceiling; a manifest-declared anchor is the sharp one — a `cadence` in `review-signoff`, the day the
+  configuration was observed in `iac-scan`, the end of the audit window in `audit-pack`.
