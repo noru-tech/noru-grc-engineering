@@ -5,8 +5,6 @@
 // scripts/contract_test.py runs this twice and diffs the result, so a timestamp or an unsorted
 // directory listing anywhere in here will fail the build.
 //
-// TODO: replace collectFacts() with what this piece actually collects.
-//
 // Usage: node collect.mjs [--repo=<path>] [--check] [--output=json|text] [--quiet]
 // Exit codes: 0 ok, 1 drift against the manifest (--check), 2 usage/IO error.
 
@@ -14,10 +12,19 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const PIECE = "privacy-datamap";
 export const VERSION = "0.1.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
+
+const HERE = fileURLToPath(new URL(".", import.meta.url));
+const TABLE = JSON.parse(
+  readFileSync(join(HERE, "..", "references", "classification.json"), "utf8"),
+);
+// A schema file is small. Anything past this is generated data or a checked-in dump, and
+// reading it would cost more than it could ever tell us.
+const MAX_BYTES = 1_000_000;
 
 const SKIP_DIRS = new Set([
   ".git", "node_modules", "dist", "build", "out", ".next", ".turbo", "coverage",
@@ -91,15 +98,267 @@ export function repoProvenance(repo) {
   };
 }
 
-// TODO: this is the piece. Everything above and below is plumbing.
+// --------------------------------------------------------------------------------------------- //
+// Parsers. Each returns collections: [{ name, line, fields: [{ name, line }] }].
+//
+// These read *structure*, never meaning. That a column called `email` exists on line 12 is a parse
+// and the collector will stand behind it; what `email` means is a judgement and lives below.
+
+const SQL_SKIP = /^(primary|foreign|unique|constraint|key|index|check|partition|using|with|like|exclude)\b/i;
+const SQL_CREATE = /create\s+table\s+(?:if\s+not\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s*\(/i;
+
+export function parseSqlDdl(text) {
+  const lines = text.split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = lines[i].match(SQL_CREATE);
+    if (!match) continue;
+    const name = match[1].split(".").pop();
+    const startLine = i + 1;
+    const fields = [];
+    let depth = 0;
+    for (let j = i; j < lines.length; j += 1) {
+      // Strip the comment before counting parens, so a `--` comment cannot close the table early.
+      const line = lines[j].replace(/--.*$/, "");
+      const depthBefore = depth;
+      for (const ch of line) {
+        if (ch === "(") depth += 1;
+        else if (ch === ")") depth -= 1;
+      }
+      // A column sits inside the CREATE TABLE parens, so the line must already be at depth >= 1
+      // before it is read. That is what keeps the CREATE line itself and the closing `);` out.
+      if (j > i && depthBefore >= 1) {
+        const body = line.trim().replace(/^[`"[]/, "");
+        const first = body.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+        if (first && !SQL_SKIP.test(body)) fields.push({ name: first[1], line: j + 1 });
+      }
+      if (j > i && depth <= 0) {
+        i = j;
+        break;
+      }
+    }
+    if (fields.length > 0) out.push({ name, line: startLine, fields });
+  }
+  return out;
+}
+
+export function parsePrisma(text) {
+  const lines = text.split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = lines[i].match(/^\s*model\s+([A-Za-z0-9_]+)\s*\{/);
+    if (!match) continue;
+    const fields = [];
+    for (let j = i + 1; j < lines.length && !/^\s*\}/.test(lines[j]); j += 1) {
+      const body = lines[j].replace(/\/\/.*$/, "").trim();
+      if (body === "" || body.startsWith("@@")) continue;
+      const field = body.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+[A-Za-z_[]/);
+      if (field) fields.push({ name: field[1], line: j + 1 });
+    }
+    if (fields.length > 0) out.push({ name: match[1], line: i + 1, fields });
+  }
+  return out;
+}
+
+// Django (models.Model) and SQLAlchemy (Column(...)) both declare a column as a class attribute
+// assigned from a call. Requiring the call is what keeps ordinary attributes out.
+const PY_COLUMN = /^\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*[^=]+)?=\s*(?:[A-Za-z_][A-Za-z0-9_.]*\.)?(Column|mapped_column|[A-Za-z]*Field|relationship)\s*\(/;
+
+export function parsePythonOrm(text) {
+  const lines = text.split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = lines[i].match(/^class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*:/);
+    if (!match) continue;
+    const bases = match[2];
+    if (!/models\.Model|Base\b|db\.Model|SQLModel|DeclarativeBase/.test(bases)) continue;
+    const fields = [];
+    for (let j = i + 1; j < lines.length && !/^\S/.test(lines[j]); j += 1) {
+      const field = lines[j].match(PY_COLUMN);
+      if (field) fields.push({ name: field[1], line: j + 1 });
+    }
+    if (fields.length > 0) out.push({ name: match[1], line: i + 1, fields });
+  }
+  return out;
+}
+
+export function parseProto(text) {
+  const lines = text.split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = lines[i].match(/^\s*message\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{/);
+    if (!match) continue;
+    const fields = [];
+    for (let j = i + 1; j < lines.length && !/^\s*\}/.test(lines[j]); j += 1) {
+      const body = lines[j].replace(/\/\/.*$/, "").trim();
+      const field = body.match(
+        /^(?:repeated\s+|optional\s+|required\s+)?[A-Za-z_][A-Za-z0-9_.<>, ]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\d+\s*;/
+      );
+      if (field) fields.push({ name: field[1], line: j + 1 });
+    }
+    if (fields.length > 0) out.push({ name: match[1], line: i + 1, fields });
+  }
+  return out;
+}
+
+export function parseGraphql(text) {
+  const lines = text.split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = lines[i].match(/^\s*(?:type|input)\s+([A-Za-z_][A-Za-z0-9_]*)[^{]*\{/);
+    if (!match) continue;
+    const fields = [];
+    for (let j = i + 1; j < lines.length && !/^\s*\}/.test(lines[j]); j += 1) {
+      const body = lines[j].replace(/#.*$/, "").trim();
+      const field = body.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\))?\s*:\s*[A-Za-z[]/);
+      if (field) fields.push({ name: field[1], line: j + 1 });
+    }
+    if (fields.length > 0) out.push({ name: match[1], line: i + 1, fields });
+  }
+  return out;
+}
+
+const PARSERS = [
+  { kind: "sql_ddl", parse: parseSqlDdl, match: (p) => p.endsWith(".sql") },
+  { kind: "prisma", parse: parsePrisma, match: (p) => p.endsWith(".prisma") },
+  { kind: "python_orm", parse: parsePythonOrm, match: (p) => p.endsWith(".py") },
+  { kind: "protobuf", parse: parseProto, match: (p) => p.endsWith(".proto") },
+  {
+    kind: "graphql",
+    parse: parseGraphql,
+    match: (p) => p.endsWith(".graphql") || p.endsWith(".gql") || p.endsWith(".graphqls"),
+  },
+];
+
+// --------------------------------------------------------------------------------------------- //
+// Classification. The only judgement the collector makes is "this name means the same thing in
+// every schema it appears in", and it makes it by lookup, not inference. Everything else is raised.
+
+export function normalizeFieldName(name) {
+  return String(name)
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+export function classifyField(name, table) {
+  const key = normalizeFieldName(name);
+  const hit = table.exact[key];
+  if (hit) {
+    return {
+      data_categories: [hit],
+      needs_review: false,
+      matched_on: key,
+      special_category: table.special_categories.includes(hit),
+    };
+  }
+  if (table.operational.includes(key)) {
+    return { data_categories: [], needs_review: false, operational: true };
+  }
+  return { data_categories: [], needs_review: true, reason: table.maybe_pii.includes(key)
+    ? "the name looks personal but its category depends on what this table is for"
+    : "no exact match in the bundled classification table" };
+}
+
+export function fidesKeyFor(path) {
+  const key = path
+    .replace(/\.[A-Za-z0-9]+$/, "")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+  return key === "" ? "repository" : key;
+}
+
+// --------------------------------------------------------------------------------------------- //
+// Systems. A service is a directory that declares itself one; the repository root is the fallback,
+// because a repository with no package manifest anywhere is still one deployable thing.
+
+const SERVICE_MANIFESTS = new Set([
+  "package.json", "pyproject.toml", "go.mod", "Cargo.toml", "composer.json", "Gemfile",
+  "build.gradle", "pom.xml",
+]);
+
+export function discoverServices(files) {
+  const roots = new Set();
+  for (const rel of files) {
+    const parts = rel.split("/");
+    if (SERVICE_MANIFESTS.has(parts[parts.length - 1])) roots.add(parts.slice(0, -1).join("/"));
+  }
+  if (roots.size === 0) roots.add("");
+  return [...roots].sort();
+}
+
 export function collectFacts(repo) {
   const files = walk(repo);
+  const datasets = [];
+  let fieldCount = 0;
+  let classified = 0;
+  let needsReview = 0;
+  const specialRefs = [];
+
+  for (const rel of files) {
+    const parser = PARSERS.find((p) => p.match(rel));
+    if (!parser) continue;
+    let text;
+    try {
+      const raw = readFileSync(join(repo, rel));
+      if (raw.length > MAX_BYTES) continue;
+      text = raw.toString("utf8");
+    } catch {
+      continue;
+    }
+    const parsed = parser.parse(text);
+    if (parsed.length === 0) continue;
+
+    const collections = parsed.map((collection) => ({
+      name: collection.name,
+      ref: `${rel}:${collection.line}`,
+      fields: collection.fields.map((field) => {
+        const verdict = classifyField(field.name, TABLE);
+        fieldCount += 1;
+        if (verdict.needs_review) needsReview += 1;
+        else if (verdict.data_categories.length > 0) classified += 1;
+        if (verdict.special_category) specialRefs.push(`${rel}:${field.line}`);
+        return { name: field.name, ref: `${rel}:${field.line}`, ...verdict };
+      }),
+    }));
+
+    datasets.push({
+      fides_key: fidesKeyFor(rel),
+      name: rel,
+      source_kind: parser.kind,
+      ref: `${rel}:1`,
+      collections,
+    });
+  }
+
+  const systems = discoverServices(files).map((root) => ({
+    fides_key: fidesKeyFor(root === "" ? "repository" : root),
+    name: root === "" ? "repository" : root,
+    ref: root === "" ? "." : root,
+    dataset_references: datasets
+      .filter((d) => (root === "" ? true : d.name.startsWith(`${root}/`)))
+      .map((d) => d.fides_key)
+      .sort(),
+  }));
+
   return {
     piece: PIECE,
     generated_by: GENERATED_BY,
     files_scanned: files.length,
-    // TODO: replace with the facts this piece can stand behind, each carrying file:line.
-    findings: [],
+    datasets,
+    systems,
+    counts: {
+      datasets: datasets.length,
+      collections: datasets.reduce((n, d) => n + d.collections.length, 0),
+      fields: fieldCount,
+      classified,
+      needs_review: needsReview,
+    },
+    // Article 9 and Article 10 data, listed separately because it carries the most risk and is the
+    // thing a reviewer must not have to go looking for.
+    special_category_refs: specialRefs.sort(),
   };
 }
 
@@ -157,16 +416,62 @@ export function buildSkeleton(derived, provenance) {
     version: VERSION,
     piece: PIECE,
     source: { ...provenance, derived_digest: digestOf(derived) },
-    // TODO: turn derived.findings into items a human can review and sign for.
-    items: [],
+    dataset: derived.datasets.map((dataset) => ({
+      fides_key: dataset.fides_key,
+      name: dataset.name,
+      collections: dataset.collections.map((collection) => ({
+        name: collection.name,
+        refs: [collection.ref],
+        // The collection is the claim unit: one owner signs for "these are the categories in this
+        // table". Per-field attribution would mean five hundred blocks on a five-hundred-column
+        // schema, which is a form nobody fills in.
+        needs_review: true,
+        fields: collection.fields.map((field) => {
+          const out = {
+            name: field.name,
+            data_categories: field.data_categories,
+            refs: [field.ref],
+          };
+          if (field.needs_review) out.needs_review = true;
+          return out;
+        }),
+      })),
+    })),
+    system: derived.systems.map((system) => ({
+      fides_key: system.fides_key,
+      name: system.name,
+      system_type: "Application",
+      dataset_references: system.dataset_references,
+      privacy_declarations: [
+        {
+          name: "",
+          data_use: "",
+          data_subjects: [],
+          data_categories: [],
+          refs: [system.ref],
+          needs_review: true,
+        },
+      ],
+    })),
   };
 }
 
 const HEADER = `# .noru/privacy-datamap.yml — generated by ${GENERATED_BY}
 #
-# Every TODO below is a decision a person has to make and sign for. The validator enforces:
-#   * refs[] must cite the repository lines (file:line) that produced each claim
-#   * interpretation.owner must be a person, not a team alias
+# This is a STARTING POINT, not a data map. The collector found the structure and classified the
+# field names it recognises with certainty; everything it could not resolve is marked
+# needs_review: true, and a manifest carrying one cannot be pushed.
+#
+# What a person has to do, and sign for:
+#   * resolve every needs_review field to a data category, or delete the field if it holds none
+#   * name the purpose, data_use and data_subjects for each system's privacy declarations
+#   * add an interpretation block to each collection and each declaration: who decided, when,
+#     until when, and why
+#
+# What the validator enforces:
+#   * every data_categories / data_use / data_subjects value is a real Fideslang key
+#   * refs[] cites the repository lines (file:line) that produced each claim
+#   * interpretation.owner is a person, not a team alias
 #   * needs_review: true blocks the push
 `;
 
@@ -227,7 +532,7 @@ function main(argv) {
     drift,
     wrote_skeleton: wroteSkeleton,
     provenance,
-    counts: { files_scanned: derived.files_scanned, findings: derived.findings.length },
+    counts: { files_scanned: derived.files_scanned, ...derived.counts },
   };
 
   if (opts.json) {
@@ -236,7 +541,12 @@ function main(argv) {
     process.stdout.write(
       [
         `scanned ${derived.files_scanned} file(s) in ${opts.repo}`,
-        `findings: ${derived.findings.length}`,
+        `${derived.counts.datasets} dataset(s), ${derived.counts.collections} collection(s), ` +
+          `${derived.counts.fields} field(s)`,
+        `classified: ${derived.counts.classified}, needs review: ${derived.counts.needs_review}`,
+        derived.special_category_refs.length > 0
+          ? `special-category data at: ${derived.special_category_refs.join(", ")}`
+          : "",
         `derived facts: ${summary.derived_facts}`,
         wroteSkeleton ? `wrote skeleton: ${summary.manifest}` : "",
         drift ? "DRIFT: the manifest does not match the repository as it is now" : "",

@@ -1,0 +1,14 @@
+datasource db {
+  provider = "postgresql"
+}
+
+model Subscriber {
+  id             Int      @id @default(autoincrement())
+  emailAddress   String   @unique
+  displayName    String?
+  dateOfBirth    DateTime?
+  preferredTopic String?
+  createdAt      DateTime @default(now())
+
+  @@index([emailAddress])
+}

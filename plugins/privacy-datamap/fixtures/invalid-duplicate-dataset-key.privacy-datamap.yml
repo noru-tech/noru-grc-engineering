@@ -16,6 +16,15 @@ dataset:
       - name: accounts
         refs:
           - "db/migrations/0001_create_accounts.sql:2"
+        interpretation:
+          owner: Dana Okafor
+          decided_at: "2026-08-20"
+          expires_at: "2027-02-20"
+          rationale: >-
+            Walked the table with the service owner. The classifications follow the column
+            semantics enforced by the application layer, not just the column names.
+          refs:
+            - "db/migrations/0001_create_accounts.sql:2"
         fields:
           - name: email
             data_categories:
@@ -36,6 +45,9 @@ dataset:
             data_categories: []
             refs:
               - "db/migrations/0001_create_accounts.sql:9"
+  - fides_key: app_postgres
+    name: a second store claiming the same key
+    collections: []
 system:
   - fides_key: web_app
     name: The customer-facing web application

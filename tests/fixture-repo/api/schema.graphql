@@ -1,0 +1,6 @@
+type Viewer {
+  id: ID!
+  username: String!
+  ipAddress: String
+  bio: String
+}

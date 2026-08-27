@@ -362,16 +362,43 @@ PIECE = "privacy-datamap"
 REF_RE = re.compile(r"^[^:\s][^:]*:[0-9]+$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+# Fideslang's own key grammar, from the upstream FidesKey type.
+FIDES_KEY_RE = re.compile(r"^[A-Za-z0-9_.<>-]+$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
-TOP_LEVEL_KEYS = {"version", "piece", "source", "items"}
+TOP_LEVEL_KEYS = {"version", "piece", "source", "dataset", "system"}
 SOURCE_KEYS = {"slug", "commit_sha", "branch", "generated_by", "derived_digest"}
 INTERPRETATION_KEYS = {"owner", "decided_at", "expires_at", "rationale", "refs"}
-ITEM_KEYS = {"key", "kind", "title", "refs", "interpretation", "needs_review"}
+DATASET_KEYS = {"fides_key", "name", "description", "collections"}
+COLLECTION_KEYS = {"name", "description", "refs", "interpretation", "needs_review", "fields"}
+FIELD_KEYS = {"name", "description", "data_categories", "refs", "needs_review", "fields"}
+SYSTEM_KEYS = {
+    "fides_key", "name", "description", "system_type", "dataset_references",
+    "privacy_declarations",
+}
+DECLARATION_KEYS = {
+    "name", "data_use", "data_categories", "data_subjects", "refs", "interpretation",
+    "needs_review",
+}
 
 
 def load_vocabulary():
-    return json.loads((REFERENCES / "vocabulary.json").read_text(encoding="utf-8"))
+    """The bundled vocabulary plus the Fideslang snapshot the piece validates keys against.
+
+    Offline by construction (requirement 3). Where the piece can reach Noru, getPrivacyTaxonomy is
+    authoritative and :scan reconciles against it — a key this snapshot has never heard of is a
+    stale snapshot, not necessarily an invalid key. That reconciliation is the skill's job; this
+    file's job is to be right about the snapshot it has.
+    """
+    vocab = json.loads((REFERENCES / "vocabulary.json").read_text(encoding="utf-8"))
+    for name, key in (
+        ("data_categories", "data_categories"),
+        ("data_uses", "data_use"),
+        ("data_subjects", "data_subjects"),
+    ):
+        rows = json.loads((REFERENCES / "taxonomy" / f"{name}.json").read_text(encoding="utf-8"))
+        vocab[key] = [row["fides_key"] for row in rows]
+    return vocab
 
 
 def check_unknown_keys(rep, path, obj, allowed):
@@ -438,11 +465,228 @@ def check_source(rep, doc):
             )
 
 
+def check_categories(rep, path, node, vocab):
+    """Every data category must be a real Fideslang key. A typo is an error, not a new category."""
+    cats = node.get("data_categories")
+    if cats is None:
+        return []
+    if not isinstance(cats, list):
+        rep.err(f"{path}.data_categories", "must be a list")
+        return []
+    for i, cat in enumerate(cats):
+        if not isinstance(cat, str) or cat not in vocab["data_categories"]:
+            rep.err(
+                f"{path}.data_categories[{i}]",
+                f"unknown fideslang data category '{cat}'"
+                + suggest(str(cat), vocab["data_categories"]),
+            )
+    return cats
+
+
+def check_fields(rep, path, fields, vocab, counts):
+    if not isinstance(fields, list):
+        rep.err(f"{path}.fields", "must be a list")
+        return
+    seen = set()
+    for i, field in enumerate(fields):
+        fpath = f"{path}.fields[{i}]"
+        if not isinstance(field, dict):
+            rep.err(fpath, "field must be a mapping")
+            continue
+        check_unknown_keys(rep, fpath, field, FIELD_KEYS)
+        name = field.get("name")
+        if not name or not isinstance(name, str):
+            rep.err(f"{fpath}.name", "missing required `name`")
+        elif name in seen:
+            rep.err(f"{fpath}.name", f"duplicate field '{name}' in this collection")
+        else:
+            seen.add(name)
+        counts["fields"] += 1
+
+        cats = check_categories(rep, fpath, field, vocab)
+        # A field says where it came from or it is not a claim about this repository.
+        check_refs(rep, fpath, field)
+        if field.get("needs_review") is True:
+            counts["needs_review"] += 1
+            rep.err(
+                f"{fpath}.needs_review",
+                "still true — the collector could not classify this field and nobody has. Give it "
+                "a data category, or delete the field if it holds no personal data, then remove "
+                "the flag",
+            )
+        elif not cats:
+            # Not an error: plenty of columns are operational. But it is worth saying out loud,
+            # because a data map that quietly omits a field looks identical to one that considered
+            # it and found nothing.
+            rep.warn(f"{fpath}.data_categories", "empty — recorded as holding no personal data")
+        # Nested fields: a JSON column, an embedded document, a protobuf sub-message.
+        if "fields" in field:
+            check_fields(rep, fpath, field["fields"], vocab, counts)
+
+
+def check_datasets(rep, doc, vocab, counts):
+    datasets = doc.get("dataset")
+    if datasets is None:
+        rep.err("dataset", "missing required `dataset` (an empty list is a valid answer)")
+        return []
+    if not isinstance(datasets, list):
+        rep.err("dataset", "must be a list")
+        return []
+
+    keys = []
+    seen = set()
+    for i, dataset in enumerate(datasets):
+        path = f"dataset[{i}]"
+        if not isinstance(dataset, dict):
+            rep.err(path, "dataset must be a mapping")
+            continue
+        check_unknown_keys(rep, path, dataset, DATASET_KEYS)
+        key = dataset.get("fides_key")
+        if not key or not isinstance(key, str) or not FIDES_KEY_RE.match(key):
+            rep.err(
+                f"{path}.fides_key",
+                f"'{key}' does not match the Fides key pattern [A-Za-z0-9_.<>-]",
+            )
+        elif key in seen:
+            rep.err(f"{path}.fides_key", f"duplicate dataset key '{key}'")
+        else:
+            seen.add(key)
+            keys.append(key)
+        if not dataset.get("name"):
+            rep.err(f"{path}.name", "missing required `name` — a key nobody can read is not a map")
+
+        collections = dataset.get("collections")
+        if collections is None:
+            rep.err(f"{path}.collections", "missing required `collections`")
+            continue
+        if not isinstance(collections, list):
+            rep.err(f"{path}.collections", "must be a list")
+            continue
+        for j, collection in enumerate(collections):
+            cpath = f"{path}.collections[{j}]"
+            if not isinstance(collection, dict):
+                rep.err(cpath, "collection must be a mapping")
+                continue
+            check_unknown_keys(rep, cpath, collection, COLLECTION_KEYS)
+            if not collection.get("name"):
+                rep.err(f"{cpath}.name", "missing required `name`")
+            counts["collections"] += 1
+            # The collection is the claim unit: one person signs for "these are the categories in
+            # this table". Per-field attribution would be five hundred blocks on a five-hundred
+            # column schema, which is a form nobody fills in.
+            check_refs(rep, cpath, collection)
+            check_interpretation(rep, cpath, collection)
+            if collection.get("needs_review") is True:
+                counts["needs_review"] += 1
+                rep.err(
+                    f"{cpath}.needs_review",
+                    "still true — nobody has reviewed this collection's classification. Review it "
+                    "and remove the flag before pushing",
+                )
+            check_fields(rep, cpath, collection.get("fields", []), vocab, counts)
+    return keys
+
+
+def check_systems(rep, doc, vocab, dataset_keys, counts):
+    systems = doc.get("system")
+    if systems is None:
+        rep.err("system", "missing required `system` (an empty list is a valid answer)")
+        return
+    if not isinstance(systems, list):
+        rep.err("system", "must be a list")
+        return
+
+    seen = set()
+    for i, system in enumerate(systems):
+        path = f"system[{i}]"
+        if not isinstance(system, dict):
+            rep.err(path, "system must be a mapping")
+            continue
+        check_unknown_keys(rep, path, system, SYSTEM_KEYS)
+        key = system.get("fides_key")
+        if not key or not isinstance(key, str) or not FIDES_KEY_RE.match(key):
+            rep.err(
+                f"{path}.fides_key",
+                f"'{key}' does not match the Fides key pattern [A-Za-z0-9_.<>-]",
+            )
+        elif key in seen:
+            rep.err(f"{path}.fides_key", f"duplicate system key '{key}'")
+        else:
+            seen.add(key)
+        if not system.get("name"):
+            rep.err(f"{path}.name", "missing required `name`")
+        counts["systems"] += 1
+
+        # A reference to a dataset this manifest does not define is a dangling edge in the map:
+        # the graph would show a system reading from a store nothing describes.
+        refs = system.get("dataset_references") or []
+        if not isinstance(refs, list):
+            rep.err(f"{path}.dataset_references", "must be a list")
+        else:
+            for j, ref in enumerate(refs):
+                if ref not in dataset_keys:
+                    rep.err(
+                        f"{path}.dataset_references[{j}]",
+                        f"'{ref}' is not a dataset defined in this manifest"
+                        + suggest(str(ref), dataset_keys),
+                    )
+
+        declarations = system.get("privacy_declarations")
+        if declarations is None:
+            rep.err(f"{path}.privacy_declarations", "missing required `privacy_declarations`")
+            continue
+        if not isinstance(declarations, list):
+            rep.err(f"{path}.privacy_declarations", "must be a list")
+            continue
+        for j, decl in enumerate(declarations):
+            dpath = f"{path}.privacy_declarations[{j}]"
+            if not isinstance(decl, dict):
+                rep.err(dpath, "privacy declaration must be a mapping")
+                continue
+            check_unknown_keys(rep, dpath, decl, DECLARATION_KEYS)
+            if not decl.get("name"):
+                rep.err(f"{dpath}.name", "missing required `name` — say what this processing is for")
+            use = decl.get("data_use")
+            if not use:
+                rep.err(f"{dpath}.data_use", "missing required `data_use`")
+            elif use not in vocab["data_use"]:
+                rep.err(
+                    f"{dpath}.data_use",
+                    f"unknown fideslang data use '{use}'" + suggest(str(use), vocab["data_use"]),
+                )
+            subjects = decl.get("data_subjects")
+            if not subjects:
+                rep.err(f"{dpath}.data_subjects", "missing required `data_subjects`")
+            elif not isinstance(subjects, list):
+                rep.err(f"{dpath}.data_subjects", "must be a list")
+            else:
+                for k, subject in enumerate(subjects):
+                    if subject not in vocab["data_subjects"]:
+                        rep.err(
+                            f"{dpath}.data_subjects[{k}]",
+                            f"unknown fideslang data subject '{subject}'"
+                            + suggest(str(subject), vocab["data_subjects"]),
+                        )
+            check_categories(rep, dpath, decl, vocab)
+            check_refs(rep, dpath, decl)
+            check_interpretation(rep, dpath, decl)
+            if decl.get("needs_review") is True:
+                counts["needs_review"] += 1
+                rep.err(
+                    f"{dpath}.needs_review",
+                    "still true — the collector cannot know what a system uses data for. Name the "
+                    "purpose, the data use and the subjects, then remove the flag",
+                )
+
+
 def validate(doc, vocab):
     rep = Report()
-    counts = {"items": 0}
+    counts = {"datasets": 0, "collections": 0, "fields": 0, "systems": 0, "needs_review": 0}
     if not isinstance(doc, dict):
-        rep.err("<root>", "manifest must be a mapping with `version`, `piece`, `source`, `items`")
+        rep.err(
+            "<root>",
+            "manifest must be a mapping with `version`, `piece`, `source`, `dataset`, `system`",
+        )
         return rep, counts
 
     check_unknown_keys(rep, "<root>", doc, TOP_LEVEL_KEYS)
@@ -453,48 +697,9 @@ def validate(doc, vocab):
         rep.err("piece", f"expected '{PIECE}', found '{doc.get('piece')}'")
 
     check_source(rep, doc)
-
-    items = doc.get("items")
-    if items is None:
-        rep.err("items", "missing required `items` (an empty list is a valid answer)")
-        items = []
-    elif not isinstance(items, list):
-        rep.err("items", "must be a list")
-        items = []
-
-    seen = set()
-    for i, item in enumerate(items):
-        path = f"items[{i}]"
-        if not isinstance(item, dict):
-            rep.err(path, "item must be a mapping")
-            continue
-        check_unknown_keys(rep, path, item, ITEM_KEYS)
-        key = item.get("key")
-        if not key or not isinstance(key, str) or not KEY_RE.match(key):
-            rep.err(f"{path}.key", f"'{key}' is not a stable lowercase key")
-        elif key in seen:
-            rep.err(f"{path}.key", f"duplicate key '{key}' — keys must be unique and stable")
-        else:
-            seen.add(key)
-        if not item.get("title"):
-            rep.err(f"{path}.title", "missing required `title`")
-        kind = item.get("kind")
-        if kind is None:
-            rep.err(f"{path}.kind", "missing required `kind`")
-        elif kind not in vocab["item_kind"]:
-            rep.err(
-                f"{path}.kind",
-                f"unknown item kind '{kind}'" + suggest(kind, vocab["item_kind"]),
-            )
-        check_refs(rep, path, item)
-        check_interpretation(rep, path, item)
-        if item.get("needs_review") is True:
-            rep.err(
-                f"{path}.needs_review",
-                "still true — a human has not resolved this; resolve it and remove the flag "
-                "before pushing",
-            )
-    counts["items"] = len(items)
+    dataset_keys = check_datasets(rep, doc, vocab, counts)
+    check_systems(rep, doc, vocab, dataset_keys, counts)
+    counts["datasets"] = len(doc.get("dataset") or [])
     return rep, counts
 
 
@@ -588,7 +793,11 @@ def main(argv):
         print(f"\nFAILED: {len(rep.errors)} error(s), {len(rep.warnings)} warning(s).")
         return 1
     if not quiet:
-        print(f"\nOK: {counts['items']} item(s), all keys valid ({len(rep.warnings)} warning(s)).")
+        print(
+            f"\nOK: {counts['datasets']} dataset(s), {counts['collections']} collection(s), "
+            f"{counts['fields']} field(s), {counts['systems']} system(s), all keys valid "
+            f"({len(rep.warnings)} warning(s))."
+        )
     return 0
 
 

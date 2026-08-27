@@ -40,6 +40,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 AI_INVENTORY = ROOT / "plugins" / "ai-inventory"
 COLLECTOR = AI_INVENTORY / "scripts" / "collect.mjs"
 VALIDATOR = AI_INVENTORY / "scripts" / "validate_manifest.py"
+PRIVACY_DATAMAP = ROOT / "plugins" / "privacy-datamap"
 
 
 class Results:
@@ -849,6 +850,217 @@ def test_audit_pack_every_conclusion_has_an_assurance_horizon(results):
     )
 
 
+# --------------------------------------------------------------------------------------------- #
+# privacy-datamap. The weight here is on the split the piece rests on: structure is *derived* and
+# meaning is *judged*. A parser that reports a column exists is standing behind a fact; a table that
+# says `email` means user.contact.email is standing behind a lookup. Anything outside both is raised
+# for a human rather than guessed, because a confidently wrong data category is worse than a gap —
+# the gap gets reviewed and the wrong answer gets signed.
+
+
+def datamap_repo(tmp, name, files):
+    repo = pathlib.Path(tmp) / name
+    for rel, body in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    collector = PRIVACY_DATAMAP / "scripts" / "collect.mjs"
+    result = run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+    if result.returncode != 0:
+        raise RuntimeError(f"collector exited {result.returncode}: {result.stderr[:300]}")
+    derived = json.loads(
+        (repo / ".noru" / ".cache" / "privacy-datamap.derived.json").read_text(encoding="utf-8")
+    )
+    return derived, repo
+
+
+def fields_of(derived, collection_name):
+    for dataset in derived["datasets"]:
+        for collection in dataset["collections"]:
+            if collection["name"] == collection_name:
+                return {f["name"]: f for f in collection["fields"]}
+    return {}
+
+
+SQL_FIXTURE = """CREATE TABLE accounts (
+    id            BIGSERIAL PRIMARY KEY,
+    email         TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    weird_column  TEXT,
+    created_at    TIMESTAMPTZ,
+    CONSTRAINT accounts_email_lower CHECK (email = lower(email))
+);
+"""
+
+
+def test_datamap_reads_every_declared_format(results, tmp):
+    """Each parser the README claims must actually find its collection, or the claim is marketing."""
+    derived, _ = datamap_repo(
+        tmp,
+        "formats",
+        {
+            "db/schema.sql": SQL_FIXTURE,
+            "store/schema.prisma": "model Subscriber {\n  id Int @id\n  emailAddress String\n}\n",
+            "store/models.py": (
+                "from django.db import models\n\n\n"
+                "class Patient(models.Model):\n"
+                "    full_name = models.CharField(max_length=200)\n"
+                "    date_of_birth = models.DateField()\n"
+            ),
+            "api/contact.proto": (
+                'syntax = "proto3";\n\nmessage ContactCard {\n  string email = 1;\n}\n'
+            ),
+            "api/schema.graphql": "type Viewer {\n  username: String!\n  ipAddress: String\n}\n",
+        },
+    )
+    found = {d["source_kind"] for d in derived["datasets"]}
+    for kind in ("sql_ddl", "prisma", "python_orm", "protobuf", "graphql"):
+        results.check(
+            f"[privacy-datamap] the {kind} parser finds a collection",
+            kind in found,
+            f"found: {sorted(found)}",
+        )
+    results.check(
+        "[privacy-datamap] a SQL constraint clause is not read as a column",
+        "CONSTRAINT" not in fields_of(derived, "accounts")
+        and "accounts_email_lower" not in fields_of(derived, "accounts"),
+        sorted(fields_of(derived, "accounts")),
+    )
+
+
+def test_datamap_classifies_only_what_it_knows(results, tmp):
+    derived, _ = datamap_repo(tmp, "classify", {"db/schema.sql": SQL_FIXTURE})
+    fields = fields_of(derived, "accounts")
+
+    results.check(
+        "[privacy-datamap] an exact match is classified",
+        fields.get("email", {}).get("data_categories") == ["user.contact.email"],
+        fields.get("email"),
+    )
+    # The whole determinism argument rests on this: a name the table does not know is RAISED, never
+    # inferred. A collector that guessed would be non-deterministic and confidently wrong at once.
+    results.check(
+        "[privacy-datamap] an unrecognised name is raised, not guessed",
+        fields.get("weird_column", {}).get("needs_review") is True
+        and fields.get("weird_column", {}).get("data_categories") == [],
+        fields.get("weird_column"),
+    )
+    # Operational columns are not personal data and must not become review noise; a reviewer who has
+    # to dismiss `id` and `created_at` on every table stops reading the list.
+    results.check(
+        "[privacy-datamap] an operational column is not review noise",
+        fields.get("created_at", {}).get("needs_review") is not True
+        and fields.get("id", {}).get("needs_review") is not True,
+        [fields.get("id"), fields.get("created_at")],
+    )
+
+
+def test_datamap_normalises_naming_styles(results, tmp):
+    """The same column in camelCase, snake_case and PascalCase is the same column."""
+    derived, _ = datamap_repo(
+        tmp,
+        "naming",
+        {
+            "store/schema.prisma": (
+                "model A {\n  emailAddress String\n  last_login_ip String\n  DateOfBirth String\n}\n"
+            )
+        },
+    )
+    fields = fields_of(derived, "A")
+    for name, expected in (
+        ("emailAddress", "user.contact.email"),
+        ("last_login_ip", "user.device.ip_address"),
+        ("DateOfBirth", "user.demographic.date_of_birth"),
+    ):
+        results.check(
+            f"[privacy-datamap] {name} normalises to {expected}",
+            fields.get(name, {}).get("data_categories") == [expected],
+            fields.get(name),
+        )
+
+
+def test_datamap_citations_point_at_the_real_line(results, tmp):
+    """A citation that points at the wrong line is worse than no citation: it looks checkable."""
+    derived, repo = datamap_repo(tmp, "refs", {"db/schema.sql": SQL_FIXTURE})
+    fields = fields_of(derived, "accounts")
+    ok = True
+    detail = []
+    for name, field in fields.items():
+        path, _, line = field["ref"].rpartition(":")
+        source = (repo / path).read_text(encoding="utf-8").split("\n")[int(line) - 1]
+        if name not in source:
+            ok = False
+            detail.append(f"{name} cited at {field['ref']} but that line reads {source.strip()!r}")
+    results.check(
+        "[privacy-datamap] every field citation resolves to the line the field is on", ok, detail
+    )
+
+
+def test_datamap_surfaces_special_category_data(results, tmp):
+    """Article 9 data is the highest-risk thing in a data map and must never be a line to scroll past."""
+    derived, _ = datamap_repo(
+        tmp,
+        "special",
+        {
+            "store/models.py": (
+                "from django.db import models\n\n\n"
+                "class Patient(models.Model):\n"
+                "    medical_record_number = models.CharField(max_length=64)\n"
+                "    email = models.EmailField()\n"
+            )
+        },
+    )
+    fields = fields_of(derived, "Patient")
+    results.check(
+        "[privacy-datamap] special-category data is flagged on the field",
+        fields.get("medical_record_number", {}).get("special_category") is True,
+        fields.get("medical_record_number"),
+    )
+    results.check(
+        "[privacy-datamap] ordinary personal data is not flagged special",
+        fields.get("email", {}).get("special_category") is not True,
+        fields.get("email"),
+    )
+    results.check(
+        "[privacy-datamap] special-category citations are collected for the report",
+        derived["special_category_refs"] == ["store/models.py:5"],
+        derived["special_category_refs"],
+    )
+
+
+def test_datamap_never_overwrites_a_reviewed_manifest(results, tmp):
+    """Regenerating over someone's signed classification is the worst thing a collector can do,
+    because it looks like it worked."""
+    derived, repo = datamap_repo(tmp, "no-clobber", {"db/schema.sql": SQL_FIXTURE})
+    manifest = repo / ".noru" / "privacy-datamap.yml"
+    reviewed = manifest.read_text(encoding="utf-8") + "\n# a human edited this\n"
+    manifest.write_text(reviewed, encoding="utf-8")
+
+    (repo / "db" / "schema.sql").write_text(
+        SQL_FIXTURE.replace("weird_column  TEXT,", "weird_column  TEXT,\n    phone_number  TEXT,"),
+        encoding="utf-8",
+    )
+    collector = PRIVACY_DATAMAP / "scripts" / "collect.mjs"
+    again = run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+    results.check(
+        "[privacy-datamap] a changed schema reports drift instead of rewriting the manifest",
+        again.returncode == 0 and json.loads(again.stdout)["drift"] is True,
+        again.stdout[:200],
+    )
+    results.check(
+        "[privacy-datamap] the reviewed manifest is left exactly as the human left it",
+        manifest.read_text(encoding="utf-8") == reviewed,
+        "the collector overwrote a manifest a person had edited",
+    )
+    checked = run(["node", str(collector), f"--repo={repo}", "--check", "--output=json", "--quiet"])
+    results.check(
+        "[privacy-datamap] --check exits 1 on that drift so CI fails",
+        checked.returncode == 1,
+        f"exit {checked.returncode}",
+    )
+
+
+
 def main(argv):
     output_json = False
     quiet = False
@@ -879,6 +1091,12 @@ def main(argv):
             test_emotion_recognition_is_biometric(results, tmp)
             test_art5_screen(results, tmp)
             test_skeleton_never_asserts(results, tmp)
+            test_datamap_reads_every_declared_format(results, tmp)
+            test_datamap_classifies_only_what_it_knows(results, tmp)
+            test_datamap_normalises_naming_styles(results, tmp)
+            test_datamap_citations_point_at_the_real_line(results, tmp)
+            test_datamap_surfaces_special_category_data(results, tmp)
+            test_datamap_never_overwrites_a_reviewed_manifest(results, tmp)
             test_iac_never_copies_the_line(results, tmp)
             test_iac_identity_survives_a_move(results, tmp)
             test_iac_absence_is_detectable(results, tmp)

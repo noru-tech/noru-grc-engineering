@@ -12,6 +12,58 @@
 | `/privacy-datamap:diff` | no | Reads current state, prints the exact plan |
 | `/privacy-datamap:push` | **yes** | Executes the confirmed plan |
 
+## What it reads
+
+| Format | Files | What it takes |
+|---|---|---|
+| SQL DDL | `*.sql` (schemas, migrations) | `CREATE TABLE` → collection, each column → field |
+| Prisma | `*.prisma` | `model` → collection, each field |
+| Python ORM | `*.py` | Django `models.Model` and SQLAlchemy declarative classes; an attribute assigned from `Column(...)`, `mapped_column(...)` or a `*Field(...)` call |
+| Protobuf | `*.proto` | `message` → collection, each numbered field |
+| GraphQL SDL | `*.graphql`, `*.gql`, `*.graphqls` | `type` and `input` → collection, each field |
+
+**Not read yet**, and worth saying so plainly rather than letting an empty result imply a clean
+repository: OpenAPI and JSON Schema, TypeORM and Sequelize entities, Mongoose schemas, ActiveRecord,
+Ecto, GORM structs, and TypeScript or Zod DTOs. A repository whose schema lives only in one of those
+will produce an empty data map, which is not the same as having no personal data in it. If the piece
+finds nothing, check this table before concluding anything.
+
+## Structure is derived, meaning is judged
+
+This split is the whole design, and it is what lets a collector be deterministic (contract
+requirement 2) while the interesting part of the work is a judgement.
+
+**The collector stands behind** the structure: that a column named `email` exists at
+`db/schema.sql:12` is a parse, not an opinion, and it carries the `file:line` to prove it. It also
+classifies the field names it can resolve by **exact lookup** against
+[`references/classification.json`](./references/classification.json) — a table, not an inference. A
+name only belongs in that table when it means the same thing in every schema it appears in.
+
+**A person stands behind** everything else, and the collector marks it rather than guessing:
+
+- a field name the table does not know → `needs_review: true`
+- what each system uses the data *for* — `data_use`, `data_subjects`, the purpose → `needs_review: true`
+- the `interpretation` block on each collection and each declaration: who decided, when, until when, why
+
+A manifest carrying any `needs_review: true` **cannot be pushed**. That is the mechanism, not a
+lint: a confidently wrong data category is worse than a gap, because the gap gets reviewed and the
+wrong answer gets signed.
+
+The claim unit is the **collection**, not the field. One person signs for "these are the categories
+in this table"; per-field attribution would mean five hundred interpretation blocks on a
+five-hundred-column schema, which is a form nobody fills in. Field-level uncertainty still shows,
+as `needs_review` flags inside the collection that block the push.
+
+Special-category data — GDPR Article 9, plus Article 10 criminal-offence data — is collected into
+its own list so a reviewer never has to go looking for the highest-risk thing in the map.
+
+## Accuracy
+
+The validator guarantees every key it emits is a **real** Fideslang key. It cannot guarantee the
+judgement is **right**. Classification is a model inference over a lookup table; review the
+`needs_review` items and spot-check the rest before treating the output as authoritative. This
+accelerates a data map. It does not replace privacy review.
+
 ## Scopes
 
 Least privilege. Start read-only.

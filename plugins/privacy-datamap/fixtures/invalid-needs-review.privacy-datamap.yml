@@ -16,8 +16,18 @@ dataset:
       - name: accounts
         refs:
           - "db/migrations/0001_create_accounts.sql:2"
+        interpretation:
+          owner: Dana Okafor
+          decided_at: "2026-08-20"
+          expires_at: "2027-02-20"
+          rationale: >-
+            Walked the table with the service owner. The classifications follow the column
+            semantics enforced by the application layer, not just the column names.
+          refs:
+            - "db/migrations/0001_create_accounts.sql:2"
         fields:
           - name: email
+            needs_review: true
             data_categories:
               - user.contact.email
             refs:
