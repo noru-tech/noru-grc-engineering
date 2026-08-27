@@ -39,7 +39,7 @@ import sys
 import difflib
 import re
 
-_BLOCK_SCALAR_RE = re.compile(r"^[>|][+\-]?\d*$")  # >, |, >-, >+, |-, |+, >2, |2, …
+_BLOCK_SCALAR_RE = re.compile(r"^[>|](?:[+-]\d*|\d*[+-]?)$")  # >, |, >-, |+, >2, |2-, |-2, …
 
 
 def load_yaml(text):
@@ -148,16 +148,111 @@ def _strip_comment(line):
     return line
 
 
+def _block_header(val):
+    """Split a `>`/`|` header into (style, chomping, explicit indent), or None if it is not one."""
+    if not _BLOCK_SCALAR_RE.match(val):
+        return None
+    style, chomp, digits = val[0], "", ""
+    for ch in val[1:]:  # YAML allows the two indicators in either order: `|2-` and `|-2`
+        if ch in "+-":
+            chomp = ch
+        else:
+            digits += ch
+    return style, chomp, int(digits) if digits else 0
+
+
+def _read_block_scalar(raw, start, key_col, header, final_break):
+    """Return (value, index after the block) for the `>`/`|` block whose header is above `start`.
+
+    The lines are read from the raw document, never from the comment-stripped stream: inside a
+    block scalar a `#` is prose, not a comment. Stripping it deletes the rest of the line, so a
+    rationale citing `ticket #4412`, `C#` or a URL fragment would be stored short -- content loss
+    the reader has no way to notice, on exactly the machines that have no PyYAML to fall back to.
+    """
+    style, chomp, increment = header
+    # An explicit indicator counts from the key's column; otherwise the first non-blank line sets
+    # the indentation, and anything less indented than it ends the block.
+    indent = key_col + increment if increment else None
+    body, i = [], start
+    while i < len(raw):
+        line = raw[i]
+        if line.strip():
+            line_indent = len(line) - len(line.lstrip(" "))
+            if indent is None:
+                if line_indent <= key_col:
+                    break
+                indent = line_indent
+            elif line_indent < indent:
+                break
+        body.append(line)
+        i += 1
+
+    stripped = [line[indent:] if indent and len(line) > indent else "" for line in body]
+    end = len(stripped)
+    while end and stripped[end - 1] == "":
+        end -= 1
+    content, trailing = stripped[:end], len(stripped) - end
+
+    # Breaks available to the chomping indicator: the one that ends the last content line, plus
+    # one per blank line after it. A document that stops mid-line ends its last line with no
+    # break at all, and PyYAML drops the newline accordingly.
+    breaks = trailing + (1 if content else 0)
+    if i >= len(raw) and not final_break:
+        breaks -= 1
+    breaks = max(breaks, 0)
+    if not content:
+        # An empty block keeps its blank lines only under `+`; clip and strip discard them.
+        return ("\n" * breaks if chomp == "+" else ""), i
+
+    text = "\n".join(content) if style == "|" else _fold(content)
+    if chomp == "-":
+        return text, i
+    return text + "\n" * (breaks if chomp == "+" else min(breaks, 1)), i
+
+
+def _fold(lines):
+    """Fold a `>` block: line breaks become spaces, except around blank or more-indented lines."""
+    out, prev = [], None
+    for line in lines:
+        if line == "":
+            out.append("\n")  # a run of n blank lines folds to n newlines, not n + 1
+        else:
+            if out and prev != "":
+                out.append("\n" if prev.startswith(" ") or line.startswith(" ") else " ")
+            out.append(line)
+        prev = line
+    return "".join(out)
+
+
 def _tokenize(text):
-    out = []
-    for raw in text.splitlines():
-        stripped = _strip_comment(raw).rstrip()
-        if not stripped.strip():
-            continue
-        if stripped.lstrip().startswith("#"):
+    """Flatten the document to (indent, content, block) triples; `block` is a resolved scalar.
+
+    Block scalars are resolved here rather than in _parse_map because their extent is a property
+    of the raw text -- their lines must escape comment stripping, blank-line dropping and the
+    rstrip that the rest of the tokenizer applies.
+    """
+    out, raw, i = [], text.splitlines(), 0
+    # Whether the document's last line is terminated: a block that runs to an unterminated final
+    # line has one break fewer than its line count suggests.
+    final_break = bool(raw) and text.splitlines(True)[-1] != raw[-1]
+    while i < len(raw):
+        stripped = _strip_comment(raw[i]).rstrip()
+        if not stripped.strip() or stripped.lstrip().startswith("#"):
+            i += 1
             continue
         indent = len(stripped) - len(stripped.lstrip(" "))
-        out.append((indent, stripped.lstrip(" ")))
+        content = stripped.lstrip(" ")
+        key, val = _split_kv(content)
+        header = _block_header(val) if val else None
+        if key is None or header is None:
+            out.append((indent, content, None))
+            i += 1
+            continue
+        # A block under a sequence item indents from the key, not from the dash: in `- note: >`
+        # the sibling `other:` sits deeper than the dash but shallower than the block's content.
+        key_col = indent + (len(content) - len(content.lstrip("- ")))
+        block, i = _read_block_scalar(raw, i + 1, key_col, header, final_break)
+        out.append((indent, key + ":", block))
     return out
 
 
@@ -201,7 +296,7 @@ def _parse_seq(lines, i, indent):
         elif _split_kv(rest)[0] is not None:
             child_indent = indent + (len(lines[i][1]) - len(lines[i][1].lstrip("- ")))
             child_indent = indent + 2 if child_indent <= indent else child_indent
-            group = [(child_indent, rest)]
+            group = [(child_indent, rest, lines[i][2])]
             j = i + 1
             while j < len(lines) and lines[j][0] >= child_indent:
                 group.append(lines[j])
@@ -221,7 +316,10 @@ def _parse_map(lines, i, indent):
         key, val = _split_kv(lines[i][1])
         if key is None:
             break
-        if val is None:
+        if lines[i][2] is not None:
+            d[key] = lines[i][2]
+            i += 1
+        elif val is None:
             i += 1
             if i < len(lines) and lines[i][0] > indent:
                 child, i = _parse_node(lines, i)
@@ -233,17 +331,6 @@ def _parse_map(lines, i, indent):
                 d[key] = child
             else:
                 d[key] = None
-        elif _BLOCK_SCALAR_RE.match(val):
-            # Block scalar (> folded, | literal): consume the indented continuation lines as the
-            # value. Without this the continuation sits deeper than the current map context and
-            # _parse_map breaks early, silently dropping every key after it.
-            i += 1
-            block_lines = []
-            while i < len(lines) and lines[i][0] > indent:
-                block_lines.append(lines[i][1])
-                i += 1
-            sep = " " if val[0] == ">" else "\n"
-            d[key] = sep.join(block_lines)
         else:
             d[key] = _scalar(val)
             i += 1
