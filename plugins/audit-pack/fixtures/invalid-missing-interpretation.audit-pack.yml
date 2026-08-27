@@ -1,0 +1,15 @@
+# Fixture: a claim with a citation but nobody standing behind it.
+# Expected: exit 1, "missing required `interpretation`".
+version: 0.1.0
+piece: audit-pack
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: audit-pack@0.1.0
+items:
+  - key: example-item
+    kind: TODO_first_kind
+    title: An example item
+    refs:
+      - src/example.ts:12

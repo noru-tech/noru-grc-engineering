@@ -1,0 +1,14 @@
+{
+  "_comment": [
+    "Bundled vocabulary for the audit-pack validator (contract requirement 3).",
+    "Kept in sync with the contract schema by scripts/check_repo.py once you add an entry to",
+    "its VOCAB_SYNC table.",
+    "",
+    "What must NEVER go here: framework control text, guidance, or an evidence-item list. A piece",
+    "asks Noru what is needed. See contract/README.md, requirement 9."
+  ],
+  "item_kind": [
+    "TODO_first_kind",
+    "TODO_second_kind"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "iac-scan",
+  "displayName": "Noru Iac Scan",
+  "version": "0.1.0",
+  "description": "TODO: one sentence describing iac-scan.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "grc",
+    "iac-scan"
+  ]
+}

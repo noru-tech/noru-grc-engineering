@@ -1,0 +1,34 @@
+{
+  "name": "iac-scan",
+  "version": "0.1.0",
+  "description": "TODO: one sentence describing iac-scan.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech",
+    "url": "https://noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "grc",
+    "iac-scan"
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Noru Iac Scan",
+    "shortDescription": "TODO: one sentence describing iac-scan.",
+    "longDescription": "TODO: one sentence describing iac-scan.",
+    "developerName": "Noru",
+    "category": "Productivity",
+    "capabilities": [
+      "TODO"
+    ],
+    "websiteURL": "https://noru.tech",
+    "defaultPrompt": "TODO: what a user would type to reach iac-scan."
+  }
+}

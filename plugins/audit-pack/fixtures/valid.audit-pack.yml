@@ -1,0 +1,20 @@
+# Fixture: a complete, attributed manifest. The validator must exit 0 on this file.
+version: 0.1.0
+piece: audit-pack
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: audit-pack@0.1.0
+items:
+  - key: example-item
+    kind: TODO_first_kind
+    title: An example item
+    refs:
+      - src/example.ts:12
+    interpretation:
+      owner: a.person@example.com
+      decided_at: 2026-08-27
+      expires_at: 2027-02-27
+      rationale: >
+        Why this claim holds, in a sentence a reviewer can argue with.

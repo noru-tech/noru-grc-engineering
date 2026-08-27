@@ -1,0 +1,22 @@
+# Fixture: a kind that is not in the bundled vocabulary. This is what the difflib
+# "did you mean ...?" hint is for.
+# Expected: exit 1, "unknown item kind".
+version: 0.1.0
+piece: iac-scan
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: iac-scan@0.1.0
+items:
+  - key: example-item
+    kind: TODO_frist_kind
+    title: An example item
+    refs:
+      - src/example.ts:12
+    interpretation:
+      owner: a.person@example.com
+      decided_at: 2026-08-27
+      expires_at: 2027-02-27
+      rationale: >
+        Why this claim holds, in a sentence a reviewer can argue with.

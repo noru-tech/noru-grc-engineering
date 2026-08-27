@@ -1,0 +1,113 @@
+{
+  "$schema": "../../contract/piece.schema.json",
+  "piece": "iac-scan",
+  "contract_version": "0.1.0",
+  "artifact": ".noru/iac-scan.yml",
+  "manifest_schema": "contract/iac-scan.schema.json",
+  "commands": {
+    "scan": "commands/scan.md",
+    "diff": "commands/diff.md",
+    "push": "commands/push.md"
+  },
+  "skill": "skills/iac-scan/SKILL.md",
+  "collector": {
+    "entrypoint": "scripts/collect.mjs",
+    "deterministic": true,
+    "network": false,
+    "inputs": [
+      ".noru/.cache/noru-state.json"
+    ]
+  },
+  "validator": {
+    "entrypoint": "scripts/validate_manifest.py",
+    "runtime": "python3-stdlib",
+    "vocabulary": [
+      "references/vocabulary.json"
+    ],
+    "suggestions": true,
+    "exit_codes": {
+      "0": "manifest is valid; warnings may be present",
+      "1": "manifest has validation errors",
+      "2": "usage error, unreadable file, or unparseable YAML"
+    },
+    "fixtures": {
+      "valid": [
+        "fixtures/valid.iac-scan.yml"
+      ],
+      "invalid": [
+        {
+          "path": "fixtures/invalid-missing-interpretation.iac-scan.yml",
+          "expect_message": "missing required `interpretation`"
+        },
+        {
+          "path": "fixtures/invalid-unknown-kind.iac-scan.yml",
+          "expect_message": "unknown item kind"
+        }
+      ]
+    }
+  },
+  "push": {
+    "entrypoint": "scripts/push.mjs",
+    "mode": "keyed_upsert",
+    "collapses_to": {
+      "tool": "TODO: describe the single server-side operation this fan-out would fold into, if one is published",
+      "tracked_at": "https://github.com/noru-tech/noru-grc-engineering/issues"
+    },
+    "operations": [
+      {
+        "name": "createEvidence",
+        "transport": "mcp",
+        "scope": "write:evidence",
+        "idempotency": {
+          "kind": "client_probe",
+          "key": [
+            "description contains marker"
+          ],
+          "verified_at": "TODO: the public documentation where you confirmed this behaviour — a section of https://api.noru.tech/llms.txt, or the tool description published at https://api.noru.tech/v1/mcp. If it is not documented, say so and treat the claim as unverified.",
+          "gap": "TODO: what the published API does not document, what this piece does instead, and what a documented key would let it drop"
+        }
+      }
+    ],
+    "provenance": {
+      "slug": true,
+      "commit_sha": true,
+      "branch": true
+    },
+    "diff_required": true,
+    "requires_confirmation": true
+  },
+  "scopes": {
+    "read": [
+      "read:organization",
+      "read:controls",
+      "read:evidence"
+    ],
+    "write": [
+      "write:evidence"
+    ]
+  },
+  "queue": {
+    "source": [
+      {
+        "kind": "mcp_tool",
+        "tool": "getControlContext",
+        "note": "TODO: say exactly what this piece reads from Noru to decide what is needed."
+      }
+    ],
+    "hardcoded_expectations": false
+  },
+  "interpretation": {
+    "required": true,
+    "level": "per_claim",
+    "unattributed": "error"
+  },
+  "ci": {
+    "output_json": true,
+    "quiet": true,
+    "exit_codes": {
+      "0": "success",
+      "1": "drift, validation failure, or missing prerequisite input",
+      "2": "usage error, including a push without --confirm"
+    }
+  }
+}

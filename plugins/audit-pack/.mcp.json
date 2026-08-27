@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "noru": {
+      "type": "http",
+      "url": "https://api.noru.tech/v1/mcp",
+      "note": "Authentication is managed by the MCP client. Use OAuth where supported, or configure bearer authentication with NORU_API_KEY for manual/headless setup. Do not commit OAuth tokens, API keys, or generated local configs containing secrets."
+    }
+  }
+}
