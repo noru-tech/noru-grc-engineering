@@ -14,7 +14,13 @@
       "version": "0.1.0",
       "license": "MIT",
       "category": "compliance",
-      "keywords": ["noru", "compliance", "grc", "mcp", "hub"],
+      "keywords": [
+        "noru",
+        "compliance",
+        "grc",
+        "mcp",
+        "hub"
+      ],
       "author": {
         "name": "Noru",
         "email": "support@noru.tech"
@@ -65,7 +71,7 @@
     {
       "name": "review-signoff",
       "source": "./plugins/review-signoff",
-      "description": "Turn a periodic review of machine output — access, rules, baselines, assets, physical access, vendors — into a named, dated, expiring sign-off in Noru.",
+      "description": "Turn a periodic review of machine output \u2014 access, rules, baselines, assets, physical access, vendors \u2014 into a named, dated, expiring sign-off in Noru.",
       "version": "0.1.0",
       "license": "MIT",
       "category": "compliance",
@@ -107,7 +113,7 @@
     {
       "name": "iac-scan",
       "source": "./plugins/iac-scan",
-      "description": "Scan the Terraform, CloudFormation, Kubernetes and CI configuration a repository actually contains, decide what each finding means in this environment, and land the result in Noru as security findings — closing the ones that no longer reproduce.",
+      "description": "Scan the Terraform, CloudFormation, Kubernetes and CI configuration a repository actually contains, decide what each finding means in this environment, and land the result in Noru as security findings \u2014 closing the ones that no longer reproduce.",
       "version": "0.1.0",
       "license": "MIT",
       "category": "compliance",
@@ -128,7 +134,7 @@
     {
       "name": "audit-pack",
       "source": "./plugins/audit-pack",
-      "description": "Assemble the evidence bundle, sampling and workpapers an auditor asks for — for one framework over one audit window — from Noru's graph plus the local files an integration cannot reach, and land the tested conclusion for each control back in Noru.",
+      "description": "Assemble the evidence bundle, sampling and workpapers an auditor asks for \u2014 for one framework over one audit window \u2014 from Noru's graph plus the local files an integration cannot reach, and land the tested conclusion for each control back in Noru.",
       "version": "0.1.0",
       "license": "MIT",
       "category": "compliance",
@@ -140,6 +146,28 @@
         "sampling",
         "evidence",
         "soc2"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
+    },
+    {
+      "name": "privacy-datamap",
+      "source": "./plugins/privacy-datamap",
+      "description": "Read the schemas a repository actually contains \u2014 ORM models, migrations, SQL DDL, API contracts \u2014 classify the personal data in them against the Fideslang taxonomy, review the result in a pull request, and land the data map in Noru.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "privacy",
+        "fides",
+        "fideslang",
+        "data-map",
+        "gdpr",
+        "ropa"
       ],
       "author": {
         "name": "Noru",
