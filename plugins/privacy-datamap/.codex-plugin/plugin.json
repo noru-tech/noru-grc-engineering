@@ -1,7 +1,7 @@
 {
   "name": "privacy-datamap",
   "version": "0.1.0",
-  "description": "TODO: one sentence describing privacy-datamap.",
+  "description": "Read the schemas a repository actually contains \u2014 ORM models, migrations, SQL DDL, API contracts \u2014 classify the personal data in them against the Fideslang taxonomy, and land the data map in Noru with a citation for every field and a named owner for every judgement.",
   "author": {
     "name": "Noru",
     "email": "support@noru.tech",
@@ -13,22 +13,32 @@
   "keywords": [
     "noru",
     "compliance",
-    "grc",
-    "privacy-datamap"
+    "privacy",
+    "fides",
+    "fideslang",
+    "data-map",
+    "ropa",
+    "gdpr",
+    "data-governance"
   ],
   "skills": "./skills/",
   "commands": "./commands/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Noru Privacy Datamap",
-    "shortDescription": "TODO: one sentence describing privacy-datamap.",
-    "longDescription": "TODO: one sentence describing privacy-datamap.",
+    "displayName": "Privacy Datamap",
+    "shortDescription": "Build a privacy data map from a repository's schemas",
+    "longDescription": "Reads the schemas a repository contains, classifies the personal data in them against the bundled Fideslang taxonomy, and lands the result in Noru as a privacy data map. Every field carries the file:line it came from; anything the classifier cannot resolve is raised for a human rather than guessed, and a manifest with unresolved items cannot be pushed.",
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
-      "TODO"
+      "Read",
+      "Write"
     ],
     "websiteURL": "https://noru.tech",
-    "defaultPrompt": "TODO: what a user would type to reach privacy-datamap."
+    "defaultPrompt": [
+      "Build a privacy data map for this repository.",
+      "What personal data does this codebase hold, and where?",
+      "Generate a fideslang manifest for this repo."
+    ]
   }
 }

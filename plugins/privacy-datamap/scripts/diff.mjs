@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { toFideslang } from "./lib/fides.mjs";
 import {
   parseCommonArgs,
   planPathFor,
@@ -26,8 +27,6 @@ import {
 } from "./lib/plan.mjs";
 
 const PIECE = "privacy-datamap";
-// Keys the piece adds for human review and strips before anything is sent to Noru.
-const BOOKKEEPING = new Set(["refs", "interpretation", "needs_review"]);
 const USAGE = "usage: diff.mjs [--repo=<path>] [--output=json|text] [--quiet]\n";
 
 function loadJson(path, label) {
@@ -59,34 +58,6 @@ function canonical(value) {
 
 function digest(value) {
   return createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
-}
-
-/**
- * Project the manifest down to plain Fideslang — exactly what `ingestDatamap` accepts, and exactly
- * what `.fides/datamap.yml` holds.
- *
- * The piece's own bookkeeping never leaves the repository. `refs` says which line of which file a
- * field came from, `interpretation` says who stands behind the classification, and `needs_review`
- * marks what nobody has resolved yet. All three are how a human reviews the manifest in a pull
- * request; none is Noru's business, and a data map carrying them would be a data map no other Fides
- * tool could read.
- */
-export function toFideslang(manifest) {
-  const strip = (node) => {
-    if (Array.isArray(node)) return node.map(strip);
-    if (node && typeof node === "object") {
-      return Object.fromEntries(
-        Object.entries(node)
-          .filter(([key]) => !BOOKKEEPING.has(key))
-          .map(([key, value]) => [key, strip(value)]),
-      );
-    }
-    return node;
-  };
-  return {
-    dataset: strip(manifest.dataset ?? []),
-    system: strip(manifest.system ?? []),
-  };
 }
 
 /**

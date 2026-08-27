@@ -8,6 +8,24 @@ one version number; the release workflow fails if they disagree.
 
 ### Added
 
+- `privacy-datamap` renders `.fides/datamap.yml`, the deliverable declared in its `outputs[]`, and
+  gets its skill and commands. The export is gated the way `audit-pack` gates its bundle: only ever
+  written from a manifest whose `derived_digest` matches the repository as it stands right now. A
+  Fides file that looks authoritative and describes a schema that has moved on is worse than no
+  file, because nobody re-reads one that already exists.
+
+  The projection to plain Fideslang now lives in one place, `scripts/lib/fides.mjs`, used by both
+  the renderer and the plan builder — so the export and the payload `ingestDatamap` receives are the
+  same content by construction rather than by discipline, and a test asserts it. Built separately
+  they would drift, and the failure would be silent: a data map handed to an auditor saying
+  something different from the one in the compliance record.
+
+  **Fixed: `structure_digest` was reaching Noru.** Adding it to the manifest in the previous change
+  put it on the wire too, because the leak check was a denylist of the three review fields that
+  existed when it was written. It is now an allowlist taken from Fideslang's own resource model — an
+  external vocabulary this piece cannot quietly grow — so the next review field is caught by what
+  the wire looks like rather than by somebody remembering two places. Both directions are
+  mutation-tested.
 - `privacy-datamap` puts the **fourth expiry anchor** to work — the one added to
   `contract/README.md` in this same release and documented there as unused. Every collection now
   carries a `structure_digest`: a hash of its field *names*, not their categories, so resolving a

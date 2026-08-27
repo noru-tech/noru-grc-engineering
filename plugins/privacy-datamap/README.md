@@ -8,7 +8,7 @@
 
 | Command | Writes to Noru? | What it does |
 |---|---|---|
-| `/privacy-datamap:scan` | no | Deterministic offline collection → `.noru/privacy-datamap.yml` |
+| `/privacy-datamap:scan` | no | Reads the repository's schemas → `.noru/privacy-datamap.yml` — and, once that manifest validates, renders `.fides/datamap.yml` |
 | `/privacy-datamap:diff` | no | Reads current state, prints the exact plan |
 | `/privacy-datamap:push` | **yes** | Executes the confirmed plan |
 

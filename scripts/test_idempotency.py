@@ -29,6 +29,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -1173,18 +1174,34 @@ def test_privacy_datamap(results, tmp):
 
     payload = op["arguments"]["manifest"]
     has_content = bool(payload.get("dataset") or payload.get("system"))
-    leaked = sorted(
-        set(keys_at_every_depth(payload)) & {"refs", "interpretation", "needs_review"}
-    )
+
+    # An ALLOWLIST taken from Fideslang itself — Ethyca's resource model, an EXTERNAL vocabulary
+    # this piece cannot quietly grow. That is the whole point of the direction.
+    #
+    # A denylist of review fields goes stale the moment the piece adds one, which is exactly how
+    # structure_digest reached the wire: it was added to the manifest while this check was still
+    # looking for the three fields that existed before it. Deriving the allowlist from this piece's
+    # own schema cannot help either, because the schema declares the review fields too — subtracting
+    # a set that has gone stale from a set that contains it leaves the leak allowed.
+    fideslang_keys = {
+        "dataset", "system",
+        "fides_key", "name", "description", "meta",
+        "collections", "fields", "data_categories", "data_qualifier", "retention",
+        "system_type", "dataset_references", "privacy_declarations",
+        "data_use", "data_subjects", "egress", "ingress", "third_party_sharing",
+        "administrating_department", "joint_controller",
+        "data_protection_impact_assessment",
+    }
+    leaked = sorted(set(keys_at_every_depth(payload)) - fideslang_keys)
     if has_content:
         results.check(
-            f"[{label}] the piece's own bookkeeping never reaches Noru",
+            f"[{label}] only Fideslang keys reach Noru",
             not leaked,
             f"leaked: {leaked}",
         )
     else:
         results.skip(
-            f"[{label}] the piece's own bookkeeping never reaches Noru",
+            f"[{label}] only Fideslang keys reach Noru",
             "the valid fixture carries no dataset or system yet, so the projection has nothing to "
             "strip and this would pass whether or not toFideslang stripped anything. It activates "
             "on its own once the manifest schema and the fixture carry real collections.",
