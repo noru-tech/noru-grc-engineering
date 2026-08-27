@@ -42,6 +42,48 @@
       }
     },
     {
+      "name": "governance-records",
+      "source": "./plugins/governance-records",
+      "description": "File the records of human decisions in Noru: minutes, ISMS scope, statement of applicability, internal audit plans and reports, findings and corrective action plans, each attributed and dated.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "governance",
+        "minutes",
+        "internal-audit",
+        "iso-27001",
+        "soc2"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
+    },
+    {
+      "name": "review-signoff",
+      "source": "./plugins/review-signoff",
+      "description": "Turn a periodic review of machine output — access, rules, baselines, assets, physical access, vendors — into a named, dated, expiring sign-off in Noru.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "access-review",
+        "attestation",
+        "sign-off",
+        "iso-27001",
+        "soc2"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
+    },
+    {
       "name": "evidence-push",
       "source": "./plugins/evidence-push",
       "description": "Work Noru's own evidence queue: see which catalogue expectations are unmet, stage local artifacts against them, and upload with control mappings.",

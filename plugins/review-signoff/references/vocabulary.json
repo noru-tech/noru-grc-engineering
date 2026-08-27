@@ -1,0 +1,53 @@
+{
+  "_comment": [
+    "Bundled vocabulary for the review-signoff validator (contract requirement 3).",
+    "Kept in sync with contract/review-signoff.schema.json by scripts/check_repo.py.",
+    "",
+    "These are REVIEW SHAPES and CADENCES — the recurring patterns in which a human attests to",
+    "machine output. They are not framework content: no control text, no guidance, no evidence-item",
+    "list. What is due, and what a control needs, comes from the customer's own organization at scan",
+    "time over MCP, never from this file. See contract/README.md, requirement 9."
+  ],
+  "review_kind": [
+    "access_review",
+    "rule_review",
+    "baseline_review",
+    "asset_reconciliation",
+    "physical_access_review",
+    "vendor_security_review",
+    "backup_restore_review",
+    "log_review"
+  ],
+  "cadence": ["monthly", "quarterly", "semiannual", "annual"],
+  "_cadence_days_comment": [
+    "The window an expiry is allowed to fall in, counted in days from decided_at. A quarterly review",
+    "that claims a two-year sign-off is not a quarterly review, and that is the single most common",
+    "way an expiring attestation quietly stops meaning anything. The windows are deliberately wide:",
+    "the check is meant to catch a wrong cadence, not to police a fortnight's slippage."
+  ],
+  "cadence_days": {
+    "monthly": [21, 45],
+    "quarterly": [75, 115],
+    "semiannual": [150, 225],
+    "annual": [300, 430]
+  },
+  "disposition": ["revoked", "retained", "corrected", "escalated", "deferred", "accepted_risk"],
+  "kind_aliases": {
+    "access_review": ["access", "entitlement", "permission", "accounts", "users"],
+    "rule_review": ["rule", "firewall", "ruleset", "policy", "acl"],
+    "baseline_review": ["baseline", "hardening", "benchmark", "configuration", "cis"],
+    "asset_reconciliation": ["asset", "inventory", "reconciliation", "cmdb"],
+    "physical_access_review": ["physical", "badge", "door", "site", "premises"],
+    "vendor_security_review": ["vendor", "supplier", "third", "party"],
+    "backup_restore_review": ["backup", "restore", "recovery"],
+    "log_review": ["log", "audit", "siem", "alerts"]
+  },
+  "row_counted_extensions": [".csv", ".tsv"],
+  "queue_tools": [
+    "getOrganizationControls",
+    "getPendingControls",
+    "getControlContext",
+    "getEvidenceItems",
+    "getEvidenceForControl"
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "_comment": [
+    "Bundled vocabulary for the governance-records validator (contract requirement 3).",
+    "Kept in sync with contract/governance-records.schema.json by scripts/check_repo.py.",
+    "",
+    "These are DOCUMENT KINDS — the shapes a governance record comes in. They are not framework",
+    "content: no control text, no guidance, no evidence-item list. What a control actually needs",
+    "comes from the customer's own organization at scan time over MCP, never from this file.",
+    "See contract/README.md, requirement 9."
+  ],
+  "record_kind": [
+    "steering_committee_minutes",
+    "management_review_minutes",
+    "board_minutes",
+    "audit_committee_minutes",
+    "risk_committee_minutes",
+    "isms_scope",
+    "statement_of_applicability",
+    "internal_audit_plan",
+    "internal_audit_report",
+    "internal_audit_checklist",
+    "finding_record",
+    "corrective_action_plan",
+    "decision_record"
+  ],
+  "_meeting_kinds_comment": [
+    "A meeting record asserts that named people met and decided something. Without a participant",
+    "list it asserts nothing an auditor can test, so the validator requires participants for these",
+    "kinds and not for the others."
+  ],
+  "meeting_kinds": [
+    "steering_committee_minutes",
+    "management_review_minutes",
+    "board_minutes",
+    "audit_committee_minutes",
+    "risk_committee_minutes"
+  ],
+  "attendance": ["present", "apologies", "delegate"],
+  "action_status": ["open", "in_progress", "done", "cancelled"],
+  "kind_aliases": {
+    "steering_committee_minutes": ["steering", "committee", "isms", "minutes"],
+    "management_review_minutes": ["management", "review", "minutes"],
+    "board_minutes": ["board", "minutes"],
+    "audit_committee_minutes": ["audit", "committee", "minutes"],
+    "risk_committee_minutes": ["risk", "committee", "minutes"],
+    "isms_scope": ["isms", "scope", "boundaries"],
+    "statement_of_applicability": ["statement", "applicability", "soa"],
+    "internal_audit_plan": ["internal", "audit", "plan", "programme", "program", "schedule"],
+    "internal_audit_report": ["internal", "audit", "report"],
+    "internal_audit_checklist": ["internal", "audit", "checklist", "workpaper"],
+    "finding_record": ["finding", "nonconformity", "nonconformance", "observation"],
+    "corrective_action_plan": ["corrective", "action", "plan", "remediation", "capa"],
+    "decision_record": ["decision", "adr", "record"]
+  },
+  "queue_tools": [
+    "getOrganizationControls",
+    "getPendingControls",
+    "getControlContext",
+    "getEvidenceItems",
+    "getEvidenceForControl"
+  ]
+}

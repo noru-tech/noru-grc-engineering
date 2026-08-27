@@ -1,0 +1,6 @@
+account,system,role,last_used,decision
+acct-alpha,example-app,admin,2026-06-28,keep
+acct-bravo,example-app,read,2026-06-30,keep
+acct-charlie,example-app,admin,2025-11-02,revoke
+acct-delta,example-db,read,2026-06-12,keep
+acct-echo,example-db,admin,2026-06-27,keep

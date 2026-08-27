@@ -68,6 +68,22 @@ each is a place where a fixture can be right and reality wrong.
    `getOrganizationEvidence`'s `search` filter actually matches on description text at the volumes a
    real org has, and that the marker survives a round trip through the app unchanged.
 
+7. **`governance-records` against a real organization's queue.** Confirm `:scan` lists genuinely
+   unmet expectations; file one record; confirm it links to the right control and that the extracted
+   participants, decisions and actions read correctly against the source document. The extractor has
+   only ever met documents written to its own conventions — a real minute book will not be.
+
+8. **`review-signoff`'s second queue half.** Confirm `getEvidenceForControl` really reports expiry
+   and status for linked evidence at a volume worth filtering, so "which sign-offs have lapsed" is
+   answerable without pulling the whole register. Then push one sign-off and confirm the
+   `updateEvidence` call actually lands the expiry on the record: if it does not, the piece's central
+   claim is in the text and missing from the register.
+
+9. **The dependent call in `review-signoff:push`.** The expiry is set on a record whose id only
+   exists after the preceding call returns. `test_idempotency.py` proves the emitted `depends_on`
+   points at a call in the same push; it cannot prove a client substitutes it correctly. Watch one
+   real push do it.
+
 Until these are done, treat the pieces as reviewed and internally consistent, not as field-tested.
 
 ## Known gaps, stated rather than discovered later
@@ -77,9 +93,17 @@ Until these are done, treat the pieces as reviewed and internally consistent, no
   `POST /v1/evidence/upload` documents a key, so both pieces fall back to a client probe. Edit an
   evidence description in the Noru UI and the probe stops matching; a re-run uploads again. Recorded
   in each `piece.json` with what a documented key would let the piece drop.
-- **Neither piece is `mode: single_call`.** Both fan out several individually-keyed writes because
-  the published API offers no single ingest operation for these artifacts. Both declare
+- **No piece is `mode: single_call`.** Every one fans out several individually-keyed writes because
+  the published API offers no single ingest operation for these artifacts. Every one declares
   `collapses_to`.
+- **`review-signoff` needs two calls where one would do.** The published `createEvidence` input
+  fields do not include an expiry, so the sign-off's expiry is set by a second, dependent call. An
+  expiry that could be set at creation time would remove the dependency and the whole class of
+  half-applied sign-off that comes with it.
+- **`governance-records` creates rather than updates when an account is rewritten.** The marker
+  includes a digest of the rendered record, so re-filed minutes become a second record. For an
+  account of a meeting that is arguably correct — an auditor should see both — but it is a
+  consequence of having no documented key, not a decision anyone made.
 - **The MCP `push` does not perform the writes.** It emits the confirmed call list for the client to
   execute, because a script cannot speak MCP without handling a credential. The gate is enforced in
   the script; the execution is the agent's, and an agent that improvises a call outside the list has

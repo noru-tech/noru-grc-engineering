@@ -7,6 +7,8 @@ codex plugin marketplace add noru-tech/noru-grc-engineering
 codex plugin add noru@noru-grc-engineering
 codex plugin add ai-inventory@noru-grc-engineering
 codex plugin add evidence-push@noru-grc-engineering
+codex plugin add governance-records@noru-grc-engineering
+codex plugin add review-signoff@noru-grc-engineering
 ```
 
 Codex reads the marketplace from `.agents/plugins/marketplace.json` and each plugin from
@@ -42,6 +44,8 @@ inlines the value, and do not paste the key into a chat.
 | `ai-inventory:diff` also | `read:assets`, `read:vendors` |
 | `ai-inventory:push` | adds `write:assets`, `write:vendors`, `write:evidence` |
 | `evidence-push:push` | adds `write:evidence` |
+| `governance-records:push` | adds `write:evidence` |
+| `review-signoff:push` | adds `write:evidence` |
 
 ## Headless use
 

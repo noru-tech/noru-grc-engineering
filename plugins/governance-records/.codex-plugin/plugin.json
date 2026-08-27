@@ -1,0 +1,41 @@
+{
+  "name": "governance-records",
+  "version": "0.1.0",
+  "description": "File the records of human decisions in Noru: minutes, ISMS scope, statement of applicability, internal audit plans and reports, findings and corrective action plans, each attributed and dated.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech",
+    "url": "https://noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "governance",
+    "minutes",
+    "internal-audit",
+    "iso-27001",
+    "soc2",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Noru Governance Records",
+    "shortDescription": "Turn minutes and governance documents into attributed evidence.",
+    "longDescription": "Asks Noru which catalogue expectations are unmet, reads the governance documents already in your repository — minutes, ISMS scope, statement of applicability, audit plans and reports, findings, corrective action plans — extracts who met, what was decided and what was assigned to whom with a citation for every fact, and files each record as attributed evidence over MCP.",
+    "developerName": "Noru",
+    "category": "Productivity",
+    "capabilities": [
+      "Unmet governance expectations from Noru's own catalogue",
+      "Structured extraction from minutes and governance documents",
+      "Named participants, decisions and owned actions",
+      "Attributed records with a review date"
+    ],
+    "websiteURL": "https://noru.tech",
+    "defaultPrompt": "Show me which governance expectations are unmet and which of my minutes could satisfy them."
+  }
+}

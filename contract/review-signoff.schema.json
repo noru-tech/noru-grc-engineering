@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/review-signoff.schema.json",
+  "title": "Noru review sign-off manifest (.noru/review-signoff.yml)",
+  "description": "The recurring pattern where a human attests to machine output: an access review, a rule review, a hardening baseline check, an asset reconciliation, a physical access review, a vendor security review. The machine produces a list; a named person confirms it, records the exceptions and what was done about each, and signs for a fixed period. The interpretation block is not metadata on this manifest — it IS the sign-off, which is why expires_at is mandatory here and has to match the declared cadence. Enforced by plugins/review-signoff/scripts/validate_manifest.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "piece", "source", "queue_snapshot", "reviews"],
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "piece": { "const": "review-signoff" },
+    "source": { "$ref": "#/$defs/source" },
+    "queue_snapshot": {
+      "description": "What Noru said was due, at the moment :scan ran: expectations with nothing linked, and evidence already linked that is expiring or expired. Written from MCP output by the client; never invented by this plugin. Requirement 9.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fetched_at", "via", "controls"],
+      "properties": {
+        "fetched_at": { "type": "string", "minLength": 10 },
+        "via": {
+          "description": "The MCP tools the snapshot came from.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "getOrganizationControls",
+              "getPendingControls",
+              "getControlContext",
+              "getEvidenceItems",
+              "getEvidenceForControl"
+            ]
+          }
+        },
+        "controls": { "type": "array", "items": { "$ref": "#/$defs/queueControl" } }
+      }
+    },
+    "reviews": { "type": "array", "items": { "$ref": "#/$defs/review" } }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "commit_sha", "branch", "generated_by"],
+      "properties": {
+        "slug": { "type": "string", "minLength": 1 },
+        "commit_sha": { "type": "string", "minLength": 7 },
+        "branch": { "type": "string", "minLength": 1 },
+        "generated_by": { "type": "string", "minLength": 1 },
+        "derived_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "ref": { "type": "string", "pattern": "^[^:\\s][^:]*:[0-9]+$" },
+    "interpretation": {
+      "description": "Contract requirement 8. For this piece the block is the sign-off itself: `owner` is the person who attests, `decided_at` is when they signed, `expires_at` is when the attestation stops meaning anything, and `rationale` is what they are standing behind. expires_at is REQUIRED here — an attestation with no end date is not a periodic review — and the validator additionally requires it to fall inside the window the declared cadence implies.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "decided_at", "expires_at", "rationale"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 3 },
+        "decided_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "expires_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "rationale": { "type": "string", "minLength": 10 },
+        "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } }
+      }
+    },
+    "queueControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control_id", "unmet_evidence_items"],
+      "properties": {
+        "control_id": {
+          "description": "The canonical lowercase internal control id returned as `id` by getOrganizationControls. `controlId` is the uppercase display form; store the canonical one.",
+          "type": "string",
+          "minLength": 1
+        },
+        "display_id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "type": "string" },
+        "coverage": { "type": "number" },
+        "unmet_evidence_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "title": { "type": "string", "minLength": 1 },
+              "type": { "type": "string" }
+            }
+          }
+        },
+        "expiring_evidence": {
+          "description": "Evidence already linked to this control whose expiry has passed or is close. getEvidenceForControl publishes each record's status and expiry; a review that has gone stale is due again, and that is half of this piece's queue.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["evidence_id"],
+            "properties": {
+              "evidence_id": { "type": "string", "minLength": 1 },
+              "title": { "type": "string" },
+              "status": { "type": "string" },
+              "expires_at": { "type": "string" }
+            }
+          }
+        },
+        "testing_guidance_available": {
+          "description": "Whether getControlContext returned testing guidance for this control. The guidance text itself is deliberately not stored: it is the API's to serve, not ours to vendor.",
+          "type": "boolean"
+        }
+      }
+    },
+    "reviewInput": {
+      "description": "The machine output being attested to. Its digest is what makes the sign-off checkable: change the export and the sign-off no longer covers it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "sha256", "records_reviewed"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "records_reviewed": {
+          "description": "How many rows, accounts, rules or assets the reviewer actually looked at.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "produced_by": {
+          "description": "Free text: where the export came from, in the reviewer's own words. Not a vendor identifier and not validated — it is context for whoever reads the record later.",
+          "type": "string"
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["confirmed", "exceptions"],
+      "properties": {
+        "confirmed": {
+          "description": "Records the reviewer looked at and accepted as correct.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "exceptions": {
+          "description": "Records the reviewer did not accept. Must equal the length of exceptions[].",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "exception": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "disposition", "owner"],
+      "properties": {
+        "reference": {
+          "description": "How to find this row again in the reviewed export. Not a person's identifier where an opaque one will do.",
+          "type": "string",
+          "minLength": 1
+        },
+        "disposition": {
+          "enum": ["revoked", "retained", "corrected", "escalated", "deferred", "accepted_risk"]
+        },
+        "owner": { "type": "string", "minLength": 3 },
+        "note": { "type": "string" },
+        "resolved_on": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+      }
+    },
+    "controlMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control_id"],
+      "properties": {
+        "control_id": { "type": "string", "minLength": 1 },
+        "evidence_item_ids": {
+          "description": "Omit or leave empty for a generic control-level link; name the catalogue items to satisfy a specific expectation.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "kind",
+        "title",
+        "cadence",
+        "performed_on",
+        "input",
+        "outcome",
+        "refs",
+        "control_mappings",
+        "interpretation"
+      ],
+      "properties": {
+        "key": {
+          "description": "Stable identity for this review across re-scans. A new period is a new key: last quarter's access review is not this quarter's.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "kind": {
+          "enum": [
+            "access_review",
+            "rule_review",
+            "baseline_review",
+            "asset_reconciliation",
+            "physical_access_review",
+            "vendor_security_review",
+            "backup_restore_review",
+            "log_review"
+          ]
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "cadence": { "enum": ["monthly", "quarterly", "semiannual", "annual"] },
+        "performed_on": {
+          "description": "When the review was actually carried out. A sign-off cannot predate it.",
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "supersedes": {
+          "description": "The evidence id of the previous period's sign-off, where the queue snapshot showed one expiring. Recorded so the chain of periods is visible.",
+          "type": "string"
+        },
+        "input": { "$ref": "#/$defs/reviewInput" },
+        "outcome": { "$ref": "#/$defs/outcome" },
+        "exceptions": { "type": "array", "items": { "$ref": "#/$defs/exception" } },
+        "refs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ref" } },
+        "control_mappings": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/controlMapping" }
+        },
+        "interpretation": { "$ref": "#/$defs/interpretation" },
+        "needs_review": { "type": "boolean" }
+      }
+    }
+  }
+}

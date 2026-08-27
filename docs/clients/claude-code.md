@@ -7,6 +7,8 @@
 /plugin install noru@noru-grc-engineering
 /plugin install ai-inventory@noru-grc-engineering
 /plugin install evidence-push@noru-grc-engineering
+/plugin install governance-records@noru-grc-engineering
+/plugin install review-signoff@noru-grc-engineering
 ```
 
 Install `noru` (the hub) alongside whichever pieces you want. Each piece works on its own, but the
@@ -59,6 +61,8 @@ Claude Code, or Codex, or Cursor.
 | `ai-inventory:diff` also | `read:assets`, `read:vendors` |
 | `ai-inventory:push` | adds `write:assets`, `write:vendors`, `write:evidence` |
 | `evidence-push:push` | adds `write:evidence` |
+| `governance-records:push` | adds `write:evidence` |
+| `review-signoff:push` | adds `write:evidence` |
 
 Wildcards (`read:*`, `write:*`) work but are the wrong default. Start read-only: tool visibility is
 filtered by scope at registration time, so a missing tool means a missing scope rather than an

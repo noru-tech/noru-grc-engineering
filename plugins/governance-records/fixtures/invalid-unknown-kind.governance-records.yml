@@ -1,0 +1,50 @@
+# Fixture: a kind that is not in the bundled vocabulary. This is what the difflib
+# "did you mean ...?" hint is for.
+# Expected: exit 1, "unknown record kind".
+version: 0.1.0
+piece: governance-records
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: governance-records@0.1.0
+queue_snapshot:
+  fetched_at: 2026-08-27T09:14:00Z
+  via:
+    - getOrganizationControls
+    - getControlContext
+  controls:
+    - control_id: zz-02
+      display_id: ZZ-02
+      name: Example management oversight control
+      status: in_progress
+      coverage: 0
+      testing_guidance_available: true
+      unmet_evidence_items:
+        - id: E-ZZ-11
+          title: Example Management Review Minutes
+          type: record
+records:
+  - key: 2026-05-14-management-review
+    kind: management_review_minute
+    title: Management review
+    occurred_on: 2026-05-14
+    next_review_due: 2027-05-14
+    document:
+      file: governance/2026-05-14-management-review.md
+      sha256: 3b2f7c11d5a84e6390cf2b6d8e4a7150c93d8f26b1a4057e8c3d9210fa6b4c7d
+    participants:
+      - name: Robin Example
+        attendance: present
+    refs:
+      - governance/2026-05-14-management-review.md:1
+    control_mappings:
+      - control_id: zz-02
+        evidence_item_ids:
+          - E-ZZ-11
+    interpretation:
+      owner: robin.example@example.com
+      decided_at: 2026-05-20
+      rationale: >
+        I chaired this review and approved the minutes; they are a true account of what was
+        decided.

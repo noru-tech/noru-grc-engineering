@@ -1,0 +1,63 @@
+# Fixture: a review kind that is not in the bundled vocabulary. This is what the difflib
+# "did you mean ...?" hint is for.
+# Expected: exit 1, "unknown review kind".
+#
+# The control and evidence-item ids below are in the reserved synthetic namespaces (zz-*,
+# E-ZZ-*) that contract/README.md sets aside for fixtures.
+version: 0.1.0
+piece: review-signoff
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: review-signoff@0.1.0
+queue_snapshot:
+  fetched_at: 2026-08-27T09:14:00Z
+  via:
+    - getOrganizationControls
+    - getControlContext
+    - getEvidenceForControl
+  controls:
+    - control_id: zz-03
+      display_id: ZZ-03
+      name: Example periodic access review control
+      status: in_progress
+      coverage: 50
+      testing_guidance_available: true
+      unmet_evidence_items:
+        - id: E-ZZ-21
+          title: Example Quarterly Access Review
+          type: record
+reviews:
+  - key: 2026-q3-access-review
+    kind: acess_review
+    title: Q3 access review, production systems
+    cadence: quarterly
+    performed_on: 2026-07-01
+    input:
+      file: reviews/2026-07-01-quarterly-access-review.csv
+      sha256: 5447c9ae43a8df1874b9c3ffd7a8bd1057f0818979763a5c765e1f913fc296e6
+      size_bytes: 263
+      records_reviewed: 5
+      produced_by: Export of production entitlements taken on the first of the quarter.
+    outcome:
+      confirmed: 4
+      exceptions: 1
+    exceptions:
+      - reference: acct-charlie-0
+        disposition: revoked
+        owner: priya.nair@example.com
+        note: Administrative access unused since the previous period.
+    refs:
+      - reviews/2026-07-01-quarterly-access-review.csv:1
+    control_mappings:
+      - control_id: zz-03
+        evidence_item_ids:
+          - E-ZZ-21
+    interpretation:
+      owner: priya.nair@example.com
+      decided_at: 2026-07-03
+      expires_at: 2026-10-04
+      rationale: >
+        I walked every row of the export against the personnel directory and disposed of
+        every exception.

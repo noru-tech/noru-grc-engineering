@@ -46,6 +46,16 @@ VOCAB_SYNC = [
     ("evidence-push", "max_file_bytes", "$defs.upload.properties.size_bytes.maximum", "value"),
     ("evidence-push", "queue_tools",
      "properties.queue_snapshot.properties.via.items.enum", "set"),
+    ("governance-records", "record_kind", "$defs.record.properties.kind.enum", "set"),
+    ("governance-records", "attendance", "$defs.participant.properties.attendance.enum", "set"),
+    ("governance-records", "action_status", "$defs.action.properties.status.enum", "set"),
+    ("governance-records", "queue_tools",
+     "properties.queue_snapshot.properties.via.items.enum", "set"),
+    ("review-signoff", "review_kind", "$defs.review.properties.kind.enum", "set"),
+    ("review-signoff", "cadence", "$defs.review.properties.cadence.enum", "set"),
+    ("review-signoff", "disposition", "$defs.exception.properties.disposition.enum", "set"),
+    ("review-signoff", "queue_tools",
+     "properties.queue_snapshot.properties.via.items.enum", "set"),
 ]
 
 # Real credentials look like these. Documentation placeholders do not.

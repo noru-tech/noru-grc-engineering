@@ -258,6 +258,50 @@ def test_fixtures_match_schema(results):
             )
 
 
+def test_as_of_expiry(results):
+    """review-signoff claims that --as-of turns a stale sign-off into an error. Assert it.
+
+    The validator never reads the clock — that is what keeps it deterministic and what stops these
+    fixtures rotting — so "has anyone stood behind this recently?" has to be asked explicitly. The
+    README and the skill both promise this behaviour, so it gets a test.
+    """
+    piece = PLUGINS / "review-signoff"
+    validator = piece / "scripts" / "validate_manifest.py"
+    fixture = piece / "fixtures" / "valid.review-signoff.yml"
+
+    # Judged on its own terms, with no date supplied, the fixture is valid.
+    plain = run(["python3", str(validator), str(fixture), "--quiet"])
+    results.check(
+        "[review-signoff] a valid manifest passes when no --as-of is given",
+        plain.returncode == 0,
+        plain.stdout.strip()[:300],
+    )
+
+    # The day after signing, nothing has expired.
+    fresh = run(["python3", str(validator), str(fixture), "--as-of=2026-07-04", "--quiet"])
+    results.check(
+        "[review-signoff] --as-of inside every validity window still passes",
+        fresh.returncode == 0,
+        fresh.stdout.strip()[:300],
+    )
+
+    # Long after the last sign-off lapsed, it must fail — what is due then is another review.
+    stale = run(["python3", str(validator), str(fixture), "--as-of=2027-06-15"])
+    results.check(
+        "[review-signoff] an expired sign-off is an ERROR under --as-of",
+        stale.returncode == 1 and "expired on" in stale.stdout,
+        stale.stdout.strip()[:300],
+    )
+
+    # A malformed date is a usage error, not a silently ignored flag.
+    bad = run(["python3", str(validator), str(fixture), "--as-of=last-tuesday"])
+    results.check(
+        "[review-signoff] a malformed --as-of exits 2 rather than being ignored",
+        bad.returncode == 2,
+        (bad.stdout + bad.stderr).strip()[:200],
+    )
+
+
 def main(argv):
     output_json = False
     quiet = False
@@ -283,6 +327,7 @@ def main(argv):
     test_fallback_loader(results)
     test_suggestions(results)
     test_exit_codes(results)
+    test_as_of_expiry(results)
     test_json_output(results)
     test_fixtures_match_schema(results)
 

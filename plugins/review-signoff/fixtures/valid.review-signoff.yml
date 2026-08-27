@@ -1,0 +1,120 @@
+# Fixture: two sign-offs against a queue Noru returned. The validator must exit 0.
+#
+# The first is quarterly and has exceptions the reviewer disposed of; the second is annual and
+# supersedes a sign-off the queue snapshot showed as expired. Both carry the interpretation block
+# from contract requirement 8 — and in this piece that block is not metadata about the claim, it is
+# the claim: a named person, the day they signed, and the day their signature stops meaning
+# anything.
+#
+# The control and evidence-item ids below are in the reserved synthetic namespaces (zz-*, E-ZZ-*)
+# that contract/README.md sets aside for fixtures. Real catalogue ids must never appear anywhere in
+# this repository — that is contract requirement 9, and fixtures are the obvious loophole, so the
+# contract test checks these namespaces specifically.
+version: 0.1.0
+piece: review-signoff
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: review-signoff@0.1.0
+queue_snapshot:
+  fetched_at: 2026-08-27T09:14:00Z
+  via:
+    - getOrganizationControls
+    - getControlContext
+    - getEvidenceForControl
+  controls:
+    - control_id: zz-03
+      display_id: ZZ-03
+      name: Example periodic access review control
+      status: in_progress
+      coverage: 50
+      testing_guidance_available: true
+      unmet_evidence_items:
+        - id: E-ZZ-21
+          title: Example Quarterly Access Review
+          type: record
+      expiring_evidence:
+        - evidence_id: EXAMPLE-EVIDENCE-ID
+          title: Example access review, previous period
+          status: expired
+          expires_at: 2026-05-31T23:59:59Z
+    - control_id: zz-04
+      display_id: ZZ-04
+      name: Example supplier oversight control
+      status: in_progress
+      coverage: 0
+      testing_guidance_available: true
+      unmet_evidence_items:
+        - id: E-ZZ-22
+          title: Example Vendor Security Review
+          type: record
+reviews:
+  - key: 2026-q3-access-review
+    kind: access_review
+    title: Q3 access review, production systems
+    cadence: quarterly
+    performed_on: 2026-07-01
+    supersedes: EXAMPLE-EVIDENCE-ID
+    input:
+      file: reviews/2026-07-01-quarterly-access-review.csv
+      sha256: 5447c9ae43a8df1874b9c3ffd7a8bd1057f0818979763a5c765e1f913fc296e6
+      size_bytes: 263
+      records_reviewed: 5
+      produced_by: Export of production entitlements taken on the first of the quarter.
+    outcome:
+      confirmed: 3
+      exceptions: 2
+    exceptions:
+      - reference: acct-charlie
+        disposition: revoked
+        owner: priya.nair@example.com
+        note: Administrative access unused since the previous period.
+        resolved_on: 2026-07-02
+      - reference: acct-echo
+        disposition: retained
+        owner: priya.nair@example.com
+        note: Break-glass account; retained deliberately and monitored.
+    refs:
+      - reviews/2026-07-01-quarterly-access-review.csv:1
+    control_mappings:
+      - control_id: zz-03
+        evidence_item_ids:
+          - E-ZZ-21
+    interpretation:
+      owner: priya.nair@example.com
+      decided_at: 2026-07-03
+      expires_at: 2026-10-04
+      rationale: >
+        I walked every row of the export against the personnel directory, revoked one account and
+        deliberately retained one. The sign-off covers exactly the export digested above and is
+        good until the next quarterly review falls due.
+  - key: 2026-annual-vendor-security-review
+    kind: vendor_security_review
+    title: Annual vendor security review
+    cadence: annual
+    performed_on: 2026-06-15
+    input:
+      file: reviews/2026-06-15-vendor-security-review.csv
+      sha256: 1c9a0b7e5d34f28615c0a3b9e7d426f81530acbd94e7f2160b8d35ca47e91f06
+      size_bytes: 4820
+      records_reviewed: 12
+      produced_by: Vendor register export, filtered to suppliers with production data access.
+    outcome:
+      confirmed: 12
+      exceptions: 0
+    exceptions: []
+    refs:
+      - reviews/2026-06-15-vendor-security-review.csv:1
+    control_mappings:
+      - control_id: zz-04
+        evidence_item_ids:
+          - E-ZZ-22
+    interpretation:
+      owner: sam.okafor@example.com
+      decided_at: 2026-06-15
+      expires_at: 2027-06-14
+      rationale: >
+        I reviewed the current assurance evidence for every supplier with production data access
+        and found nothing outstanding. Annual cadence, so the sign-off runs to the day before the
+        next review is due.

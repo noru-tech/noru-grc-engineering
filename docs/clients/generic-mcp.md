@@ -37,6 +37,30 @@ File upload is a deliberate omission from the MCP surface: tool arguments are JS
 a multipart body. The published `createEvidence` tool says so in as many words — "File uploads
 (multipart) are not supported via MCP" — so a client should not go looking for one.
 
+### governance-records
+
+| Phase | Tools | Scopes |
+|---|---|---|
+| `:scan` (read) | `getOrganizationControls`, `getControlContext`, `getEvidenceItems`, `getEvidenceForControl` | `read:controls`, `read:evidence` |
+| `:diff` (read) | `getOrganizationEvidence` | `read:evidence` |
+| `:push` (write) | `createEvidence`, `linkEvidenceToControl` | `write:evidence` |
+
+`linkEvidenceToControl` is only reached when the record already exists and a control mapping was
+added to the manifest afterwards; `createEvidence` carries the mappings on a first push.
+
+### review-signoff
+
+| Phase | Tools | Scopes |
+|---|---|---|
+| `:scan` (read) | `getOrganizationControls`, `getControlContext`, `getEvidenceForControl`, `getEvidenceItems` | `read:controls`, `read:evidence` |
+| `:diff` (read) | `getOrganizationEvidence` | `read:evidence` |
+| `:push` (write) | `createEvidence`, then `updateEvidence` to set the sign-off's expiry | `write:evidence` |
+
+This is the one piece whose call list has an ordering dependency: the published `createEvidence`
+input fields do not include an expiry, so the expiry is set afterwards on the record that call
+returns. Those calls carry `depends_on`, naming the earlier call and the single field to substitute.
+Substituting that field is the only edit a client may make to any emitted call.
+
 ## Control identifiers
 
 `getOrganizationControls` returns two identifiers per control. The lowercase `id` is canonical —

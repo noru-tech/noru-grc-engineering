@@ -1,0 +1,41 @@
+{
+  "name": "review-signoff",
+  "version": "0.1.0",
+  "description": "Turn a periodic review of machine output — access, rules, baselines, assets, physical access, vendors — into a named, dated, expiring sign-off in Noru.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech",
+    "url": "https://noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "access-review",
+    "attestation",
+    "sign-off",
+    "iso-27001",
+    "soc2",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Noru Review Sign-off",
+    "shortDescription": "Attest to machine output with an expiring sign-off.",
+    "longDescription": "Asks Noru which periodic reviews are unmet and which sign-offs have expired, hashes the export you reviewed, records what was confirmed and what each exception was, and lands the attestation as evidence that expires on the day the reviewer said it would.",
+    "developerName": "Noru",
+    "category": "Productivity",
+    "capabilities": [
+      "Unmet and expiring reviews from Noru's own catalogue",
+      "Digest of the exact output that was reviewed",
+      "Exceptions with a disposition and a named owner",
+      "A named, dated sign-off with a real expiry in Noru"
+    ],
+    "websiteURL": "https://noru.tech",
+    "defaultPrompt": "Which review sign-offs have expired or are due, and what do I need to review?"
+  }
+}

@@ -19,6 +19,10 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
   `plugins/<piece>/piece.json`
 - [`ai-inventory.schema.json`](./ai-inventory.schema.json) — the `.noru/ai-inventory.yml` artifact
 - [`evidence-push.schema.json`](./evidence-push.schema.json) — the `.noru/evidence-push.yml` artifact
+- [`governance-records.schema.json`](./governance-records.schema.json) — the
+  `.noru/governance-records.yml` artifact
+- [`review-signoff.schema.json`](./review-signoff.schema.json) — the `.noru/review-signoff.yml`
+  artifact
 
 ## The nine requirements
 
@@ -77,6 +81,21 @@ not derive, but a manifest carrying `needs_review: true` cannot be pushed.
 when the configuration changes, so someone must re-own it. Procedural obligations (policy approval,
 training, board oversight) are legitimately point-in-time on a review cadence; they may omit
 `expires_at` if the rationale says why.
+
+That carve-out was written before anything was built on it, and "if the rationale says why" turned
+out to be unenforceable — no validator can read a sentence and decide whether it earned an omission.
+Two pieces now sit at opposite ends of the rule, and both are stricter than the prose was:
+
+- `governance-records` accepts an omitted `expires_at` **only** when the record carries
+  `next_review_due` instead. Same intent as the carve-out, but a date a validator can check, and a
+  record with neither is an error rather than a well-worded exemption.
+- `review-signoff` makes `expires_at` **required**, and additionally requires it to fall inside the
+  window the review's declared `cadence` implies. A quarterly review signed off for two years is not
+  a quarterly review, and nothing else in the manifest would ever say so.
+
+The general rule the two agree on: **a claim must name the date it stops being current, in some
+field the validator can compare.** Whether that field is `expires_at` or a cadence-shaped substitute
+is the piece's business; having neither is not.
 
 `owner` must be a person. A team alias cannot be asked what it was thinking.
 

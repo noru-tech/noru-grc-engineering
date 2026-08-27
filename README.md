@@ -27,6 +27,8 @@ directory, no flat-file risk register, no second source of truth to reconcile be
 |---|---|---|
 | [`ai-inventory`](./plugins/ai-inventory/) | model/provider calls, agents, prompts, retrieval, evals, oversight points | assets + vendors + evidence (`iso_42001` / `eu_ai_act`) |
 | [`evidence-push`](./plugins/evidence-push/) | local artifacts, against Noru's own unmet evidence expectations | file evidence with control mappings |
+| [`governance-records`](./plugins/governance-records/) | minutes, ISMS scope, statement of applicability, audit plans and reports, findings, corrective action plans | attributed, dated records as evidence |
+| [`review-signoff`](./plugins/review-signoff/) | a periodic review of machine output, and the human decision about it | a named, dated, expiring sign-off as evidence |
 | [`noru`](./plugins/noru/) | — | the hub: `connect`, `doctor`, `context` |
 
 Every piece is the same three moves, and exactly three commands:
@@ -39,13 +41,19 @@ Every piece is the same three moves, and exactly three commands:
 
 ### What each piece is for
 
-The two pieces target different work, and v0.1 ships both because either alone would misrepresent
-what this toolkit does.
+The pieces target deliberately unalike work — which is what makes the contract a contract rather
+than a description of one plugin. One hits REST, three hit MCP; they share no collector logic.
 
 - `ai-inventory` targets **ISO 42001 and the EU AI Act**: what an AI register needs, discovered from
   the repository where the answers actually live.
 - `evidence-push` targets **whatever your organization's own evidence queue says is unmet** — it
   asks Noru rather than shipping an opinion, so it is not tied to one framework.
+- `governance-records` targets the **records of human decisions**: who met, when, what was decided,
+  what was assigned to whom. Noru already owns the *authoring* half of governance — policy
+  generation, policy lifecycle, approvers and versions — so this piece writes no policy text.
+- `review-signoff` targets the recurring **"a human attests to machine output"** pattern: access
+  reviews, rule reviews, hardening baselines, asset reconciliation, physical access, vendor reviews.
+  Each produces a named, dated, expiring sign-off, and the expiry reaches the record itself.
 
 ## Install
 
@@ -56,6 +64,8 @@ what this toolkit does.
 /plugin install noru@noru-grc-engineering
 /plugin install ai-inventory@noru-grc-engineering
 /plugin install evidence-push@noru-grc-engineering
+/plugin install governance-records@noru-grc-engineering
+/plugin install review-signoff@noru-grc-engineering
 ```
 
 Then configure the Noru MCP connection: [Claude guide](./docs/clients/claude-code.md).
@@ -113,6 +123,8 @@ Use least-privilege scopes:
 | `ai-inventory:diff` also | `read:assets`, `read:vendors` |
 | `ai-inventory:push` | adds `write:assets`, `write:vendors`, `write:evidence` |
 | `evidence-push:push` | adds `write:evidence` |
+| `governance-records:push` | adds `write:evidence` |
+| `review-signoff:push` | adds `write:evidence` |
 
 ## The contract
 
@@ -157,7 +169,9 @@ noru-grc-engineering/
 ├── plugins/
 │   ├── noru/                           # hub: connect, doctor, context
 │   ├── ai-inventory/                   # :scan :diff :push  (MCP)
-│   └── evidence-push/                  # :scan :diff :push  (REST upload)
+│   ├── evidence-push/                  # :scan :diff :push  (REST upload)
+│   ├── governance-records/             # :scan :diff :push  (MCP)
+│   └── review-signoff/                 # :scan :diff :push  (MCP)
 ├── scripts/                            # scaffolder, contract test, checks — stdlib/built-ins only
 ├── tests/fixture-repo/                 # the repository the collectors are tested against
 └── docs/
