@@ -1,8 +1,8 @@
-# Fixture: a finding with a citation but nobody standing behind it.
-# Expected: exit 1, "missing required `interpretation`".
+# Fixture: two findings sharing one key.
+# Expected: exit 1, "would overwrite each other on every push".
 #
-# A scanner cannot decide whether a rule that fired means anything in this environment. That is
-# the whole reason contract requirement 8 exists, and here it is an error and never a warning.
+# The key becomes the externalId the upsert is addressed by, so a duplicate is not untidy — it
+# is two findings taking turns to be the one that exists.
 version: 0.1.0
 piece: iac-scan
 source:
@@ -52,3 +52,31 @@ findings:
       - infra/storage.tf:13
     risk_id: EXAMPLE-RISK-ID
     owner_email: sam.okafor@example.com
+    interpretation:
+      owner: sam.okafor@example.com
+      decided_at: 2026-08-24
+      expires_at: 2026-10-15
+      rationale: >
+        I opened the cited line. It is a real literal and not a variable reference, so the value is
+        in the history and has to be rotated as well as moved. Filed against the existing risk while
+        the rotation is in flight.
+  - key: terraform-credential-literal-in-source.a1b2c3d4e5f6
+    check: terraform-network-ingress-open-to-the-internet
+    technology: terraform
+    severity: high
+    category: configuration
+    status: open
+    title: Network ingress rule accepts traffic from any address
+    file: infra/network.tf
+    resource: aws_security_group.web
+    observed_on: 2026-08-20
+    refs:
+      - infra/network.tf:10
+    asset_external_id: example-account/example-cluster
+    interpretation:
+      owner: priya.nair@example.com
+      decided_at: 2026-08-24
+      expires_at: 2026-10-15
+      rationale: >
+        The port is genuinely public, but the rule sits in front of the cluster the register already
+        knows about, so the finding is attached to that asset rather than to a new one.

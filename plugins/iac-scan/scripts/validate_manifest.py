@@ -1,16 +1,47 @@
 #!/usr/bin/env python3
-"""Validate .noru/iac-scan.yml against the BUNDLED vocabulary.
+"""Validate .noru/iac-scan.yml against the BUNDLED vocabulary and rule set.
 
-Self-contained and atomic: Python standard library only, no pip install, no network.
+Self-contained and atomic:
+  * Python standard library only. No pip install, no venv, no network.
+  * Technologies, severities, statuses, categories, the per-status expiry horizons and the queue
+    tool names come from ../references/vocabulary.json; the rules come from ../references/checks.json.
+    Neither file contains framework content and neither ever will.
+  * Parses YAML with PyYAML if it happens to be importable, otherwise a bundled fallback loader.
 
-Contract requirement 8 is the rule that makes this piece worth trusting: every item must carry
-refs[] citing the lines that produced it AND a complete interpretation block naming the person who
-stands behind it. An unattributed claim is an ERROR, never a warning.
+What this validator is really for: a scanner produces a list, and a list is not a finding. Somebody
+has to say whether each rule that fired means anything in this environment, how bad it is here, and
+until when that judgement stands. Those three answers are what this file insists on.
+
+The rules that are specific to this piece:
+
+  * `interpretation.expires_at` is REQUIRED, and is measured from `observed_on` rather than from
+    `decided_at`. A finding observed in March and signed in August is a claim about March's
+    configuration however recent the signature is, and anchoring on the signature would let a stale
+    observation be renewed forever without anybody looking at the configuration again.
+  * How far it may stand depends on the status. An `open` finding is a live observation the next
+    scan refreshes. `accepted` and `false_positive` are decisions to leave the configuration alone;
+    they get a longer horizon and a hard requirement that the reasoning is actually written down,
+    because an acceptance nobody revisits is how a known misconfiguration becomes permanent.
+  * `decided_at` cannot precede `observed_on`. You cannot judge a configuration before you saw it.
+  * `asset_external_id` and `risk_id` may only name things the queue snapshot says the organization
+    already has. This piece never creates an asset and never opens a risk.
+  * A citation has to point at the file the finding says it is about. The citation is the whole
+    evidence: no matched line text is ever recorded, because one of the rules fires on a line that
+    holds a credential.
+
+Requirement 9 is enforced the way the other pieces enforce it: nothing may reference something that
+is not in the `queue_snapshot` that came from Noru.
+
+`--as-of=YYYY-MM-DD` turns an already-expired judgement into an error. Leave it off and the file is
+judged on its own terms, which is what keeps this validator deterministic; pass it in CI and a
+decision nobody has revisited fails the build. Nothing here ever reads the clock by itself.
 
 Usage:
-    python3 validate_manifest.py <manifest.yml> [--output=json] [--quiet] [--emit-parsed=<path>]
+    python3 validate_manifest.py <manifest.yml> [--as-of=YYYY-MM-DD] [--output=json] [--quiet]
+                                 [--emit-parsed=<path>]
 Exit codes: 0 = valid (warnings allowed), 1 = validation errors, 2 = usage / load error.
 """
+import datetime
 import json
 import pathlib
 import sys
@@ -259,19 +290,67 @@ class Report:
 REFERENCES = pathlib.Path(__file__).resolve().parent.parent / "references"
 PIECE = "iac-scan"
 
+# The `source` every finding this piece lands carries in Noru. Findings are keyed on
+# (source, externalId), so this string is half of every identity the piece owns. The queue snapshot
+# has to have been fetched with the same filter, or the "no longer reproducing" set is somebody
+# else's findings and closing against it would close records this piece never wrote.
+FINDING_SOURCE = "iac-scan"
+
 REF_RE = re.compile(r"^[^:\s][^:]*:[0-9]+$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
+KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
-TOP_LEVEL_KEYS = {"version", "piece", "source", "items"}
+TOP_LEVEL_KEYS = {"version", "piece", "source", "queue_snapshot", "findings"}
 SOURCE_KEYS = {"slug", "commit_sha", "branch", "generated_by", "derived_digest"}
 INTERPRETATION_KEYS = {"owner", "decided_at", "expires_at", "rationale", "refs"}
-ITEM_KEYS = {"key", "kind", "title", "refs", "interpretation", "needs_review"}
+QUEUE_KEYS = {"fetched_at", "via", "source", "open_findings", "assets", "risks"}
+QUEUE_OPEN_KEYS = {"external_id", "check_name", "title", "severity", "status", "category"}
+QUEUE_ASSET_KEYS = {"id", "external_id", "name"}
+QUEUE_RISK_KEYS = {"id", "title"}
+FINDING_KEYS = {
+    "key", "check", "technology", "severity", "category", "status", "title", "file", "resource",
+    "observed_on", "refs", "asset_external_id", "risk_id", "owner_email", "interpretation",
+    "needs_review",
+}
+
+# Deciding to leave a misconfiguration in place is the judgement that most needs its reasoning
+# written down, and the one most likely to be a shrug. A sentence is not much to ask.
+DECIDED_TO_LEAVE = ("accepted", "false_positive")
+REASONING_MIN_CHARS = 60
+
+# A TODO left by the collector is a decision nobody has made yet, so it is never publishable.
+TODO_RE = re.compile(r"\bTODO\b")
 
 
 def load_vocabulary():
-    return json.loads((REFERENCES / "vocabulary.json").read_text(encoding="utf-8"))
+    vocab = json.loads((REFERENCES / "vocabulary.json").read_text(encoding="utf-8"))
+    # A status with no horizon would skip the expiry check silently, which is the one failure mode
+    # this validator cannot afford: the check would still report success. A broken bundle is a
+    # setup error, not a finding about the manifest.
+    missing = sorted(set(vocab["finding_status"]) - set(vocab["status_horizon_days"]))
+    if missing:
+        raise ValueError(
+            f"status_horizon_days has no entry for {missing} — every status needs an expiry horizon "
+            "or the horizon check passes without checking anything"
+        )
+    return vocab
+
+
+def load_checks():
+    """The bundled rules, by id. Rules describe configuration; there is no framework content here."""
+    data = json.loads((REFERENCES / "checks.json").read_text(encoding="utf-8"))
+    return {check["id"]: check for check in data["checks"]}
+
+
+def parse_date(value):
+    """None when the value is not an ISO date. The caller decides whether that is an error."""
+    if not isinstance(value, str) or not DATE_RE.match(value):
+        return None
+    try:
+        return datetime.date.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def check_unknown_keys(rep, path, obj, allowed):
@@ -280,26 +359,203 @@ def check_unknown_keys(rep, path, obj, allowed):
             rep.err(f"{path}.{key}", f"unknown key '{key}'" + suggest(key, allowed))
 
 
-def check_refs(rep, path, obj):
-    refs = obj.get("refs")
+def check_date(rep, path, value, required, label):
+    if value is None:
+        if required:
+            rep.err(path, f"missing required `{label}` (YYYY-MM-DD)")
+        return None
+    parsed = parse_date(value)
+    if parsed is None:
+        rep.err(path, f"'{value}' is not an ISO date (YYYY-MM-DD)")
+    return parsed
+
+
+def check_source(rep, doc):
+    src = doc.get("source")
+    if not isinstance(src, dict):
+        rep.err("source", "missing required `source` block (slug, commit_sha, branch, generated_by)")
+        return None
+    check_unknown_keys(rep, "source", src, SOURCE_KEYS)
+    for field in ("slug", "commit_sha", "branch", "generated_by"):
+        if not src.get(field) or not isinstance(src.get(field), str):
+            rep.err(
+                f"source.{field}",
+                f"missing required `{field}` — push provenance is not optional (requirement 4)",
+            )
+    sha = src.get("commit_sha")
+    if isinstance(sha, str) and 0 < len(sha) < 7:
+        rep.err("source.commit_sha", f"'{sha}' is too short to identify a commit")
+    slug = src.get("slug")
+    return slug if isinstance(slug, str) else None
+
+
+def check_queue(rep, doc, vocab):
+    """Requirement 9. What Noru already held, recorded so the plan can be argued with later."""
+    queue = doc.get("queue_snapshot")
+    empty = {"open": {}, "assets": set(), "risks": set()}
+    if not isinstance(queue, dict):
+        rep.err(
+            "queue_snapshot",
+            "missing required `queue_snapshot` — this piece works Noru's queue and must record the "
+            "queue it worked (requirement 9). Without the open set a re-scan cannot tell which "
+            "findings should now be closed",
+        )
+        return empty
+    check_unknown_keys(rep, "queue_snapshot", queue, QUEUE_KEYS)
+
+    if not queue.get("fetched_at"):
+        rep.err("queue_snapshot.fetched_at", "missing required `fetched_at`")
+
+    via = queue.get("via")
+    if not isinstance(via, list) or len(via) == 0:
+        rep.err(
+            "queue_snapshot.via",
+            "missing required `via` — name the Noru tools the snapshot came from",
+        )
+    else:
+        for tool in via:
+            if tool not in vocab["queue_tools"]:
+                rep.err(
+                    "queue_snapshot.via",
+                    f"'{tool}' is not a Noru queue tool this piece reads"
+                    + suggest(tool, vocab["queue_tools"]),
+                )
+
+    if queue.get("source") != FINDING_SOURCE:
+        rep.err(
+            "queue_snapshot.source",
+            f"expected '{FINDING_SOURCE}', found '{queue.get('source')}' — the open set has to have "
+            "been fetched for this piece's own source, or closing against it would close findings "
+            "this piece never wrote",
+        )
+
+    open_findings = {}
+    rows = queue.get("open_findings")
+    if rows is None:
+        rep.err(
+            "queue_snapshot.open_findings",
+            "missing required `open_findings` (an empty list is a valid answer and means nothing "
+            "has been landed yet)",
+        )
+        rows = []
+    elif not isinstance(rows, list):
+        rep.err("queue_snapshot.open_findings", "must be a list")
+        rows = []
+    for i, row in enumerate(rows):
+        opath = f"queue_snapshot.open_findings[{i}]"
+        if not isinstance(row, dict):
+            rep.err(opath, "open finding must be a mapping")
+            continue
+        check_unknown_keys(rep, opath, row, QUEUE_OPEN_KEYS)
+        external_id = row.get("external_id")
+        if not external_id or not isinstance(external_id, str):
+            rep.err(f"{opath}.external_id", "missing required `external_id`")
+            continue
+        # Closing a finding means sending the whole record back, so anything the upsert requires has
+        # to be in the snapshot. A snapshot missing them cannot be reconciled from.
+        for field, allowed in (
+            ("check_name", None),
+            ("title", None),
+            ("severity", vocab["severity"]),
+            ("status", vocab["finding_status"]),
+            ("category", vocab["category"]),
+        ):
+            value = row.get(field)
+            if value is None or not isinstance(value, str) or value == "":
+                rep.err(
+                    f"{opath}.{field}",
+                    f"missing required `{field}` — closing a finding sends the whole record back, "
+                    "so the snapshot has to carry every field the upsert requires",
+                )
+            elif allowed is not None and value not in allowed:
+                rep.err(f"{opath}.{field}", f"unknown {field} '{value}'" + suggest(value, allowed))
+        open_findings[external_id] = row
+
+    assets = set()
+    rows = queue.get("assets")
+    if rows is None:
+        rep.err("queue_snapshot.assets", "missing required `assets` (an empty list is valid)")
+        rows = []
+    elif not isinstance(rows, list):
+        rep.err("queue_snapshot.assets", "must be a list")
+        rows = []
+    for i, row in enumerate(rows):
+        apath = f"queue_snapshot.assets[{i}]"
+        if not isinstance(row, dict):
+            rep.err(apath, "asset must be a mapping")
+            continue
+        check_unknown_keys(rep, apath, row, QUEUE_ASSET_KEYS)
+        if not row.get("id"):
+            rep.err(f"{apath}.id", "missing required `id`")
+        if isinstance(row.get("external_id"), str) and row["external_id"] != "":
+            assets.add(row["external_id"])
+
+    risks = set()
+    rows = queue.get("risks")
+    if rows is None:
+        rep.err("queue_snapshot.risks", "missing required `risks` (an empty list is valid)")
+        rows = []
+    elif not isinstance(rows, list):
+        rep.err("queue_snapshot.risks", "must be a list")
+        rows = []
+    for i, row in enumerate(rows):
+        rpath = f"queue_snapshot.risks[{i}]"
+        if not isinstance(row, dict):
+            rep.err(rpath, "risk must be a mapping")
+            continue
+        check_unknown_keys(rep, rpath, row, QUEUE_RISK_KEYS)
+        if not row.get("id"):
+            rep.err(f"{rpath}.id", "missing required `id`")
+        else:
+            risks.add(row["id"])
+
+    return {"open": open_findings, "assets": assets, "risks": risks}
+
+
+def check_refs(rep, path, finding):
+    refs = finding.get("refs")
     if refs is None:
-        rep.err(path, "missing required `refs` — every claim must cite the lines that produced it")
+        rep.err(
+            path,
+            "missing required `refs` — say where the rule fired, as 'file:line'. The line is the "
+            "whole evidence: this piece never copies what it matched",
+        )
         return
     if not isinstance(refs, list) or len(refs) == 0:
-        rep.err(f"{path}.refs", "must be a non-empty list — an unattributed claim is an error")
+        rep.err(f"{path}.refs", "must be a non-empty list — an uncited finding is an error")
         return
+    declared = finding.get("file")
     for i, ref in enumerate(refs):
         if not isinstance(ref, str) or not REF_RE.match(ref):
             rep.err(f"{path}.refs[{i}]", f"'{ref}' is not a 'file:line' citation")
+            continue
+        cited = ref.rsplit(":", 1)[0]
+        if cited.startswith("/") or ".." in cited.split("/"):
+            rep.err(
+                f"{path}.refs[{i}]",
+                f"'{cited}' must be a path inside the repository, not absolute and not traversing "
+                "out of it",
+            )
+        elif isinstance(declared, str) and declared != "" and cited != declared:
+            # A warning and not an error: the citation is what a reader opens, so a mismatch is
+            # worth saying out loud, but a manifest whose paths were rewritten wholesale (a move, a
+            # rename, a test harness re-pointing them) is still a manifest somebody can read.
+            rep.warn(
+                f"{path}.refs[{i}]",
+                f"cites '{cited}' but the finding says it is about '{declared}' — one of the two is "
+                "out of date, and the citation is the half a reader can actually open",
+            )
 
 
-def check_interpretation(rep, path, obj):
-    block = obj.get("interpretation")
+def check_interpretation(rep, path, finding, vocab, observed_on, as_of):
+    """Requirement 8, anchored on when the configuration was seen rather than on when it was signed."""
+    block = finding.get("interpretation")
     if block is None:
         rep.err(
             path,
-            "missing required `interpretation` — name the person who decided this, when, "
-            "until when, and why",
+            "missing required `interpretation` — a scanner cannot decide whether a rule that fired "
+            "is real in your environment. Name the person who decided, the day they decided, the "
+            "day the decision stops being current, and what they looked at",
         )
         return
     ipath = f"{path}.interpretation"
@@ -310,96 +566,275 @@ def check_interpretation(rep, path, obj):
 
     owner = block.get("owner")
     if not owner or not isinstance(owner, str) or len(owner) < 3:
-        rep.err(f"{ipath}.owner", "missing or too short — must name a person, not a team alias")
-    if block.get("decided_at") is None:
-        rep.err(f"{ipath}.decided_at", "missing required `decided_at` (YYYY-MM-DD)")
-    for field in ("decided_at", "expires_at"):
-        value = block.get(field)
-        if value is not None and (not isinstance(value, str) or not DATE_RE.match(value)):
-            rep.err(f"{ipath}.{field}", f"'{value}' is not an ISO date (YYYY-MM-DD)")
+        rep.err(
+            f"{ipath}.owner",
+            "missing or too short — name the person who decided, not a team alias. A team cannot "
+            "be asked what it was looking at",
+        )
+    elif TODO_RE.search(owner):
+        rep.err(f"{ipath}.owner", "still a TODO — a placeholder cannot decide anything")
+
+    decided_at = check_date(rep, f"{ipath}.decided_at", block.get("decided_at"), True, "decided_at")
+
+    expires_at = None
+    if block.get("expires_at") is None:
+        rep.err(
+            f"{ipath}.expires_at",
+            "missing required `expires_at` — a judgement about a configuration goes stale when the "
+            "configuration changes, and nothing else in this file says when somebody has to look "
+            "again",
+        )
+    else:
+        expires_at = check_date(
+            rep, f"{ipath}.expires_at", block.get("expires_at"), True, "expires_at"
+        )
+
+    status = finding.get("status")
     rationale = block.get("rationale")
     if not rationale or not isinstance(rationale, str) or len(rationale.strip()) < 10:
-        rep.err(f"{ipath}.rationale", "missing or too short — say why this claim holds")
-    if block.get("expires_at") is None:
-        rep.warn(f"{ipath}.expires_at", "no expiry set; acceptable only for a point-in-time claim")
+        rep.err(
+            f"{ipath}.rationale",
+            "missing or too short — say what you looked at and why this stands",
+        )
+    elif TODO_RE.search(rationale):
+        rep.err(f"{ipath}.rationale", "still a TODO — write the decision before signing it")
+    elif status in DECIDED_TO_LEAVE and len(rationale.strip()) < REASONING_MIN_CHARS:
+        rep.err(
+            f"{ipath}.rationale",
+            f"status is '{status}', so this is a decision to leave the configuration as it is — "
+            "accepting a misconfiguration, or calling it a false positive, is exactly the judgement "
+            "that has to be written down. Say what makes it safe here, in a sentence somebody can "
+            "disagree with",
+        )
 
+    if decided_at is not None and observed_on is not None and decided_at < observed_on:
+        rep.err(
+            f"{ipath}.decided_at",
+            f"'{decided_at.isoformat()}' is before observed_on '{observed_on.isoformat()}' — a "
+            "configuration cannot be judged before it was observed",
+        )
 
-def check_source(rep, doc):
-    src = doc.get("source")
-    if not isinstance(src, dict):
-        rep.err("source", "missing required `source` block")
-        return
-    check_unknown_keys(rep, "source", src, SOURCE_KEYS)
-    for field in ("slug", "commit_sha", "branch", "generated_by"):
-        if not src.get(field) or not isinstance(src.get(field), str):
+    if expires_at is not None and decided_at is not None and expires_at <= decided_at:
+        rep.err(
+            f"{ipath}.expires_at",
+            f"'{expires_at.isoformat()}' is not after decided_at '{decided_at.isoformat()}' — a "
+            "decision cannot expire before it was made",
+        )
+
+    horizon = vocab["status_horizon_days"].get(status)
+    if expires_at is not None and observed_on is not None and horizon is not None:
+        days = (expires_at - observed_on).days
+        if days > horizon:
             rep.err(
-                f"source.{field}",
-                f"missing required `{field}` — push provenance is not optional (requirement 4)",
+                f"{ipath}.expires_at",
+                f"stands for {days} day(s) after the configuration was observed on "
+                f"{observed_on.isoformat()}, and a finding in status '{status}' may stand for at "
+                f"most {horizon}. The anchor is observed_on and not decided_at on purpose: signing "
+                "late does not make an old observation current",
             )
 
+    if as_of is not None and expires_at is not None and expires_at < as_of:
+        rep.err(
+            f"{ipath}.expires_at",
+            f"this decision expired on {expires_at.isoformat()}, before the --as-of date "
+            f"{as_of.isoformat()} — re-scan and decide again rather than pushing the old judgement",
+        )
 
-def validate(doc, vocab):
+    refs = block.get("refs")
+    if refs is not None:
+        if not isinstance(refs, list):
+            rep.err(f"{ipath}.refs", "must be a list of 'file:line' strings")
+        else:
+            for i, ref in enumerate(refs):
+                if not isinstance(ref, str) or not REF_RE.match(ref):
+                    rep.err(f"{ipath}.refs[{i}]", f"'{ref}' is not a 'file:line' citation")
+
+
+def check_finding(rep, path, finding, vocab, checks, queue, seen_keys, as_of):
+    if not isinstance(finding, dict):
+        rep.err(path, "finding must be a mapping")
+        return
+    check_unknown_keys(rep, path, finding, FINDING_KEYS)
+
+    key = finding.get("key")
+    if not key or not isinstance(key, str) or not KEY_RE.match(key):
+        rep.err(
+            f"{path}.key",
+            f"'{key}' is not a stable lowercase key (letters, digits, '.', '_', '-')",
+        )
+    elif key in seen_keys:
+        rep.err(
+            f"{path}.key",
+            f"duplicate key '{key}' — the key is what the upsert is addressed by, so two findings "
+            "sharing one would overwrite each other on every push",
+        )
+    else:
+        seen_keys.add(key)
+
+    check_id = finding.get("check")
+    rule = None
+    if check_id is None:
+        rep.err(f"{path}.check", "missing required `check`")
+    elif check_id not in checks:
+        rep.err(
+            f"{path}.check",
+            f"unknown check '{check_id}' — it is not one of the bundled rules"
+            + suggest(check_id, sorted(checks)),
+        )
+    else:
+        rule = checks[check_id]
+
+    technology = finding.get("technology")
+    if technology is None:
+        rep.err(f"{path}.technology", "missing required `technology`")
+    elif technology not in vocab["technology"]:
+        rep.err(
+            f"{path}.technology",
+            f"unknown technology '{technology}'" + suggest(technology, vocab["technology"]),
+        )
+    elif rule is not None and rule["technology"] != technology:
+        rep.err(
+            f"{path}.technology",
+            f"'{check_id}' only fires on {rule['technology']} configuration, but this finding says "
+            f"'{technology}'. One of the two is wrong, and the scan does not produce this pairing",
+        )
+
+    for field, allowed in (
+        ("severity", vocab["severity"]),
+        ("category", vocab["category"]),
+        ("status", vocab["finding_status"]),
+    ):
+        value = finding.get(field)
+        if value is None:
+            rep.err(f"{path}.{field}", f"missing required `{field}`")
+        elif value not in allowed:
+            rep.err(f"{path}.{field}", f"unknown {field} '{value}'" + suggest(value, allowed))
+
+    if not finding.get("title") or not isinstance(finding.get("title"), str):
+        rep.err(f"{path}.title", "missing required `title`")
+
+    file_path = finding.get("file")
+    if not file_path or not isinstance(file_path, str):
+        rep.err(f"{path}.file", "missing required `file`")
+    elif file_path.startswith("/") or ".." in file_path.split("/"):
+        rep.err(
+            f"{path}.file",
+            f"'{file_path}' must be a path inside the repository, not absolute and not traversing "
+            "out of it",
+        )
+
+    resource = finding.get("resource")
+    if resource is not None and not isinstance(resource, str):
+        rep.err(f"{path}.resource", "must be a string or null")
+
+    observed_on = check_date(
+        rep, f"{path}.observed_on", finding.get("observed_on"), True, "observed_on"
+    )
+
+    asset = finding.get("asset_external_id")
+    if asset is not None:
+        if not isinstance(asset, str) or asset == "":
+            rep.err(f"{path}.asset_external_id", "must be a non-empty string when present")
+        elif asset not in queue["assets"]:
+            rep.err(
+                f"{path}.asset_external_id",
+                f"'{asset}' is not in the queue snapshot — a finding may only be attached to an "
+                "asset the organization already has, because this piece cannot know whether the "
+                "thing a configuration block describes is the thing the register already holds"
+                + suggest(asset, sorted(queue["assets"])),
+            )
+
+    risk = finding.get("risk_id")
+    if risk is not None:
+        if not isinstance(risk, str) or risk == "":
+            rep.err(f"{path}.risk_id", "must be a non-empty string when present")
+        elif risk not in queue["risks"]:
+            rep.err(
+                f"{path}.risk_id",
+                f"'{risk}' is not in the queue snapshot — filing a finding against a risk the "
+                "organization does not carry would invent a register entry"
+                + suggest(risk, sorted(queue["risks"])),
+            )
+
+    owner_email = finding.get("owner_email")
+    if owner_email is not None and (not isinstance(owner_email, str) or len(owner_email) < 3):
+        rep.err(f"{path}.owner_email", "must be a non-empty string when present")
+
+    check_refs(rep, path, finding)
+    check_interpretation(rep, path, finding, vocab, observed_on, as_of)
+
+    if finding.get("needs_review") is True:
+        rep.err(
+            f"{path}.needs_review",
+            "still true — nobody has decided whether this rule firing means anything here; resolve "
+            "it and remove the flag before pushing",
+        )
+
+
+def validate(doc, vocab, checks, as_of=None):
     rep = Report()
-    counts = {"items": 0}
+    counts = {"findings": 0, "open_in_noru": 0, "to_close": 0, "configuration_files": 0}
     if not isinstance(doc, dict):
-        rep.err("<root>", "manifest must be a mapping with `version`, `piece`, `source`, `items`")
+        rep.err(
+            "<root>",
+            "manifest must be a mapping with `version`, `piece`, `source`, `queue_snapshot`, "
+            "`findings`",
+        )
         return rep, counts
 
     check_unknown_keys(rep, "<root>", doc, TOP_LEVEL_KEYS)
+
     version = doc.get("version")
     if not version or not isinstance(version, str) or not SEMVER_RE.match(version):
         rep.err("version", f"'{version}' is not a semantic version (for example 0.1.0)")
     if doc.get("piece") != PIECE:
         rep.err("piece", f"expected '{PIECE}', found '{doc.get('piece')}'")
 
-    check_source(rep, doc)
+    slug = check_source(rep, doc)
+    queue = check_queue(rep, doc, vocab)
+    counts["open_in_noru"] = len(queue["open"])
 
-    items = doc.get("items")
-    if items is None:
-        rep.err("items", "missing required `items` (an empty list is a valid answer)")
-        items = []
-    elif not isinstance(items, list):
-        rep.err("items", "must be a list")
-        items = []
+    findings = doc.get("findings")
+    if findings is None:
+        rep.err(
+            "findings",
+            "missing required `findings` (an empty list is a valid answer — it means the rules "
+            "found nothing, and :diff will still close what no longer reproduces)",
+        )
+        findings = []
+    elif not isinstance(findings, list):
+        rep.err("findings", "must be a list")
+        findings = []
 
-    seen = set()
-    for i, item in enumerate(items):
-        path = f"items[{i}]"
-        if not isinstance(item, dict):
-            rep.err(path, "item must be a mapping")
-            continue
-        check_unknown_keys(rep, path, item, ITEM_KEYS)
-        key = item.get("key")
-        if not key or not isinstance(key, str) or not KEY_RE.match(key):
-            rep.err(f"{path}.key", f"'{key}' is not a stable lowercase key")
-        elif key in seen:
-            rep.err(f"{path}.key", f"duplicate key '{key}' — keys must be unique and stable")
-        else:
-            seen.add(key)
-        if not item.get("title"):
-            rep.err(f"{path}.title", "missing required `title`")
-        kind = item.get("kind")
-        if kind is None:
-            rep.err(f"{path}.kind", "missing required `kind`")
-        elif kind not in vocab["item_kind"]:
-            rep.err(
-                f"{path}.kind",
-                f"unknown item kind '{kind}'" + suggest(kind, vocab["item_kind"]),
+    seen_keys = set()
+    for i, finding in enumerate(findings):
+        check_finding(rep, f"findings[{i}]", finding, vocab, checks, queue, seen_keys, as_of)
+    counts["findings"] = len(findings)
+    counts["configuration_files"] = len(
+        {f.get("file") for f in findings if isinstance(f, dict) and isinstance(f.get("file"), str)}
+    )
+
+    # What :diff will close. Not an error — closing a finding whose rule stopped firing is the point
+    # of re-running — but the reviewer should meet it here rather than in the plan.
+    if slug is not None:
+        mine = f"{slug}:"
+        for external_id in sorted(queue["open"]):
+            if not external_id.startswith(mine):
+                continue
+            if external_id[len(mine):] in seen_keys:
+                continue
+            counts["to_close"] += 1
+            rep.warn(
+                "queue_snapshot.open_findings",
+                f"'{external_id}' is open in Noru and no rule reproduced it here, so :diff will "
+                "plan to resolve it. If that is wrong, the rule changed and not the configuration",
             )
-        check_refs(rep, path, item)
-        check_interpretation(rep, path, item)
-        if item.get("needs_review") is True:
-            rep.err(
-                f"{path}.needs_review",
-                "still true — a human has not resolved this; resolve it and remove the flag "
-                "before pushing",
-            )
-    counts["items"] = len(items)
+
     return rep, counts
 
 
 USAGE = (
-    "usage: validate_manifest.py <manifest.yml> [--output=json] [--quiet] "
+    "usage: validate_manifest.py <manifest.yml> [--as-of=YYYY-MM-DD] [--output=json] [--quiet] "
     "[--emit-parsed=<path.json>]\n"
 )
 
@@ -408,6 +843,7 @@ def main(argv):
     output_json = False
     quiet = False
     emit_parsed = None
+    as_of = None
     positional = []
     for arg in argv:
         if arg == "--output=json":
@@ -418,6 +854,12 @@ def main(argv):
             quiet = True
         elif arg.startswith("--emit-parsed="):
             emit_parsed = arg.split("=", 1)[1]
+        elif arg.startswith("--as-of="):
+            raw = arg.split("=", 1)[1]
+            as_of = parse_date(raw)
+            if as_of is None:
+                sys.stderr.write(f"error: --as-of='{raw}' is not an ISO date (YYYY-MM-DD)\n")
+                return 2
         elif arg in ("-h", "--help"):
             sys.stdout.write(USAGE)
             return 0
@@ -430,6 +872,7 @@ def main(argv):
     if len(positional) != 1:
         sys.stderr.write(USAGE)
         return 2
+
     path = pathlib.Path(positional[0])
     if not path.is_file():
         sys.stderr.write(f"error: no such file: {path}\n")
@@ -439,13 +882,15 @@ def main(argv):
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"error: could not parse YAML ({exc})\n")
         return 2
+
     try:
         vocab = load_vocabulary()
+        checks = load_checks()
     except Exception as exc:  # noqa: BLE001
-        sys.stderr.write(f"error: could not load bundled vocabulary ({exc})\n")
+        sys.stderr.write(f"error: could not load the bundled vocabulary or rules ({exc})\n")
         return 2
 
-    rep, counts = validate(doc, vocab)
+    rep, counts = validate(doc, vocab, checks, as_of)
     ok = not rep.errors
 
     if ok and emit_parsed:
@@ -467,6 +912,7 @@ def main(argv):
                     "manifest": str(path),
                     "ok": ok,
                     "loader": loader,
+                    "as_of": as_of.isoformat() if as_of else None,
                     "counts": counts,
                     "errors": [{"path": p, "message": m} for p, m in rep.errors],
                     "warnings": [{"path": p, "message": m} for p, m in rep.warnings],
@@ -484,11 +930,16 @@ def main(argv):
             print(f"  WARN  {p}: {m}")
     for p, m in rep.errors:
         print(f"  ERROR {p}: {m}")
+
     if not ok:
         print(f"\nFAILED: {len(rep.errors)} error(s), {len(rep.warnings)} warning(s).")
         return 1
     if not quiet:
-        print(f"\nOK: {counts['items']} item(s), all keys valid ({len(rep.warnings)} warning(s)).")
+        print(
+            f"\nOK: {counts['findings']} finding(s) across {counts['configuration_files']} "
+            f"configuration file(s); {counts['open_in_noru']} already open in Noru, "
+            f"{counts['to_close']} of which no longer reproduce ({len(rep.warnings)} warning(s))."
+        )
     return 0
 
 

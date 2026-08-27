@@ -13,6 +13,12 @@ sharpest claim and the easiest to get quietly wrong. It is not enough to find th
 finding is whether the disclosure the paragraph requires is present, and the states it reports
 (present / unclear / absent) mean specific things that are asserted below one at a time.
 
+For `iac-scan` the sharpest claim is a negative one: the rule that finds a credential written into
+configuration must never write that credential anywhere. A scanner that quotes what it matched puts
+the secret into a committed file and then into a pull request, so that property is asserted directly
+rather than left to the reviewer of the collector. The other assertions are about identity — a
+finding is keyed on the resource, so moving a block is not a new problem and renaming one is.
+
 Usage:
     python3 scripts/test_collectors.py [--output=json] [--quiet]
 Exit codes: 0 = all tests pass, 1 = a test failed, 2 = usage / setup error.
@@ -350,6 +356,226 @@ def test_missing_disclosure_fixture_alerts(results):
     )
 
 
+IAC_SCAN = ROOT / "plugins" / "iac-scan"
+IAC_COLLECTOR = IAC_SCAN / "scripts" / "collect.mjs"
+
+# A queue with nothing in it: enough for the collector to run, so a test can be about the scan and
+# not about the snapshot.
+EMPTY_IAC_QUEUE = {
+    "fetched_at": "2026-08-27T09:14:00Z",
+    "via": ["getSecurityFindings", "getOrganizationAssets", "getOrganizationRisks"],
+    "source": "iac-scan",
+    "open_findings": [],
+    "assets": [],
+    "risks": [],
+}
+
+# The line the credential rule fires on. The value is a placeholder, but the test is that NOTHING
+# resembling it reaches the derived facts or the manifest — which is the property that stops this
+# piece publishing the real thing when it runs on a real repository.
+SECRET_LITERAL = "hunter2-placeholder-not-a-real-credential"
+TF_WITH_LITERAL = f"""\
+resource "aws_db_instance" "primary" {{
+  engine            = "postgres"
+  storage_encrypted = true
+  password          = "{SECRET_LITERAL}"
+}}
+"""
+
+
+def iac_scan_repo(tmp, name, files, queue=None):
+    """Write a throwaway repository, run the real collector over it, return its derived facts."""
+    repo = pathlib.Path(tmp) / f"iac-{name}"
+    for rel, body in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    cache = repo / ".noru" / ".cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "iac-queue.json").write_text(
+        json.dumps(queue or EMPTY_IAC_QUEUE, indent=2), encoding="utf-8"
+    )
+    result = run(["node", str(IAC_COLLECTOR), f"--repo={repo}", "--output=json", "--quiet"])
+    if result.returncode != 0:
+        raise RuntimeError(f"iac-scan collector exited {result.returncode}: {result.stderr[:300]}")
+    derived = json.loads(
+        (cache / "iac-scan.derived.json").read_text(encoding="utf-8")
+    )
+    manifest = repo / ".noru" / "iac-scan.yml"
+    return derived, (manifest.read_text(encoding="utf-8") if manifest.is_file() else "")
+
+
+def iac_checks(derived, check_id):
+    return [f for f in derived["findings"] if f["check"] == check_id]
+
+
+def test_iac_never_copies_the_line(results, tmp):
+    """The rule that fires on a credential must not put that credential anywhere it can be read."""
+    derived, manifest = iac_scan_repo(tmp, "literal", {"infra/db.tf": TF_WITH_LITERAL})
+    hits = iac_checks(derived, "terraform-credential-literal-in-source")
+    results.check(
+        "[iac-scan] a credential written into Terraform is found",
+        len(hits) == 1 and hits[0]["resource"] == "aws_db_instance.primary",
+        json.dumps(derived["findings"]),
+    )
+    results.check(
+        "[iac-scan] the matched value appears in NEITHER the derived facts NOR the manifest",
+        SECRET_LITERAL not in json.dumps(derived) and SECRET_LITERAL not in manifest,
+        "the collector copied what it matched — that is how a scanner commits a secret",
+    )
+    results.check(
+        "[iac-scan] what it writes instead is a citation the reader can open",
+        hits[0]["ref"] == "infra/db.tf:4",
+        json.dumps(hits),
+    )
+
+
+def test_iac_identity_survives_a_move(results, tmp):
+    """A finding is keyed on the resource, not the line: moving a block is not a new problem."""
+    moved = "# a comment added at the top\n# and another\n" + TF_WITH_LITERAL
+    first, _ = iac_scan_repo(tmp, "move-before", {"infra/db.tf": TF_WITH_LITERAL})
+    second, _ = iac_scan_repo(tmp, "move-after", {"infra/db.tf": moved})
+    before = iac_checks(first, "terraform-credential-literal-in-source")[0]
+    after = iac_checks(second, "terraform-credential-literal-in-source")[0]
+    results.check(
+        "[iac-scan] moving a resource down the file keeps the finding's identity",
+        before["key"] == after["key"] and before["ref"] != after["ref"],
+        f"{before['key']} vs {after['key']}, {before['ref']} vs {after['ref']}",
+    )
+
+    renamed, _ = iac_scan_repo(
+        tmp,
+        "renamed",
+        {"infra/db.tf": TF_WITH_LITERAL.replace('"primary"', '"replica"')},
+    )
+    results.check(
+        "[iac-scan] the same rule on a different resource is a different finding",
+        iac_checks(renamed, "terraform-credential-literal-in-source")[0]["key"] != before["key"],
+        iac_checks(renamed, "terraform-credential-literal-in-source")[0]["key"],
+    )
+
+
+def test_iac_absence_is_detectable(results, tmp):
+    """The interesting half of an infrastructure review is what a block does NOT say."""
+    unencrypted = 'resource "aws_db_instance" "primary" {\n  engine = "postgres"\n}\n'
+    derived, _ = iac_scan_repo(tmp, "unencrypted", {"infra/db.tf": unencrypted})
+    results.check(
+        "[iac-scan] a database block declaring no encryption is reported",
+        len(iac_checks(derived, "terraform-managed-database-storage-unencrypted")) == 1,
+        json.dumps(derived["findings"]),
+    )
+
+    encrypted = (
+        'resource "aws_db_instance" "primary" {\n'
+        '  engine            = "postgres"\n'
+        "  storage_encrypted = true\n"
+        "}\n"
+    )
+    derived, _ = iac_scan_repo(tmp, "encrypted", {"infra/db.tf": encrypted})
+    results.check(
+        "[iac-scan] and the same block with encryption declared is NOT reported",
+        iac_checks(derived, "terraform-managed-database-storage-unencrypted") == [],
+        json.dumps(derived["findings"]),
+    )
+
+
+def test_iac_classification(results, tmp):
+    """A rule only ever runs against the kind of document it is written for."""
+    files = {
+        "deploy/app.yaml": (
+            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n"
+            "  template:\n    spec:\n      hostNetwork: true\n"
+        ),
+        ".github/workflows/ci.yml": (
+            "name: ci\non: [push]\npermissions: write-all\njobs:\n  test:\n"
+            "    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n"
+        ),
+        "docs/notes.yaml": "privileged: true\npermissions: write-all\n",
+    }
+    derived, _ = iac_scan_repo(tmp, "classify", files)
+    kinds = {row["file"]: row["technology"] for row in derived["configuration_files"]}
+    results.check(
+        "[iac-scan] a Kubernetes manifest and a workflow are classified, a plain YAML file is not",
+        kinds == {"deploy/app.yaml": "kubernetes", ".github/workflows/ci.yml": "github_actions"},
+        json.dumps(kinds),
+    )
+    results.check(
+        "[iac-scan] no rule fires inside the unclassified file",
+        all(f["file"] != "docs/notes.yaml" for f in derived["findings"]),
+        json.dumps([f["file"] for f in derived["findings"]]),
+    )
+    results.check(
+        "[iac-scan] a workflow step pinned to a mutable reference is reported",
+        len(iac_checks(derived, "github-actions-third-party-action-unpinned")) == 1,
+        json.dumps([f["check"] for f in derived["findings"]]),
+    )
+
+    pinned = files[".github/workflows/ci.yml"].replace(
+        "actions/checkout@v4", "actions/checkout@" + "0" * 40
+    )
+    derived, _ = iac_scan_repo(tmp, "pinned", {".github/workflows/ci.yml": pinned})
+    results.check(
+        "[iac-scan] and a step pinned to a full commit hash is not",
+        iac_checks(derived, "github-actions-third-party-action-unpinned") == [],
+        json.dumps(derived["findings"]),
+    )
+
+
+def test_iac_reports_what_stopped_reproducing(results, tmp):
+    """The half of the queue only Noru knows: a finding that is open and no longer fires."""
+    queue = dict(
+        EMPTY_IAC_QUEUE,
+        open_findings=[
+            {
+                "external_id": "example/app:terraform-object-storage-public-acl.0123456789ab",
+                "check_name": "terraform-object-storage-public-acl",
+                "title": "Object storage bucket is granted a public access control list",
+                "severity": "high",
+                "status": "open",
+                "category": "configuration",
+            }
+        ],
+    )
+    derived, _ = iac_scan_repo(tmp, "stale", {"infra/db.tf": TF_WITH_LITERAL}, queue=queue)
+    results.check(
+        "[iac-scan] an open finding no rule reproduced is named in the scan output",
+        derived["queue_no_longer_reproducing"]
+        == ["example/app:terraform-object-storage-public-acl.0123456789ab"],
+        json.dumps(derived["queue_no_longer_reproducing"]),
+    )
+
+
+def test_iac_skeleton_never_decides(results, tmp):
+    """The collector proposes. Severity, reality and ownership are the reviewer's."""
+    _, manifest = iac_scan_repo(tmp, "skeleton", {"infra/db.tf": TF_WITH_LITERAL})
+    # Counted at the finding's own indentation: the header comment mentions the flag too, and a
+    # test that matches the documentation instead of the data is a test that proves nothing.
+    results.check(
+        "[iac-scan] every finding the skeleton proposes is flagged needs_review",
+        manifest.count("\n    needs_review: true") == manifest.count("\n  - key: ") > 0,
+        f'{manifest.count(chr(10) + "    needs_review: true")} flagged, '
+        f'{manifest.count(chr(10) + "  - key: ")} finding(s)',
+    )
+    results.check(
+        "[iac-scan] the skeleton never invents an owner",
+        "owner: TODO@example.com" in manifest,
+        manifest[:200],
+    )
+
+
+def test_iac_every_status_has_an_expiry_horizon(results):
+    """A status with no horizon would make the expiry check pass without checking anything."""
+    vocab = json.loads(
+        (IAC_SCAN / "references" / "vocabulary.json").read_text(encoding="utf-8")
+    )
+    missing = sorted(set(vocab["finding_status"]) - set(vocab["status_horizon_days"]))
+    results.check(
+        "[iac-scan] every finding status has an expiry horizon in the bundled vocabulary",
+        missing == [],
+        f"no horizon for {missing}",
+    )
+
+
 def main(argv):
     output_json = False
     quiet = False
@@ -380,7 +606,14 @@ def main(argv):
             test_emotion_recognition_is_biometric(results, tmp)
             test_art5_screen(results, tmp)
             test_skeleton_never_asserts(results, tmp)
+            test_iac_never_copies_the_line(results, tmp)
+            test_iac_identity_survives_a_move(results, tmp)
+            test_iac_absence_is_detectable(results, tmp)
+            test_iac_classification(results, tmp)
+            test_iac_reports_what_stopped_reproducing(results, tmp)
+            test_iac_skeleton_never_decides(results, tmp)
         test_missing_disclosure_fixture_alerts(results)
+        test_iac_every_status_has_an_expiry_horizon(results)
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"error: {exc}\n")
         return 2

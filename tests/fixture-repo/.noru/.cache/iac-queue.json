@@ -1,0 +1,29 @@
+{
+  "_comment": "Fixture queue for the iac-scan collector determinism test. In real use this file is written by the skill from getSecurityFindings + getOrganizationAssets + getOrganizationRisks. Everything below is synthetic: the ids belong to no organization.",
+  "fetched_at": "2026-08-27T09:14:00Z",
+  "via": ["getSecurityFindings", "getOrganizationAssets", "getOrganizationRisks"],
+  "source": "iac-scan",
+  "open_findings": [
+    {
+      "external_id": "example-org/example-app:terraform-network-ingress-open-to-the-internet.deadbeefcafe",
+      "check_name": "terraform-network-ingress-open-to-the-internet",
+      "title": "Network ingress rule accepts traffic from any address",
+      "severity": "high",
+      "status": "open",
+      "category": "configuration"
+    }
+  ],
+  "assets": [
+    {
+      "id": "EXAMPLE-ASSET-ID",
+      "external_id": "example-account/example-cluster",
+      "name": "Example application cluster"
+    }
+  ],
+  "risks": [
+    {
+      "id": "EXAMPLE-RISK-ID",
+      "title": "Example risk: internet-reachable infrastructure"
+    }
+  ]
+}

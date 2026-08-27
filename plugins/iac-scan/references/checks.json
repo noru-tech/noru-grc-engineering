@@ -1,0 +1,247 @@
+{
+  "_comment": [
+    "The rules this piece can evaluate against infrastructure and pipeline configuration, bundled so",
+    "the collector stays deterministic and offline (contract requirements 2 and 3).",
+    "",
+    "This is NOT a framework catalogue and must never become one. There is no control text, no",
+    "testing guidance and no evidence-item id in this file, and the contract test fails the build if",
+    "one appears. Each entry describes a property of a configuration file — nothing about which",
+    "framework cares about it, because that mapping belongs to the organization's own control set",
+    "and is served by the API.",
+    "",
+    "`severity` and `category` are the values a Noru security finding accepts; see",
+    "references/vocabulary.json for where those enums are published. A rule that proposed a value",
+    "outside them would be rejected at push time.",
+    "",
+    "Detectors:",
+    "  line          — fires on each line matching any `line_match` pattern. `file_match` (all must",
+    "                  match somewhere in the file) narrows it to files that are the right kind of",
+    "                  document, so a key called `data:` only counts inside a Secret.",
+    "  block_match   — fires once per Terraform resource block of a listed type whose body matches",
+    "                  any `match` pattern.",
+    "  block_missing — fires once per Terraform resource block of a listed type whose body matches",
+    "                  NONE of the `expect` patterns. Absence is the interesting half of an",
+    "                  infrastructure review and a line scanner cannot see it.",
+    "",
+    "Every pattern is a regular expression evaluated with the multiline flag. Keep them anchored:",
+    "an unanchored pattern that fires on a comment is a false positive somebody has to disposition."
+  ],
+  "checks": [
+    {
+      "id": "terraform-object-storage-public-acl",
+      "technology": "terraform",
+      "severity": "high",
+      "category": "configuration",
+      "title": "Object storage bucket is granted a public access control list",
+      "what": "A canned ACL of public-read or public-read-write makes every object in the bucket readable by anyone on the internet.",
+      "remediation": "Remove the public ACL and grant access through a bucket policy scoped to the principals that need it.",
+      "detector": "line",
+      "line_match": ["^\\s*acl\\s*=\\s*\"public-read(-write)?\""]
+    },
+    {
+      "id": "terraform-object-storage-public-access-block-disabled",
+      "technology": "terraform",
+      "severity": "high",
+      "category": "configuration",
+      "title": "Object storage public-access protection is switched off",
+      "what": "One of the account- or bucket-level guards that would otherwise refuse a public ACL or policy is set to false.",
+      "remediation": "Leave every public-access guard at true unless there is a written, owned exception for this bucket.",
+      "detector": "line",
+      "line_match": [
+        "^\\s*(block_public_acls|block_public_policy|ignore_public_acls|restrict_public_buckets)\\s*=\\s*false"
+      ]
+    },
+    {
+      "id": "terraform-network-ingress-open-to-the-internet",
+      "technology": "terraform",
+      "severity": "high",
+      "category": "configuration",
+      "title": "Network ingress rule accepts traffic from any address",
+      "what": "An ingress rule whose CIDR list contains the whole IPv4 or IPv6 space is reachable from anywhere.",
+      "remediation": "Narrow the CIDR list to the networks that need the port, or put the service behind a load balancer that terminates the public edge.",
+      "detector": "line",
+      "line_match": [
+        "^\\s*cidr_blocks\\s*=\\s*\\[[^\\]]*\"0\\.0\\.0\\.0/0\"",
+        "^\\s*ipv6_cidr_blocks\\s*=\\s*\\[[^\\]]*\"::/0\""
+      ]
+    },
+    {
+      "id": "terraform-managed-database-publicly-reachable",
+      "technology": "terraform",
+      "severity": "critical",
+      "category": "configuration",
+      "title": "Managed database instance is published to the internet",
+      "what": "The instance is given a public endpoint, so its only remaining protection is the security group and the credentials.",
+      "remediation": "Set the instance to private and reach it over the VPC, a peering link or a bastion.",
+      "detector": "line",
+      "line_match": ["^\\s*publicly_accessible\\s*=\\s*true"]
+    },
+    {
+      "id": "terraform-managed-database-storage-unencrypted",
+      "technology": "terraform",
+      "severity": "high",
+      "category": "configuration",
+      "title": "Managed database declares no encryption at rest",
+      "what": "The resource block sets neither an encryption flag nor a key, so the stored data inherits whatever the provider defaults to.",
+      "remediation": "Set storage encryption explicitly, with a customer-managed key where the framework asks for one.",
+      "detector": "block_missing",
+      "block_types": ["aws_db_instance", "aws_rds_cluster", "google_sql_database_instance"],
+      "expect": [
+        "storage_encrypted\\s*=\\s*true",
+        "kms_key_id\\s*=",
+        "encryption_config",
+        "disk_encryption_configuration"
+      ]
+    },
+    {
+      "id": "terraform-object-storage-no-server-side-encryption",
+      "technology": "terraform",
+      "severity": "medium",
+      "category": "configuration",
+      "title": "Object storage bucket declares no server-side encryption",
+      "what": "The bucket resource carries no server-side encryption configuration of its own.",
+      "remediation": "Declare server-side encryption on the bucket, or point at the account default and say so in the rationale.",
+      "detector": "block_missing",
+      "block_types": ["aws_s3_bucket", "google_storage_bucket"],
+      "expect": [
+        "server_side_encryption",
+        "encryption",
+        "kms_key_name\\s*=",
+        "sse_algorithm\\s*="
+      ]
+    },
+    {
+      "id": "terraform-credential-literal-in-source",
+      "technology": "terraform",
+      "severity": "critical",
+      "category": "identity_access",
+      "title": "Credential appears to be written into the configuration",
+      "what": "An attribute whose name means secret is assigned a literal string rather than a variable or a secret reference. This piece records the attribute and the line, never the value.",
+      "remediation": "Move the value into a secret manager and reference it. Treat the literal as compromised and rotate it.",
+      "detector": "line",
+      "line_match": [
+        "^\\s*(password|secret|token|access_key|secret_key|api_key|private_key)\\s*=\\s*\"(?!\\$\\{)[^\"]{8,}\""
+      ]
+    },
+    {
+      "id": "kubernetes-container-runs-privileged",
+      "technology": "kubernetes",
+      "severity": "critical",
+      "category": "configuration",
+      "title": "Container requests privileged mode",
+      "what": "A privileged container has the host's capabilities, so a compromise of the workload is a compromise of the node.",
+      "remediation": "Drop privileged mode and grant the specific capabilities the workload needs.",
+      "detector": "line",
+      "line_match": ["^\\s*privileged:\\s*true\\s*$"]
+    },
+    {
+      "id": "kubernetes-privilege-escalation-allowed",
+      "technology": "kubernetes",
+      "severity": "high",
+      "category": "configuration",
+      "title": "Container may escalate its privileges",
+      "what": "allowPrivilegeEscalation is true, so a process inside the container can gain more privileges than its parent.",
+      "remediation": "Set allowPrivilegeEscalation to false in the container security context.",
+      "detector": "line",
+      "line_match": ["^\\s*allowPrivilegeEscalation:\\s*true\\s*$"]
+    },
+    {
+      "id": "kubernetes-workload-shares-a-host-namespace",
+      "technology": "kubernetes",
+      "severity": "high",
+      "category": "configuration",
+      "title": "Workload shares a namespace with the host",
+      "what": "Sharing the host network, process or IPC namespace removes the isolation between the workload and the node it runs on.",
+      "remediation": "Remove the host namespace flag, or record an owned exception saying why this workload needs it.",
+      "detector": "line",
+      "line_match": ["^\\s*(hostNetwork|hostPID|hostIPC):\\s*true\\s*$"]
+    },
+    {
+      "id": "kubernetes-secret-material-committed",
+      "technology": "kubernetes",
+      "severity": "critical",
+      "category": "identity_access",
+      "title": "Secret manifest carries its material in the repository",
+      "what": "A Secret document with an inline data or stringData block keeps the material in version control, where it survives every rotation and every access review.",
+      "remediation": "Source the value from a secret store or a sealed-secret controller. Rotate anything that has been in the history.",
+      "detector": "line",
+      "file_match": ["^kind:\\s*Secret\\s*$"],
+      "line_match": ["^\\s*(data|stringData):\\s*$"]
+    },
+    {
+      "id": "cloudformation-object-storage-public-access",
+      "technology": "cloudformation",
+      "severity": "high",
+      "category": "configuration",
+      "title": "Object storage bucket is declared with public access",
+      "what": "The template asks for a public canned ACL, so the bucket is readable outside the account from the moment the stack applies.",
+      "remediation": "Use a private ACL and grant access through a scoped bucket policy.",
+      "detector": "line",
+      "line_match": ["^\\s*AccessControl:\\s*['\"]?Public(Read|ReadWrite)"]
+    },
+    {
+      "id": "cloudformation-network-ingress-open-to-the-internet",
+      "technology": "cloudformation",
+      "severity": "high",
+      "category": "configuration",
+      "title": "Security group ingress accepts traffic from any address",
+      "what": "The template opens a port to the whole internet.",
+      "remediation": "Replace the wildcard CIDR with the networks that need the port.",
+      "detector": "line",
+      "line_match": [
+        "^\\s*CidrIp:\\s*['\"]?0\\.0\\.0\\.0/0",
+        "^\\s*CidrIpv6:\\s*['\"]?::/0"
+      ]
+    },
+    {
+      "id": "github-actions-third-party-action-unpinned",
+      "technology": "github_actions",
+      "severity": "medium",
+      "category": "vulnerability",
+      "title": "Workflow step uses an action that is not pinned to a commit",
+      "what": "A tag or branch reference is mutable, so the code this pipeline runs can change without any change in this repository. This includes actions published by the platform vendor, because the reference is mutable either way.",
+      "remediation": "Pin the action to a full commit hash, and keep a note of which release that hash is.",
+      "detector": "line",
+      "line_match": [
+        "^\\s*-?\\s*uses:\\s*(?!\\./)[A-Za-z0-9][A-Za-z0-9._-]*/[^@\\s]+@(?![0-9a-f]{40}(\\s|$))\\S+"
+      ]
+    },
+    {
+      "id": "github-actions-untrusted-code-in-privileged-context",
+      "technology": "github_actions",
+      "severity": "critical",
+      "category": "vulnerability",
+      "title": "Privileged workflow checks out code from the pull request that triggered it",
+      "what": "A workflow triggered on pull_request_target runs with the base repository's secrets. Checking out the contributor's branch in that context executes untrusted code with those secrets available.",
+      "remediation": "Split the job: run untrusted code in an unprivileged workflow, and do the privileged part from the base branch only.",
+      "detector": "line",
+      "file_match": ["^\\s*(-\\s*)?pull_request_target\\s*:?\\s*$"],
+      "line_match": ["^\\s*-?\\s*uses:\\s*actions/checkout@"]
+    },
+    {
+      "id": "github-actions-workflow-grants-write-all",
+      "technology": "github_actions",
+      "severity": "medium",
+      "category": "identity_access",
+      "title": "Workflow token is granted every write permission",
+      "what": "write-all hands the job's token every scope the repository can grant, which is more than any single job needs.",
+      "remediation": "Declare the specific permissions the job uses and let the rest default to none.",
+      "detector": "line",
+      "line_match": ["^\\s*permissions:\\s*write-all\\s*$"]
+    },
+    {
+      "id": "gitlab-ci-job-disables-transport-verification",
+      "technology": "gitlab_ci",
+      "severity": "medium",
+      "category": "configuration",
+      "title": "Pipeline job turns off transport certificate verification",
+      "what": "The job fetches over TLS with verification disabled, so anything on the path can substitute what the pipeline downloads.",
+      "remediation": "Fix the trust store instead of skipping the check, and remove the flag.",
+      "detector": "line",
+      "line_match": [
+        "^\\s*GIT_SSL_NO_VERIFY:\\s*['\"]?(true|1)",
+        "^\\s*-?\\s*.*\\bcurl\\b[^#]*\\s(-k|--insecure)(\\s|$)"
+      ]
+    }
+  ]
+}

@@ -1,8 +1,9 @@
-# Fixture: a finding with a citation but nobody standing behind it.
-# Expected: exit 1, "missing required `interpretation`".
+# Fixture: a misconfiguration accepted with a shrug.
+# Expected: exit 1, "has to be written down".
 #
-# A scanner cannot decide whether a rule that fired means anything in this environment. That is
-# the whole reason contract requirement 8 exists, and here it is an error and never a warning.
+# The reasoning is well-formed and long enough for any other status. It is not enough for this
+# one, because an acceptance nobody can argue with is how a known misconfiguration becomes
+# permanent.
 version: 0.1.0
 piece: iac-scan
 source:
@@ -38,17 +39,21 @@ queue_snapshot:
     - id: EXAMPLE-RISK-ID
       title: "Example risk: internet-reachable infrastructure"
 findings:
-  - key: terraform-credential-literal-in-source.a1b2c3d4e5f6
-    check: terraform-credential-literal-in-source
-    technology: terraform
-    severity: critical
-    category: identity_access
-    status: in_progress
-    title: Credential appears to be written into the configuration
-    file: infra/storage.tf
-    resource: aws_db_instance.primary
+  - key: github-actions-third-party-action-unpinned.9a8b7c6d5e4f
+    check: github-actions-third-party-action-unpinned
+    technology: github_actions
+    severity: low
+    category: vulnerability
+    status: accepted
+    title: Workflow step uses an action that is not pinned to a commit
+    file: .github/workflows/release.yml
+    resource: publish
     observed_on: 2026-08-20
     refs:
-      - infra/storage.tf:13
-    risk_id: EXAMPLE-RISK-ID
-    owner_email: sam.okafor@example.com
+      - .github/workflows/release.yml:11
+    owner_email: priya.nair@example.com
+    interpretation:
+      owner: priya.nair@example.com
+      decided_at: 2026-08-24
+      expires_at: 2027-06-30
+      rationale: Not worth it here.

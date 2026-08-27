@@ -1,8 +1,9 @@
-# Fixture: a finding with a citation but nobody standing behind it.
-# Expected: exit 1, "missing required `interpretation`".
+# Fixture: a queue snapshot fetched for somebody else's findings.
+# Expected: exit 1, "would close findings this piece never wrote".
 #
-# A scanner cannot decide whether a rule that fired means anything in this environment. That is
-# the whole reason contract requirement 8 exists, and here it is an error and never a warning.
+# The open set is what :diff closes against. Fetched under the wrong source it is a list of
+# another scanner's findings, and reconciling against it would resolve records this piece has
+# never seen. The manifest has to record which source it asked about.
 version: 0.1.0
 piece: iac-scan
 source:
@@ -16,7 +17,7 @@ queue_snapshot:
     - getSecurityFindings
     - getOrganizationAssets
     - getOrganizationRisks
-  source: iac-scan
+  source: aws
   open_findings:
     - external_id: "example-org/example-app:terraform-credential-literal-in-source.a1b2c3d4e5f6"
       check_name: terraform-credential-literal-in-source
@@ -52,3 +53,11 @@ findings:
       - infra/storage.tf:13
     risk_id: EXAMPLE-RISK-ID
     owner_email: sam.okafor@example.com
+    interpretation:
+      owner: sam.okafor@example.com
+      decided_at: 2026-08-24
+      expires_at: 2026-10-15
+      rationale: >
+        I opened the cited line. It is a real literal and not a variable reference, so the value is
+        in the history and has to be rotated as well as moved. Filed against the existing risk while
+        the rotation is in flight.

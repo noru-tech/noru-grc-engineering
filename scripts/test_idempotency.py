@@ -565,6 +565,181 @@ def test_review_signoff(results, tmp):
     )
 
 
+def state_after_iac_scan(operations, existing=()):
+    """Build the org snapshot that would exist if every planned upsert had succeeded.
+
+    Modelled on the documented behaviour and nothing more: the key is (source, externalId), a write
+    on an existing key updates in place, and a field the call does not send is left alone.
+    """
+    findings = {row["externalId"]: dict(row) for row in existing}
+    for i, op in enumerate(operations):
+        if op["effect"] == "skip":
+            continue
+        args = op["arguments"]
+        record = findings.get(args["externalId"], {"id": f"NORU-FND-{i}"})
+        for field in (
+            "source", "externalId", "title", "severity", "status", "category", "checkName",
+            "description", "observedAt", "assetId", "riskId", "ownerEmail",
+        ):
+            if field in args:
+                record[field] = args[field]
+        findings[args["externalId"]] = record
+    # Deliberately reversed: nothing guarantees a list endpoint returns records in the order they
+    # were written, so the diff must not care.
+    return list(reversed(list(findings.values())))
+
+
+def test_iac_scan(results, tmp):
+    repo, piece, decl, manifest = prepare(tmp, "iac-scan")
+    label = "iac-scan"
+
+    validate_and_parse(piece, manifest, repo, results, label)
+
+    # Seed Noru with a finding this piece filed last time whose rule no longer fires. Closing it is
+    # half of what re-running is for, and it has to be exercised on the first diff, not assumed.
+    stale = {
+        "id": "NORU-FND-STALE",
+        "source": "iac-scan",
+        "externalId": "example-org/example-app:kubernetes-container-runs-privileged.f0e1d2c3b4a5",
+        "title": "Container requests privileged mode",
+        "checkName": "kubernetes-container-runs-privileged",
+        "description": "filed by an earlier scan",
+        "severity": "critical",
+        "status": "open",
+        "category": "configuration",
+        "observedAt": "2026-06-01T00:00:00Z",
+        "assetId": None,
+        "riskId": None,
+        "ownerEmail": None,
+    }
+    # A finding under ANOTHER repository's slug, pushed to the same source. Closing it would be a
+    # bug with real consequences, so the fixture contains one on purpose.
+    other_repo = dict(
+        stale,
+        id="NORU-FND-OTHER",
+        externalId="example-org/other-app:kubernetes-container-runs-privileged.aabbccddeeff",
+    )
+    write_state(
+        repo,
+        {"fetched_at": "2026-08-27T09:14:00Z", "security_findings": [stale, other_repo]},
+    )
+
+    first = diff(piece, repo)
+    if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
+        return
+    plan = json.loads(first.stdout)
+    results.check(
+        f"[{label}] first diff plans real writes",
+        plan["summary"]["create"] > 0,
+        json.dumps(plan["summary"]),
+    )
+    results.check(
+        f"[{label}] every operation declares a server-side upsert key, not a client probe",
+        all(op["idempotency"]["kind"] == "server_upsert" for op in plan["operations"]),
+        json.dumps([op["idempotency"] for op in plan["operations"]]),
+    )
+
+    closes = [
+        op for op in plan["operations"]
+        if op["effect"] != "skip" and op["arguments"].get("status") == "resolved"
+    ]
+    results.check(
+        f"[{label}] a finding whose rule no longer fires is planned for closure",
+        len(closes) == 1 and closes[0]["arguments"]["externalId"] == stale["externalId"],
+        json.dumps([op["arguments"].get("externalId") for op in closes]),
+    )
+    results.check(
+        f"[{label}] ANOTHER repository's finding under the same source is left alone",
+        not any(
+            op["arguments"].get("externalId") == other_repo["externalId"]
+            for op in plan["operations"]
+        ),
+        json.dumps([op["arguments"].get("externalId") for op in plan["operations"]]),
+    )
+    results.check(
+        f"[{label}] every write carries slug, commit and branch provenance",
+        all(
+            {"slug", "commit_sha", "branch"} <= set(op["arguments"].get("raw") or {})
+            for op in plan["operations"]
+            if op["effect"] != "skip"
+        ),
+        json.dumps([op["arguments"].get("raw") for op in plan["operations"]])[:300],
+    )
+
+    push = piece / "scripts" / "push.mjs"
+    refused = run(["node", str(push), f"--repo={repo}"])
+    results.check(
+        f"[{label}] push without --confirm is refused with exit 2",
+        refused.returncode == 2,
+        refused.stderr,
+    )
+
+    first_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    if not results.check(
+        f"[{label}] first push emits the confirmed calls", first_push.returncode == 0,
+        first_push.stderr,
+    ):
+        return
+    calls = json.loads(first_push.stdout)["calls"]
+    results.check(f"[{label}] first push has calls to make", len(calls) > 0, len(calls))
+    results.check(
+        f"[{label}] no call carries a matched line — a finding is a citation, never a copy",
+        "example-placeholder-not-a-credential" not in first_push.stdout,
+        first_push.stdout[:200],
+    )
+
+    # Now pretend every planned write landed, and ask again.
+    findings = state_after_iac_scan(plan["operations"], [stale, other_repo])
+    write_state(repo, {"fetched_at": "2026-08-27T10:00:00Z", "security_findings": findings})
+
+    second = diff(piece, repo)
+    if not results.check(f"[{label}] second diff succeeds", second.returncode == 0, second.stderr):
+        return
+    plan2 = json.loads(second.stdout)
+    non_skip = [op for op in plan2["operations"] if op["effect"] != "skip"]
+    results.check(
+        f"[{label}] SECOND DIFF IS A NO-OP (every operation skipped)",
+        len(non_skip) == 0,
+        "; ".join(f"{op['operation']} {op['effect']} {op['subject']}" for op in non_skip),
+    )
+
+    second_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    results.check(
+        f"[{label}] SECOND PUSH MAKES NO CALLS",
+        second_push.returncode == 0 and len(json.loads(second_push.stdout)["calls"]) == 0,
+        second_push.stdout[:200],
+    )
+
+    # A severity changed by hand in Noru is an update on the same key, never a second record.
+    drifted = [
+        dict(row, severity="low") if row["externalId"].endswith("a1b2c3d4e5f6") else row
+        for row in findings
+    ]
+    write_state(repo, {"fetched_at": "2026-08-27T11:00:00Z", "security_findings": drifted})
+    third = diff(piece, repo)
+    plan3 = json.loads(third.stdout) if third.returncode == 0 else {"operations": []}
+    updates = [op for op in plan3["operations"] if op["effect"] == "update"]
+    results.check(
+        f"[{label}] a field changed in Noru plans an update on the same key, not a new finding",
+        len(updates) == 1
+        and "severity" in updates[0]["reason"]
+        and not any(op["effect"] == "create" for op in plan3["operations"]),
+        json.dumps([f"{op['effect']} {op['reason']}" for op in plan3["operations"]])[:300],
+    )
+    write_state(repo, {"fetched_at": "2026-08-27T10:00:00Z", "security_findings": findings})
+
+    # Editing the manifest must invalidate the reviewed plan.
+    diff(piece, repo)
+    manifest.write_text(manifest.read_text(encoding="utf-8") + "\n# edited after the plan\n",
+                        encoding="utf-8")
+    stale_plan = run(["node", str(push), f"--repo={repo}", "--confirm"])
+    results.check(
+        f"[{label}] editing the manifest invalidates the plan",
+        stale_plan.returncode == 1 and "manifest changed" in stale_plan.stderr,
+        stale_plan.stderr,
+    )
+
+
 # Every piece, and the test that proves re-running it is a no-op. A piece missing from this table is
 # reported as a failure by main() — see the note in the module docstring about gates that overclaim.
 IDEMPOTENCY_TESTS = {
@@ -572,6 +747,7 @@ IDEMPOTENCY_TESTS = {
     "evidence-push": test_evidence_push,
     "governance-records": test_governance_records,
     "review-signoff": test_review_signoff,
+    "iac-scan": test_iac_scan,
 }
 
 

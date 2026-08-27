@@ -1,7 +1,7 @@
 {
   "name": "iac-scan",
   "version": "0.1.0",
-  "description": "TODO: one sentence describing iac-scan.",
+  "description": "Scan the Terraform, CloudFormation, Kubernetes and CI configuration a repository actually contains, decide what each finding means in this environment, and land the result in Noru as security findings — closing the ones that no longer reproduce.",
   "author": {
     "name": "Noru",
     "email": "support@noru.tech",
@@ -13,22 +13,29 @@
   "keywords": [
     "noru",
     "compliance",
-    "grc",
-    "iac-scan"
+    "iac",
+    "terraform",
+    "kubernetes",
+    "cloudformation",
+    "security-findings",
+    "mcp"
   ],
   "skills": "./skills/",
   "commands": "./commands/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Noru Iac Scan",
-    "shortDescription": "TODO: one sentence describing iac-scan.",
-    "longDescription": "TODO: one sentence describing iac-scan.",
+    "displayName": "Noru IaC Scan",
+    "shortDescription": "Turn infrastructure misconfiguration into reviewed security findings.",
+    "longDescription": "Asks Noru which findings this piece already has open, reads the Terraform, CloudFormation, Kubernetes and pipeline configuration in the repository, and proposes a finding for each rule that fires with a citation instead of a copy of the line. A person decides whether each one is real here, how bad it is here and until when that stands; the result lands as security findings through an upsert keyed on source and external id, and the findings that no longer reproduce are closed by the same call.",
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
-      "TODO"
+      "Terraform, CloudFormation, Kubernetes and pipeline configuration",
+      "Findings keyed on the resource, not on the line number",
+      "Citations rather than copies of what matched",
+      "Closes findings whose rule no longer fires"
     ],
     "websiteURL": "https://noru.tech",
-    "defaultPrompt": "TODO: what a user would type to reach iac-scan."
+    "defaultPrompt": "Scan my infrastructure configuration and show me what changed since the last scan."
   }
 }

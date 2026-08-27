@@ -1,8 +1,8 @@
-# Fixture: a finding with a citation but nobody standing behind it.
-# Expected: exit 1, "missing required `interpretation`".
+# Fixture: a judgement with no end date.
+# Expected: exit 1, "missing required `expires_at`".
 #
-# A scanner cannot decide whether a rule that fired means anything in this environment. That is
-# the whole reason contract requirement 8 exists, and here it is an error and never a warning.
+# A finding is a claim about a configuration, and a configuration changes. Without a date the
+# claim never goes stale and nobody ever looks again.
 version: 0.1.0
 piece: iac-scan
 source:
@@ -52,3 +52,10 @@ findings:
       - infra/storage.tf:13
     risk_id: EXAMPLE-RISK-ID
     owner_email: sam.okafor@example.com
+    interpretation:
+      owner: sam.okafor@example.com
+      decided_at: 2026-08-24
+      rationale: >
+        I opened the cited line. It is a real literal and not a variable reference, so the value is
+        in the history and has to be rotated as well as moved. Filed against the existing risk while
+        the rotation is in flight.

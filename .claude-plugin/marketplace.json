@@ -103,6 +103,27 @@
         "name": "Noru",
         "email": "support@noru.tech"
       }
+    },
+    {
+      "name": "iac-scan",
+      "source": "./plugins/iac-scan",
+      "description": "Scan the Terraform, CloudFormation, Kubernetes and CI configuration a repository actually contains, decide what each finding means in this environment, and land the result in Noru as security findings — closing the ones that no longer reproduce.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "iac",
+        "terraform",
+        "kubernetes",
+        "cloudformation",
+        "security-findings"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
     }
   ]
 }
