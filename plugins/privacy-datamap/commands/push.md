@@ -1,6 +1,6 @@
 ---
 name: push
-description: TODO — land the reviewed manifest in Noru. Writes to the customer's system of record; requires explicit confirmation.
+description: Land the reviewed data map in Noru with one idempotent ingestDatamap call. Writes to the customer's system of record; requires explicit confirmation.
 ---
 
 # /privacy-datamap:push

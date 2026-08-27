@@ -29,6 +29,7 @@ Usage:
 Exit codes: 0 = all tests pass, 1 = a test failed, 2 = usage / setup error.
 """
 import hashlib
+import importlib.util
 import json
 import pathlib
 import re
@@ -1092,6 +1093,92 @@ def test_datamap_digest_agrees_across_languages(results, tmp):
 
 
 
+def test_datamap_render_is_gated_and_matches_the_push(results, tmp):
+    """`.fides/datamap.yml` is a deliverable somebody hands over. Two things have to hold.
+
+    It must never be rendered from a manifest that no longer describes the repository — a Fides file
+    that looks authoritative and documents a schema that has moved on is worse than no file, because
+    nobody re-reads one that already exists.
+
+    And it must be the same content Noru receives. If the export and the payload were built
+    separately they would drift, and the failure would be silent and horrible: a data map handed to
+    an auditor saying something different from the one in the compliance record.
+    """
+    piece = PRIVACY_DATAMAP
+    _, repo = datamap_repo(tmp, "render", {"db/schema.sql": SQL_FIXTURE})
+
+    # No validated manifest yet — the ordinary state of a first scan, and not an error.
+    results.check(
+        "[privacy-datamap] nothing is rendered without a validated manifest",
+        not (repo / ".fides" / "datamap.yml").exists(),
+        "an unvalidated manifest produced a Fides export",
+    )
+
+    fixture = (piece / "fixtures" / "valid.privacy-datamap.yml").read_text(encoding="utf-8")
+    manifest = repo / ".noru" / "privacy-datamap.yml"
+    collector = piece / "scripts" / "collect.mjs"
+    digest = json.loads(
+        run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"]).stdout
+    )["derived_digest"]
+    manifest.write_text(
+        re.sub(r"derived_digest: [0-9a-f]{64}", f"derived_digest: {digest}", fixture),
+        encoding="utf-8",
+    )
+    validator = piece / "scripts" / "validate_manifest.py"
+    parsed = repo / ".noru" / ".cache" / "privacy-datamap.parsed.json"
+    validated = run(["python3", str(validator), str(manifest), f"--emit-parsed={parsed}", "--quiet"])
+    if not results.check(
+        "[privacy-datamap] the fixture validates against this repository", validated.returncode == 0,
+        validated.stdout[:300],
+    ):
+        return
+
+    scan = run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+    rendered = json.loads(scan.stdout).get("rendered")
+    results.check(
+        "[privacy-datamap] a validated manifest renders the Fides export",
+        rendered == ".fides/datamap.yml" and (repo / ".fides" / "datamap.yml").is_file(),
+        scan.stdout[:200],
+    )
+
+    # A stale validated manifest must stop rendering, not render something out of date.
+    (repo / "db" / "schema.sql").write_text(
+        SQL_FIXTURE.replace("weird_column  TEXT,", "weird_column  TEXT,\n    phone_number  TEXT,"),
+        encoding="utf-8",
+    )
+    (repo / ".fides" / "datamap.yml").unlink()
+    run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+    results.check(
+        "[privacy-datamap] a manifest that no longer matches the repository renders nothing",
+        not (repo / ".fides" / "datamap.yml").exists(),
+        "a stale manifest was rendered as if it were current",
+    )
+
+    # Put it back, render again, and compare the export against what :push would send.
+    (repo / "db" / "schema.sql").write_text(SQL_FIXTURE, encoding="utf-8")
+    run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+    (repo / ".noru" / ".cache" / "noru-state.json").write_text(
+        json.dumps({"fetched_at": "2026-08-27T09:00:00Z"}), encoding="utf-8"
+    )
+    plan = run(
+        ["node", str(piece / "scripts" / "diff.mjs"), f"--repo={repo}", "--output=json", "--quiet"]
+    )
+    if not results.check("[privacy-datamap] diff succeeds", plan.returncode == 0, plan.stderr[:300]):
+        return
+    sent = json.loads(plan.stdout)["operations"][0]["arguments"]["manifest"]
+
+    spec = importlib.util.spec_from_file_location("pdm_validator", validator)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    exported, _ = module.load_yaml((repo / ".fides" / "datamap.yml").read_text(encoding="utf-8"))
+    results.check(
+        "[privacy-datamap] the Fides export is exactly what :push sends",
+        exported == sent,
+        f"export {json.dumps(exported)[:180]} vs sent {json.dumps(sent)[:180]}",
+    )
+
+
+
 def main(argv):
     output_json = False
     quiet = False
@@ -1129,6 +1216,7 @@ def main(argv):
             test_datamap_surfaces_special_category_data(results, tmp)
             test_datamap_never_overwrites_a_reviewed_manifest(results, tmp)
             test_datamap_digest_agrees_across_languages(results, tmp)
+            test_datamap_render_is_gated_and_matches_the_push(results, tmp)
             test_iac_never_copies_the_line(results, tmp)
             test_iac_identity_survives_a_move(results, tmp)
             test_iac_absence_is_detectable(results, tmp)

@@ -30,6 +30,7 @@ directory, no flat-file risk register, no second source of truth to reconcile be
 | [`governance-records`](./plugins/governance-records/) | minutes, ISMS scope, statement of applicability, audit plans and reports, findings, corrective action plans | attributed, dated records as evidence |
 | [`review-signoff`](./plugins/review-signoff/) | a periodic review of machine output, and the human decision about it | a named, dated, expiring sign-off as evidence |
 | [`audit-pack`](./plugins/audit-pack/) | the local artifacts, the sampling and the workpapers for one framework over one audit window | the tested conclusion for each control, as evidence |
+| [`privacy-datamap`](./plugins/privacy-datamap/) | the schemas a repository holds — ORM models, migrations, SQL DDL, protobuf, GraphQL — and the personal data in them | a Fides privacy data map (`read/write:datamaps`) |
 | [`iac-scan`](./plugins/iac-scan/) | compliance-relevant misconfiguration in Terraform, CloudFormation, Kubernetes and pipeline configuration | security findings, keyed and closed by the same call |
 | [`noru`](./plugins/noru/) | — | the hub: `connect`, `doctor`, `context` |
 
@@ -65,6 +66,13 @@ one of them mostly assembles rather than discovers.
   auditor asks for, for one framework over one window. It is the piece that mostly *consumes* — the
   pack is a local deliverable and what lands in Noru is the tested conclusion per control. Its
   sample is seeded from the population file's own digest, so anyone holding that file can redraw it.
+- `privacy-datamap` targets **the schema itself**: which columns a repository defines, which of
+  them hold personal data, and what kind. It is the piece with the strongest claim to needing the
+  repository — a data map built from a production database sees the columns that survived, never the
+  migration landing next week or the model on a branch. It supersedes
+  [`noru-tech/privacy-taxonomy`](https://github.com/noru-tech/privacy-taxonomy), and it is the only
+  piece whose push is literally one call: `ingestDatamap` takes the whole map for a source, so a
+  repository with four hundred fields is a single write.
 - `iac-scan` targets **infrastructure and pipeline configuration**: the module that has not been
   applied yet, the workflow that runs with the repository's own token, the literal somebody left in
   a variable block. It is the only piece whose every write is a documented server-side upsert, so
@@ -83,6 +91,7 @@ one of them mostly assembles rather than discovers.
 /plugin install review-signoff@noru-grc-engineering
 /plugin install audit-pack@noru-grc-engineering
 /plugin install iac-scan@noru-grc-engineering
+/plugin install privacy-datamap@noru-grc-engineering
 ```
 
 Then configure the Noru MCP connection: [Claude guide](./docs/clients/claude-code.md).
@@ -168,6 +177,8 @@ Use least-privilege scopes:
 | `audit-pack:push` | adds `write:evidence` |
 | `iac-scan:scan` and `:diff` | `read:risks`, `read:assets` — and nothing else |
 | `iac-scan:push` | adds `write:risks` |
+| `privacy-datamap:scan` and `:diff` | `read:datamaps` — and nothing else |
+| `privacy-datamap:push` | adds `write:datamaps` |
 
 ## The contract
 
