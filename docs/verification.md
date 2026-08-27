@@ -108,6 +108,17 @@ Run `:diff` before your first `:push`, and read it.
   includes a digest of the rendered record, so re-filed minutes become a second record. For an
   account of a meeting that is arguably correct — an auditor should see both — but it is a
   consequence of having no documented key, not a decision anyone made.
+- **A piece's content marker can depend on which YAML loader parsed the manifest.** The validators
+  use PyYAML where it is importable and a bundled fallback otherwise, and the two do not agree on
+  the whitespace around a folded (`>`) block scalar: PyYAML keeps the trailing newline the YAML spec
+  calls for, the fallback drops it. Any piece that digests manifest prose into a marker therefore
+  has an identity that depends on the machine — push from a laptop without PyYAML, push again from
+  CI with it, and the second push files a duplicate instead of skipping. `audit-pack` and `iac-scan`
+  normalise free text before it reaches a digest, and `scripts/test_idempotency.py` reproduces the
+  difference and asserts their plans do not move. **`ai-inventory`, `evidence-push`,
+  `governance-records` and `review-signoff` do not yet**: the same check run against them by hand
+  shows their plans change. Fixing them changes the markers of anything already pushed, so it is
+  called out here rather than done quietly alongside something else.
 - **The MCP `push` does not perform the writes.** It emits the confirmed call list for the client to
   execute, because a script cannot speak MCP without handling a credential. The gate is enforced in
   the script; the execution is the agent's, and an agent that improvises a call outside the list has
