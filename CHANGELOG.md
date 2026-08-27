@@ -6,6 +6,28 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.3.0 — 2026-08-28
+
+Two changes here alter behaviour users can see, and both are safe to take together.
+
+### Upgrading
+
+**Re-run `:scan` once and commit the new `derived_digest`.** The hashed input changed, so every
+piece reports drift on a manifest that was accurate a moment earlier. Nothing is wrong with those
+manifests; confirm nothing else moved and commit.
+
+**Move your CI pin to `@v0.3.0`.** `noru-ci@v0.2.0` runs `0.2.0`'s collectors, which still hash
+`generated_by`, so pinning the old action against manifests written by `0.3.0` plugins produces a
+digest that can never match — a permanent exit `3` reporting drift where there is none. The examples
+in the README and in [`docs/ci-mode.md`](./docs/ci-mode.md) move with this release for the same
+reason.
+
+### A note on versions
+
+Each collector's `VERSION` tracks the release again, after being pinned at `0.1.0` through `0.2.0`
+because it was part of the derived digest. It is not any more, so `generated_by` in a manifest now
+says which release wrote it and costs nothing.
+
 ### Changed
 
 - `privacy-datamap`'s push is now declared **`server_upsert` keyed on `slug`**, and the
