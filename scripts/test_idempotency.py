@@ -740,6 +740,147 @@ def test_iac_scan(results, tmp):
     )
 
 
+def state_after_audit_pack(operations):
+    """Build the org snapshot that would exist if every planned write had succeeded."""
+    evidence = []
+    for i, op in enumerate(operations):
+        if op["effect"] == "skip":
+            continue
+        args = op["arguments"]
+        if op["operation"] == "createEvidence":
+            evidence.append(
+                {
+                    "id": f"NORU-EVD-{i}",
+                    "title": args["title"],
+                    "description": args["description"],
+                    # Deliberately reversed: nothing guarantees the API echoes control links back in
+                    # the order they were sent, so the diff must not care.
+                    "linkedControls": [
+                        {"id": m["controlId"]} for m in reversed(args.get("controlMappings", []))
+                    ],
+                }
+            )
+        elif op["operation"] == "linkEvidenceToControl":
+            target = next((e for e in evidence if e["id"] == args["evidenceId"]), None)
+            if target is not None:
+                target.setdefault("linkedControls", []).append({"id": args["controlId"]})
+    return evidence
+
+
+def test_audit_pack(results, tmp):
+    repo, piece, decl, manifest = prepare(tmp, "audit-pack")
+    label = "audit-pack"
+
+    validate_and_parse(piece, manifest, repo, results, label)
+    write_state(repo, {"fetched_at": "2026-08-27T09:14:00Z", "evidence": []})
+
+    first = diff(piece, repo)
+    if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
+        return
+    plan = json.loads(first.stdout)
+    results.check(
+        f"[{label}] first diff plans real writes",
+        plan["summary"]["create"] > 0,
+        json.dumps(plan["summary"]),
+    )
+
+    creates = [op for op in plan["operations"] if op["operation"] == "createEvidence"]
+    results.check(
+        f"[{label}] one workpaper becomes one record mapped to exactly one control",
+        len(creates) > 0
+        and all(len(op["arguments"]["controlMappings"]) == 1 for op in creates),
+        json.dumps([op["arguments"]["controlMappings"] for op in creates]),
+    )
+    # The pack is a local deliverable. If the index ever ends up inside a call, the piece has quietly
+    # become a second register, which is the non-goal this whole design turns on.
+    results.check(
+        f"[{label}] the rendered pack is NOT pushed — only the tested conclusions are",
+        "## Controls in scope" not in first.stdout and "Assembled by:" not in first.stdout,
+        first.stdout[:200],
+    )
+    results.check(
+        f"[{label}] every conclusion carries the window it is about and when it stops standing",
+        all(
+            " to 2026-06-30" in op["arguments"]["content"]
+            and "Stands until:" in op["arguments"]["content"]
+            for op in creates
+        ),
+        json.dumps([op["arguments"]["content"][:120] for op in creates]),
+    )
+
+    push = piece / "scripts" / "push.mjs"
+    refused = run(["node", str(push), f"--repo={repo}"])
+    results.check(
+        f"[{label}] push without --confirm is refused with exit 2",
+        refused.returncode == 2,
+        refused.stderr,
+    )
+
+    first_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    if not results.check(
+        f"[{label}] first push emits the confirmed calls", first_push.returncode == 0,
+        first_push.stderr,
+    ):
+        return
+    calls = json.loads(first_push.stdout)["calls"]
+    results.check(f"[{label}] first push has calls to make", len(calls) > 0, len(calls))
+
+    # Now pretend every planned write landed, and ask again.
+    evidence = state_after_audit_pack(plan["operations"])
+    write_state(repo, {"fetched_at": "2026-08-27T10:00:00Z", "evidence": evidence})
+
+    second = diff(piece, repo)
+    if not results.check(f"[{label}] second diff succeeds", second.returncode == 0, second.stderr):
+        return
+    plan2 = json.loads(second.stdout)
+    non_skip = [op for op in plan2["operations"] if op["effect"] != "skip"]
+    results.check(
+        f"[{label}] SECOND DIFF IS A NO-OP (every operation skipped)",
+        len(non_skip) == 0,
+        "; ".join(f"{op['operation']} {op['effect']} {op['subject']}" for op in non_skip),
+    )
+
+    second_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    results.check(
+        f"[{label}] SECOND PUSH MAKES NO CALLS",
+        second_push.returncode == 0 and len(json.loads(second_push.stdout)["calls"]) == 0,
+        second_push.stdout[:200],
+    )
+
+    # A record filed with its control link missing plans a link, not a second workpaper. Without this
+    # the second half of the push would be dead code no test ever reaches.
+    unlinked = [dict(record, linkedControls=[]) for record in evidence]
+    write_state(repo, {"fetched_at": "2026-08-27T11:00:00Z", "evidence": unlinked})
+    relink = diff(piece, repo)
+    plan3 = json.loads(relink.stdout) if relink.returncode == 0 else {"operations": []}
+    links = [
+        op for op in plan3["operations"]
+        if op["operation"] == "linkEvidenceToControl" and op["effect"] == "create"
+    ]
+    results.check(
+        f"[{label}] a missing control link plans a link, not a second workpaper",
+        len(links) > 0
+        and all(
+            op["effect"] == "skip"
+            for op in plan3["operations"]
+            if op["operation"] == "createEvidence"
+        ),
+        json.dumps([f"{op['operation']} {op['effect']}" for op in plan3["operations"]]),
+    )
+    write_state(repo, {"fetched_at": "2026-08-27T10:00:00Z", "evidence": evidence})
+
+    # Editing the manifest must invalidate the reviewed plan.
+    diff(piece, repo)
+    manifest.write_text(manifest.read_text(encoding="utf-8") + "\n# edited after the plan\n",
+                        encoding="utf-8")
+    stale = run(["node", str(push), f"--repo={repo}", "--confirm"])
+    results.check(
+        f"[{label}] editing the manifest invalidates the plan",
+        stale.returncode == 1 and "manifest changed" in stale.stderr,
+        stale.stderr,
+    )
+
+
 # Every piece, and the test that proves re-running it is a no-op. A piece missing from this table is
 # reported as a failure by main() — see the note in the module docstring about gates that overclaim.
 IDEMPOTENCY_TESTS = {
@@ -748,6 +889,7 @@ IDEMPOTENCY_TESTS = {
     "governance-records": test_governance_records,
     "review-signoff": test_review_signoff,
     "iac-scan": test_iac_scan,
+    "audit-pack": test_audit_pack,
 }
 
 

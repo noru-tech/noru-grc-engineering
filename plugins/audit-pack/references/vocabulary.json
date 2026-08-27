@@ -1,14 +1,63 @@
 {
   "_comment": [
     "Bundled vocabulary for the audit-pack validator (contract requirement 3).",
-    "Kept in sync with the contract schema by scripts/check_repo.py once you add an entry to",
-    "its VOCAB_SYNC table.",
+    "Kept in sync with contract/audit-pack.schema.json by scripts/check_repo.py.",
     "",
-    "What must NEVER go here: framework control text, guidance, or an evidence-item list. A piece",
-    "asks Noru what is needed. See contract/README.md, requirement 9."
+    "These are the SHAPES an audit workpaper takes — how a control was tested, what was inspected,",
+    "how a population was sampled, and what was done about each exception. They are not framework",
+    "content: no control text, no testing guidance, no evidence-item list. What is in scope, what",
+    "the framework expects and how an auditor tests it all come from the customer's own",
+    "organization at scan time. See contract/README.md, requirement 9.",
+    "",
+    "The testing procedure in particular is deliberately absent. The queue snapshot records only",
+    "whether one is available; the text stays behind the API, where it belongs."
   ],
-  "item_kind": [
-    "TODO_first_kind",
-    "TODO_second_kind"
+  "conclusion": ["effective", "deficient", "not_tested"],
+  "inspected_kind": ["artifact", "evidence", "manifest"],
+  "_sampling_method_comment": [
+    "Two methods, both reproducible, and that is the whole reason there are only two. A sample this",
+    "piece records has to be one anybody can redraw from the population file, the seed and the size",
+    "— including the auditor, and including you in a year. A judgemental selection is a legitimate",
+    "audit technique and is not one of these: record it as full_population over the subset you",
+    "actually tested, and say in the rationale how the subset was chosen."
+  ],
+  "sampling_method": ["deterministic_hash", "full_population"],
+  "disposition": ["remediated", "compensating_control", "accepted_risk", "deferred"],
+  "_minimum_sample_comment": [
+    "The smallest defensible sample for a population of a given size, and a floor rather than a",
+    "recommendation: a sample below it is one an auditor will ask about, so the validator asks",
+    "first. Where the population is smaller than the floor, everything has to be tested.",
+    "",
+    "Bands are read in order and the first whose `up_to` covers the population size wins; the last",
+    "band has `up_to: null` and covers everything above."
+  ],
+  "minimum_sample": [
+    { "up_to": 30, "minimum": 5 },
+    { "up_to": 100, "minimum": 10 },
+    { "up_to": 500, "minimum": 25 },
+    { "up_to": null, "minimum": 45 }
+  ],
+  "default_sample_size": 25,
+  "_assurance_days_comment": [
+    "How long a conclusion about an audit window may stand, counted in days from the END of the",
+    "window it covers. A workpaper concludes about a period, so the period's end is the only honest",
+    "anchor: signing it late does not extend what it covers.",
+    "",
+    "A finding of `effective` runs to roughly the next annual cycle. `deficient` and `not_tested`",
+    "get a short horizon on purpose — a control you found broken, or never tested, is not something",
+    "to sign off for a year and revisit at the next audit."
+  ],
+  "assurance_days": {
+    "effective": 400,
+    "deficient": 120,
+    "not_tested": 120
+  },
+  "population_extensions": [".csv", ".tsv"],
+  "queue_tools": [
+    "getOrganizationFrameworks",
+    "getOrganizationControls",
+    "getControlContext",
+    "getEvidenceForControl",
+    "getEvidenceItems"
   ]
 }

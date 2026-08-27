@@ -1,0 +1,59 @@
+{
+  "_comment": "Fixture queue for the audit-pack collector determinism test. In real use this file is written by the skill from getOrganizationFrameworks + getOrganizationControls + getControlContext + getEvidenceForControl + getEvidenceItems. The ids below are in the reserved synthetic namespaces (zz-*, E-ZZ-*) that contract/README.md sets aside so no real catalogue id ever enters this repository.",
+  "fetched_at": "2026-08-27T09:14:00Z",
+  "via": [
+    "getOrganizationFrameworks",
+    "getOrganizationControls",
+    "getControlContext",
+    "getEvidenceForControl",
+    "getEvidenceItems"
+  ],
+  "framework_id": "zz_framework",
+  "framework_name": "Example framework",
+  "window": { "from": "2026-01-01", "to": "2026-06-30" },
+  "controls": [
+    {
+      "control_id": "zz-01",
+      "display_id": "ZZ-01",
+      "name": "Example change management control",
+      "status": "implemented",
+      "coverage": 66,
+      "testing_guidance_available": true,
+      "expected_evidence_items": [
+        { "id": "E-ZZ-01", "title": "Example Change Approval Records", "type": "record" },
+        { "id": "E-ZZ-02", "title": "Example Change Management Procedure", "type": "procedure" }
+      ],
+      "linked_evidence": [
+        {
+          "evidence_id": "EXAMPLE-EVIDENCE-ID",
+          "title": "Example change management procedure",
+          "status": "valid",
+          "type": "procedure",
+          "expires_at": "2027-01-31T23:59:59Z",
+          "evidence_item_id": "E-ZZ-02"
+        }
+      ]
+    },
+    {
+      "control_id": "zz-03",
+      "display_id": "ZZ-03",
+      "name": "Example periodic access review control",
+      "status": "in_progress",
+      "coverage": 0,
+      "testing_guidance_available": true,
+      "expected_evidence_items": [
+        { "id": "E-ZZ-21", "title": "Example Quarterly Access Review", "type": "record" }
+      ],
+      "linked_evidence": [
+        {
+          "evidence_id": "EXAMPLE-EXPIRED-EVIDENCE-ID",
+          "title": "Example access review, previous period",
+          "status": "expired",
+          "type": "record",
+          "expires_at": "2026-05-31T23:59:59Z",
+          "evidence_item_id": "E-ZZ-21"
+        }
+      ]
+    }
+  ]
+}

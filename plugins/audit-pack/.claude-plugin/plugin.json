@@ -3,7 +3,7 @@
   "name": "audit-pack",
   "displayName": "Noru Audit Pack",
   "version": "0.1.0",
-  "description": "TODO: one sentence describing audit-pack.",
+  "description": "Assemble the evidence bundle, sampling and workpapers an auditor asks for — for one framework over one audit window — from Noru's graph plus the local files an integration cannot reach, and land the tested conclusion for each control back in Noru.",
   "author": {
     "name": "Noru",
     "email": "support@noru.tech"
@@ -14,7 +14,12 @@
   "keywords": [
     "noru",
     "compliance",
-    "grc",
-    "audit-pack"
+    "audit",
+    "workpapers",
+    "sampling",
+    "evidence",
+    "soc2",
+    "iso-27001",
+    "mcp"
   ]
 }

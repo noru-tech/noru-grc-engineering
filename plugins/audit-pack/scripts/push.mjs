@@ -1,16 +1,18 @@
 #!/usr/bin/env node
 // :push for the audit-pack piece — contract requirements 4 and 5.
 //
-// MCP authentication belongs to the MCP client, so a script cannot make the calls itself without
-// handling a credential — which the contract forbids. What it does instead is the part that must be
-// deterministic and gated:
+// This piece lands in Noru over MCP, and MCP authentication belongs to the MCP client (OAuth, or a
+// bearer key the client holds). A script therefore cannot and must not make the calls itself: it
+// would have to handle a credential, which the contract forbids. What this script does instead is
+// the part that must be deterministic and gated:
 //
 //   1. refuse to run without an explicit --confirm
 //   2. refuse to run against a plan that does not match the manifest on disk right now
 //   3. drop every operation the plan already marked "skip"
 //   4. emit the exact, ordered tool calls to .noru/.cache/audit-pack.calls.json
 //
-// The skill then executes those calls through the MCP client and nothing else.
+// The skill then executes those calls through the MCP client and nothing else. The agent is not
+// free to improvise a call that is not in this file — that is the point of writing it down.
 //
 // Usage: node push.mjs [--repo=<path>] --confirm [--output=json|text] [--quiet]
 // Exit codes:
@@ -18,10 +20,16 @@
 //   1 = no plan, or the plan is stale
 //   2 = usage error, including a missing --confirm
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { assertPlanFresh, parseCommonArgs, planPathFor, readPlan, redact } from "./lib/plan.mjs";
+import {
+  assertPlanFresh,
+  parseCommonArgs,
+  planPathFor,
+  readPlan,
+  redact,
+} from "./lib/plan.mjs";
 
 const PIECE = "audit-pack";
 const USAGE = "usage: push.mjs [--repo=<path>] --confirm [--output=json|text] [--quiet]\n";
@@ -54,23 +62,24 @@ function main(argv) {
   if (!opts.confirm) {
     process.stderr.write(
       "error: refusing to push without --confirm.\n" +
-        `  ${plan.summary.create} record(s) would be created and ${plan.summary.update} updated in Noru.\n` +
+        `  ${plan.summary.create} workpaper conclusion(s) would be filed and ` +
+          `${plan.summary.update} updated in Noru. The pack itself stays local — what lands is\n` +
+          "  the tested conclusion per control, not the folder.\n" +
         "  Review the plan first (the piece's :diff command prints it), then re-run with --confirm.\n"
     );
     return 2;
   }
 
-  const calls = plan.operations
-    .filter((op) => op.effect !== "skip" && op.operation)
-    .map((op, index) => ({
-      order: index + 1,
-      tool: op.operation,
-      transport: op.transport,
-      scope: op.scope,
-      subject: op.subject,
-      effect: op.effect,
-      arguments: op.arguments,
-    }));
+  const pending = plan.operations.filter((op) => op.effect !== "skip" && op.operation);
+  const calls = pending.map((op, index) => ({
+    order: index + 1,
+    tool: op.operation,
+    transport: op.transport,
+    scope: op.scope,
+    subject: op.subject,
+    effect: op.effect,
+    arguments: op.arguments,
+  }));
 
   const callsPath = join(opts.repo, ".noru", ".cache", `${PIECE}.calls.json`);
   const payload = {
@@ -94,17 +103,21 @@ function main(argv) {
       `${JSON.stringify({ ...payload, calls_file: callsPath }, null, opts.quiet ? 0 : 2)}\n`
     );
   } else if (!opts.quiet) {
-    process.stdout.write(
-      calls.length === 0
-        ? "nothing to push: every operation in the plan was already satisfied in Noru.\n" +
-            "This is the expected result of a second run.\n"
-        : [
-            `${calls.length} confirmed MCP call(s) written to ${callsPath}:`,
-            ...calls.map((c) => `  ${String(c.order).padStart(2)}. ${c.tool.padEnd(22)} ${c.subject}`),
-            "",
-            "Execute exactly these calls, in this order, through the Noru MCP connection.",
-          ].join("\n") + "\n"
-    );
+    if (calls.length === 0) {
+      process.stdout.write(
+        "nothing to push: every workpaper conclusion in the plan is already filed in Noru.\n" +
+          "This is the expected result of a second run.\n"
+      );
+    } else {
+      process.stdout.write(
+        [
+          `${calls.length} confirmed MCP call(s) written to ${callsPath}:`,
+          ...calls.map((c) => `  ${String(c.order).padStart(2)}. ${c.tool.padEnd(22)} ${c.subject}`),
+          "",
+          "Execute exactly these calls, in this order, through the Noru MCP connection.",
+        ].join("\n") + "\n"
+      );
+    }
   }
   return 0;
 }

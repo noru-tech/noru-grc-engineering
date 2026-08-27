@@ -1,7 +1,7 @@
 {
   "name": "audit-pack",
   "version": "0.1.0",
-  "description": "TODO: one sentence describing audit-pack.",
+  "description": "Assemble the evidence bundle, sampling and workpapers an auditor asks for — for one framework over one audit window — from Noru's graph plus the local files an integration cannot reach, and land the tested conclusion for each control back in Noru.",
   "author": {
     "name": "Noru",
     "email": "support@noru.tech",
@@ -13,22 +13,30 @@
   "keywords": [
     "noru",
     "compliance",
-    "grc",
-    "audit-pack"
+    "audit",
+    "workpapers",
+    "sampling",
+    "evidence",
+    "soc2",
+    "iso-27001",
+    "mcp"
   ],
   "skills": "./skills/",
   "commands": "./commands/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Noru Audit Pack",
-    "shortDescription": "TODO: one sentence describing audit-pack.",
-    "longDescription": "TODO: one sentence describing audit-pack.",
+    "shortDescription": "Assemble the pack an auditor asks for, and file the conclusions.",
+    "longDescription": "Asks Noru which controls a framework puts in scope and what is already linked to each, gathers the local artifacts an integration cannot reach, draws a sample anybody can redraw from a population export, and writes a workpaper per control for a person to test and conclude. The pack — index, workpapers and sampling worksheets — is a local deliverable; what lands in Noru is the tested conclusion for each control over the window, mapped to the control it is about.",
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
-      "TODO"
+      "Scope and coverage from the organization's own framework mapping",
+      "Reproducible sampling seeded from the population's digest",
+      "A workpaper per control, with what was inspected and what was concluded",
+      "Conclusions that expire from the end of the window, not the signature"
     ],
     "websiteURL": "https://noru.tech",
-    "defaultPrompt": "TODO: what a user would type to reach audit-pack."
+    "defaultPrompt": "Build an audit pack for my framework covering the first half of this year."
   }
 }

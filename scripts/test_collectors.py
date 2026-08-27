@@ -13,6 +13,11 @@ sharpest claim and the easiest to get quietly wrong. It is not enough to find th
 finding is whether the disclosure the paragraph requires is present, and the states it reports
 (present / unclear / absent) mean specific things that are asserted below one at a time.
 
+For `audit-pack` the sharpest claim is that its sample can be redrawn. The pack tells an auditor how
+to reproduce the selection, so the test below follows those written instructions independently rather
+than calling the collector's own function — a sample nobody can reproduce is a list somebody typed,
+and a recipe that does not work is worse than no recipe.
+
 For `iac-scan` the sharpest claim is a negative one: the rule that finds a credential written into
 configuration must never write that credential anywhere. A scanner that quotes what it matched puts
 the secret into a committed file and then into a pull request, so that property is asserted directly
@@ -23,8 +28,10 @@ Usage:
     python3 scripts/test_collectors.py [--output=json] [--quiet]
 Exit codes: 0 = all tests pass, 1 = a test failed, 2 = usage / setup error.
 """
+import hashlib
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -576,6 +583,272 @@ def test_iac_every_status_has_an_expiry_horizon(results):
     )
 
 
+AUDIT_PACK = ROOT / "plugins" / "audit-pack"
+AP_COLLECTOR = AUDIT_PACK / "scripts" / "collect.mjs"
+AP_VALIDATOR = AUDIT_PACK / "scripts" / "validate_manifest.py"
+
+AP_QUEUE = {
+    "fetched_at": "2026-08-27T09:14:00Z",
+    "via": [
+        "getOrganizationFrameworks",
+        "getOrganizationControls",
+        "getControlContext",
+        "getEvidenceForControl",
+        "getEvidenceItems",
+    ],
+    "framework_id": "zz_framework",
+    "framework_name": "Example framework",
+    "window": {"from": "2026-01-01", "to": "2026-06-30"},
+    "controls": [
+        {
+            "control_id": "zz-01",
+            "name": "Example control",
+            "status": "implemented",
+            "coverage": 50,
+            "testing_guidance_available": True,
+            "expected_evidence_items": [
+                {"id": "E-ZZ-01", "title": "Example Records", "type": "record"},
+                {"id": "E-ZZ-02", "title": "Example Procedure", "type": "procedure"},
+            ],
+            "linked_evidence": [
+                {
+                    "evidence_id": "EXAMPLE-EVIDENCE-ID",
+                    "title": "Example procedure",
+                    "status": "valid",
+                    "type": "procedure",
+                    "evidence_item_id": "E-ZZ-02",
+                }
+            ],
+        }
+    ],
+}
+
+
+def audit_pack_repo(tmp, name, files, queue=None):
+    """Write a throwaway repository, run the real collector over it, return its derived facts."""
+    repo = pathlib.Path(tmp) / f"ap-{name}"
+    for rel, body in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    cache = repo / ".noru" / ".cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "audit-queue.json").write_text(
+        json.dumps(queue or AP_QUEUE, indent=2), encoding="utf-8"
+    )
+    result = run(["node", str(AP_COLLECTOR), f"--repo={repo}", "--output=json", "--quiet"])
+    if result.returncode != 0:
+        raise RuntimeError(f"audit-pack collector exited {result.returncode}: {result.stderr[:300]}")
+    derived = json.loads((cache / "audit-pack.derived.json").read_text(encoding="utf-8"))
+    return repo, derived, json.loads(result.stdout)
+
+
+def population_csv(rows):
+    lines = ["reference,opened"]
+    for i in range(1, rows + 1):
+        lines.append(f"REF-{i:04d},2026-01-{(i % 28) + 1:02d}")
+    return "\n".join(lines) + "\n"
+
+
+def test_audit_pack_sample_is_redrawable(results, tmp):
+    """The pack tells an auditor how to redraw the sample. Follow those instructions and check.
+
+    This is the assertion the whole piece rests on: a sample nobody can reproduce is a list somebody
+    typed. The recipe is written into the workpaper and into the README, so it gets a test that runs
+    the recipe independently rather than calling the collector's own function.
+    """
+    body = population_csv(60)
+    repo, derived, _ = audit_pack_repo(
+        tmp, "sample", {".noru/artifacts/changes.csv": body}
+    )
+    artifact = next(a for a in derived["artifacts"] if a["file"].endswith("changes.csv"))
+    population = artifact["population"]
+
+    results.check(
+        "[audit-pack] a delimited export is recognised as a population and counted",
+        population is not None and population["size"] == 60,
+        json.dumps(artifact),
+    )
+
+    # Independently: the seed is the file's own digest, and the order is sha256(seed|reference).
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    keys = [f"REF-{i:04d}" for i in range(1, 61)]
+    expected_seed = digest[:32]
+    redrawn = sorted(
+        keys, key=lambda k: hashlib.sha256(f"{expected_seed}|{k}".encode("utf-8")).hexdigest()
+    )[: population["suggested_sample_size"]]
+
+    results.check(
+        "[audit-pack] the seed is the population file's own digest, so it needs no random source",
+        population["seed"] == expected_seed,
+        f"{population['seed']} vs {expected_seed}",
+    )
+    results.check(
+        "[audit-pack] REDRAWING the sample from the documented recipe reproduces it exactly",
+        population["suggested_sample"] == redrawn,
+        f"collector {population['suggested_sample'][:4]} vs redrawn {redrawn[:4]}",
+    )
+    results.check(
+        "[audit-pack] the sample is not simply the first rows of the file",
+        population["suggested_sample"] != keys[: population["suggested_sample_size"]],
+        json.dumps(population["suggested_sample"][:5]),
+    )
+
+    # And the floor the validator enforces has to be the floor the collector proposes against.
+    _, derived_small, _ = audit_pack_repo(
+        tmp, "sample-small", {".noru/artifacts/changes.csv": population_csv(3)}
+    )
+    small = next(
+        a for a in derived_small["artifacts"] if a["file"].endswith("changes.csv")
+    )["population"]
+    results.check(
+        "[audit-pack] a population smaller than the floor is tested in full",
+        small["minimum_sample"] == 3 and small["suggested_sample_size"] == 3,
+        json.dumps(small),
+    )
+
+    _, derived_big, _ = audit_pack_repo(
+        tmp, "sample-big", {".noru/artifacts/changes.csv": population_csv(600)}
+    )
+    big = next(
+        a for a in derived_big["artifacts"] if a["file"].endswith("changes.csv")
+    )["population"]
+    results.check(
+        "[audit-pack] a large population raises the floor above the default sample size",
+        big["minimum_sample"] == 45 and big["suggested_sample_size"] == 45,
+        json.dumps({k: v for k, v in big.items() if k != "suggested_sample"}),
+    )
+
+
+def test_audit_pack_gap_analysis(results, tmp):
+    """The gap is the difference between what the framework expects and what is actually linked."""
+    _, derived, _ = audit_pack_repo(tmp, "gaps", {"README.md": "# fixture\n"})
+    control = derived["controls"][0]
+    results.check(
+        "[audit-pack] an expectation with nothing linked to it is reported as unmet",
+        control["unmet_evidence_items"] == ["E-ZZ-01"],
+        json.dumps(control),
+    )
+    results.check(
+        "[audit-pack] an expectation that IS linked is not reported as unmet",
+        "E-ZZ-02" not in control["unmet_evidence_items"],
+        json.dumps(control),
+    )
+
+    expired_queue = json.loads(json.dumps(AP_QUEUE))
+    expired_queue["controls"][0]["linked_evidence"][0]["status"] = "expired"
+    _, derived, _ = audit_pack_repo(
+        tmp, "expired", {"README.md": "# fixture\n"}, queue=expired_queue
+    )
+    results.check(
+        "[audit-pack] a linked record that expired is surfaced separately from an unmet expectation",
+        derived["controls"][0]["expired_evidence"] == ["EXAMPLE-EVIDENCE-ID"],
+        json.dumps(derived["controls"][0]),
+    )
+
+
+def test_audit_pack_assembles_upstream_manifests(results, tmp):
+    """A pack says which reviewed inputs produced what is in Noru, not only what the register says."""
+    repo, derived, _ = audit_pack_repo(
+        tmp,
+        "upstream",
+        {
+            ".noru/review-signoff.yml": "version: 0.1.0\npiece: review-signoff\nreviews: []\n",
+            ".noru/notes.yml": "just: a file\n",
+        },
+    )
+    pieces = [row["piece"] for row in derived["upstream_manifests"]]
+    results.check(
+        "[audit-pack] another piece's committed manifest is digested into the pack",
+        pieces == ["review-signoff"],
+        json.dumps(derived["upstream_manifests"]),
+    )
+    # The pack's own manifest is written into the same directory; digesting it would make the
+    # derived facts depend on their own output.
+    results.check(
+        "[audit-pack] the pack's own manifest is not one of its inputs",
+        all(row["file"] != ".noru/audit-pack.yml" for row in derived["upstream_manifests"]),
+        json.dumps(derived["upstream_manifests"]),
+    )
+
+
+def test_audit_pack_renders_only_a_validated_pack(results, tmp):
+    """A pack built from an unreviewed manifest would look exactly like a real one."""
+    repo, _, summary = audit_pack_repo(
+        tmp, "render", {".noru/artifacts/changes.csv": population_csv(40)}
+    )
+    index = repo / ".noru" / "audit-pack" / "index.md"
+    results.check(
+        "[audit-pack] a scan with no validated manifest renders the scope and says so",
+        summary["bundle"] == [".noru/audit-pack/index.md"]
+        and "has not been reviewed yet" in index.read_text(encoding="utf-8"),
+        json.dumps(summary["bundle"]),
+    )
+    results.check(
+        "[audit-pack] and it writes no workpaper for a conclusion nobody drew",
+        not (repo / ".noru" / "audit-pack" / "workpapers").exists(),
+        "workpapers were rendered from an unvalidated manifest",
+    )
+
+    # Now do it properly: the piece's own valid fixture, re-stamped with this repository's digest.
+    decl = json.loads((AUDIT_PACK / "piece.json").read_text(encoding="utf-8"))
+    fixture = (AUDIT_PACK / decl["validator"]["fixtures"]["valid"][0]).read_text(encoding="utf-8")
+    digest = summary["derived_digest"]
+    manifest = repo / ".noru" / "audit-pack.yml"
+    manifest.write_text(
+        re.sub(
+            r"(\n  generated_by: [^\n]+\n)", rf"\1  derived_digest: {digest}\n", fixture, count=1
+        ),
+        encoding="utf-8",
+    )
+    parsed = repo / ".noru" / ".cache" / "audit-pack.parsed.json"
+    validated = run(
+        ["python3", str(AP_VALIDATOR), str(manifest), f"--emit-parsed={parsed}", "--quiet"]
+    )
+    if not results.check(
+        "[audit-pack] the fixture manifest validates against this repository",
+        validated.returncode == 0,
+        validated.stdout[:300],
+    ):
+        return
+    rendered = run(["node", str(AP_COLLECTOR), f"--repo={repo}", "--output=json", "--quiet"])
+    bundle = json.loads(rendered.stdout)["bundle"]
+    results.check(
+        "[audit-pack] a validated manifest renders a workpaper per control and a sampling worksheet",
+        ".noru/audit-pack/workpapers/change-management.md" in bundle
+        and ".noru/audit-pack/sampling/change-management.csv" in bundle,
+        json.dumps(bundle),
+    )
+    workpaper = (
+        repo / ".noru" / "audit-pack" / "workpapers" / "change-management.md"
+    ).read_text(encoding="utf-8")
+    results.check(
+        "[audit-pack] the workpaper tells the reader how to redraw the sample",
+        "Redraw it" in workpaper and "Seed:" in workpaper,
+        workpaper[:200],
+    )
+    # The framework's testing procedure is Noru's to serve. A pack that copied it would vendor
+    # catalogue content and go stale the moment the framework moved.
+    results.check(
+        "[audit-pack] the pack records that a procedure exists, and never its text",
+        "Testing procedure available from Noru: yes" in workpaper,
+        workpaper[:200],
+    )
+
+
+def test_audit_pack_every_conclusion_has_an_assurance_horizon(results):
+    """A conclusion with no horizon would make the expiry check pass without checking anything."""
+    vocab = json.loads(
+        (AUDIT_PACK / "references" / "vocabulary.json").read_text(encoding="utf-8")
+    )
+    missing = sorted(set(vocab["conclusion"]) - set(vocab["assurance_days"]))
+    results.check(
+        "[audit-pack] every conclusion has an assurance horizon in the bundled vocabulary",
+        missing == [],
+        f"no horizon for {missing}",
+    )
+
+
 def main(argv):
     output_json = False
     quiet = False
@@ -612,8 +885,13 @@ def main(argv):
             test_iac_classification(results, tmp)
             test_iac_reports_what_stopped_reproducing(results, tmp)
             test_iac_skeleton_never_decides(results, tmp)
+            test_audit_pack_sample_is_redrawable(results, tmp)
+            test_audit_pack_gap_analysis(results, tmp)
+            test_audit_pack_assembles_upstream_manifests(results, tmp)
+            test_audit_pack_renders_only_a_validated_pack(results, tmp)
         test_missing_disclosure_fixture_alerts(results)
         test_iac_every_status_has_an_expiry_horizon(results)
+        test_audit_pack_every_conclusion_has_an_assurance_horizon(results)
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"error: {exc}\n")
         return 2

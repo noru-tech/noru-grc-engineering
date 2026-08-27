@@ -15,33 +15,76 @@
     "deterministic": true,
     "network": false,
     "inputs": [
-      ".noru/.cache/noru-state.json"
+      ".noru/.cache/audit-queue.json",
+      ".noru/artifacts/",
+      ".noru/*.yml",
+      ".noru/.cache/audit-pack.parsed.json"
     ]
   },
   "validator": {
     "entrypoint": "scripts/validate_manifest.py",
     "runtime": "python3-stdlib",
-    "vocabulary": [
-      "references/vocabulary.json"
-    ],
+    "vocabulary": ["references/vocabulary.json"],
     "suggestions": true,
     "exit_codes": {
       "0": "manifest is valid; warnings may be present",
-      "1": "manifest has validation errors",
+      "1": "manifest has validation errors, including a conclusion already expired at --as-of",
       "2": "usage error, unreadable file, or unparseable YAML"
     },
     "fixtures": {
-      "valid": [
-        "fixtures/valid.audit-pack.yml"
-      ],
+      "valid": ["fixtures/valid.audit-pack.yml"],
       "invalid": [
         {
           "path": "fixtures/invalid-missing-interpretation.audit-pack.yml",
           "expect_message": "missing required `interpretation`"
         },
         {
-          "path": "fixtures/invalid-unknown-kind.audit-pack.yml",
-          "expect_message": "unknown item kind"
+          "path": "fixtures/invalid-no-expiry.audit-pack.yml",
+          "expect_message": "missing required `expires_at`"
+        },
+        {
+          "path": "fixtures/invalid-conclusion-outlives-window.audit-pack.yml",
+          "expect_message": "may stand for at most"
+        },
+        {
+          "path": "fixtures/invalid-concluded-before-window-closed.audit-pack.yml",
+          "expect_message": "before the window it covers had ended"
+        },
+        {
+          "path": "fixtures/invalid-off-queue-control.audit-pack.yml",
+          "expect_message": "is not in the queue snapshot"
+        },
+        {
+          "path": "fixtures/invalid-inspected-digest-mismatch.audit-pack.yml",
+          "expect_message": "digest that does not match"
+        },
+        {
+          "path": "fixtures/invalid-inspected-not-digested.audit-pack.yml",
+          "expect_message": "was not digested by this scan"
+        },
+        {
+          "path": "fixtures/invalid-sample-below-minimum.audit-pack.yml",
+          "expect_message": "smallest defensible sample"
+        },
+        {
+          "path": "fixtures/invalid-sample-count-mismatch.audit-pack.yml",
+          "expect_message": "item(s) are listed"
+        },
+        {
+          "path": "fixtures/invalid-self-reviewed-pack.audit-pack.yml",
+          "expect_message": "cannot review their own pack"
+        },
+        {
+          "path": "fixtures/invalid-effective-with-deferred-exception.audit-pack.yml",
+          "expect_message": "deferred exception is one nobody has dealt with"
+        },
+        {
+          "path": "fixtures/invalid-duplicate-control.audit-pack.yml",
+          "expect_message": "one workpaper, one control"
+        },
+        {
+          "path": "fixtures/invalid-needs-review.audit-pack.yml",
+          "expect_message": "still true"
         }
       ]
     }
@@ -50,7 +93,7 @@
     "entrypoint": "scripts/push.mjs",
     "mode": "keyed_upsert",
     "collapses_to": {
-      "tool": "TODO: describe the single server-side operation this fan-out would fold into, if one is published",
+      "tool": "a single idempotency-keyed ingest for an assurance conclusion — the control, the period it covers, what was inspected, the sample that was drawn and the conclusion with its validity — so the piece would state the conclusion once rather than render it into an evidence body and probe for its own marker. The gap is not really call count here: it is that a tested conclusion about a control over a period has no first-class shape in the published API, so it has to travel as evidence text",
       "tracked_at": "https://github.com/noru-tech/noru-grc-engineering/issues"
     },
     "operations": [
@@ -60,11 +103,20 @@
         "scope": "write:evidence",
         "idempotency": {
           "kind": "client_probe",
-          "key": [
-            "description contains marker"
-          ],
-          "verified_at": "TODO: the public documentation where you confirmed this behaviour — a section of https://api.noru.tech/llms.txt, or the tool description published at https://api.noru.tech/v1/mcp. If it is not documented, say so and treat the claim as unverified.",
-          "gap": "TODO: what the published API does not document, what this piece does instead, and what a documented key would let it drop"
+          "key": ["description contains marker"],
+          "verified_at": "The createEvidence tool description published by https://api.noru.tech/v1/mcp documents creating text/note/link evidence with optional control mappings and states that file uploads are not supported over MCP; it documents no idempotency key. The \"Idempotency/Upsert Behavior\" section of https://api.noru.tech/llms.txt covers `POST /v1/assets` and `POST /v1/security-findings` only, so nothing published covers evidence.",
+          "gap": "No idempotency key is documented for evidence, so this piece does not rely on one: it embeds a marker built from the pack key, the workpaper key and a digest of the rendered workpaper in the evidence description, and probes getOrganizationEvidence before creating. A documented key would let the probe go away and would make a re-tested control an update rather than a second record."
+        }
+      },
+      {
+        "name": "linkEvidenceToControl",
+        "transport": "mcp",
+        "scope": "write:evidence",
+        "idempotency": {
+          "kind": "client_probe",
+          "key": ["evidenceId", "controlId"],
+          "verified_at": "The linkEvidenceToControl tool description published by https://api.noru.tech/v1/mcp documents linking an evidence record to a control and optionally narrowing the link to specific evidence-item template ids. Whether linking the same pair twice is a no-op is not documented anywhere public, so the piece does not assume it.",
+          "gap": "Nothing published says what a repeated link does, so this operation is only planned when the state snapshot shows the record exists and the control link does not. A documented key, or a documented no-op on a repeated link, would remove the need to read the organization's evidence links first."
         }
       }
     ],
@@ -77,21 +129,35 @@
     "requires_confirmation": true
   },
   "scopes": {
-    "read": [
-      "read:organization",
-      "read:controls",
-      "read:evidence"
-    ],
-    "write": [
-      "write:evidence"
-    ]
+    "read": ["read:organization", "read:frameworks", "read:controls", "read:evidence"],
+    "write": ["write:evidence"]
   },
   "queue": {
     "source": [
       {
         "kind": "mcp_tool",
+        "tool": "getOrganizationFrameworks",
+        "note": "Which frameworks the organization is actually being audited against. A pack is about one of them, and the id comes from here rather than from an argument somebody typed."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getOrganizationControls",
+        "note": "The controls in the framework's scope, with their status. Ids come from Noru; this plugin ships none."
+      },
+      {
+        "kind": "mcp_tool",
         "tool": "getControlContext",
-        "note": "TODO: say exactly what this piece reads from Noru to decide what is needed."
+        "note": "The full context for one control: what the framework expects, what is already linked, coverage, and whether a testing procedure is available. The procedure text is deliberately not stored — the pack records that one exists and the tester writes what they actually did."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getEvidenceForControl",
+        "note": "Every evidence record linked to a control with its status and expiry. A record that expired during the window is the difference between a control that was covered and one that looks covered today."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getEvidenceItems",
+        "note": "The catalogue of framework-level evidence-item templates, used to resolve titles and types for expectations the control context returns by id."
       }
     ],
     "hardcoded_expectations": false
@@ -106,7 +172,7 @@
     "quiet": true,
     "exit_codes": {
       "0": "success",
-      "1": "drift, validation failure, or missing prerequisite input",
+      "1": "drift, validation failure, an expired conclusion under --as-of, missing prerequisite input, or a stale plan",
       "2": "usage error, including a push without --confirm"
     }
   }

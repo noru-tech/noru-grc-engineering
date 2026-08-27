@@ -1,24 +1,7 @@
-# Fixture: a two-control audit pack for one framework over one half-year window. Exit 0.
+# Fixture: a control found effective while an exception against it is deferred.
+# Expected: exit 1, "deferred exception is one nobody has dealt with".
 #
-# What each part is here to show:
-#   * the change-management workpaper draws a REPRODUCIBLE sample. The seed is the population file's
-#     own digest, so anybody holding that file can order it by sha256(seed + "|" + reference) and get
-#     exactly the 5 rows listed below. That is the difference between a sample and a list
-#     somebody typed.
-#   * everything it says it inspected is something the scan digested, at that digest — including
-#     another piece's committed manifest, because a pack should say which reviewed inputs produced
-#     what is in Noru rather than only what the register happens to say today.
-#   * the access-review workpaper concludes DEFICIENT, with an owned exception and a short expiry. A
-#     control you found broken is not something to sign off for a year.
-#
-# The digests and the drawn sample are computed from the real files in tests/fixture-repo, so this
-# fixture is internally true rather than plausible-looking. The one exception is the review-signoff
-# manifest: the fixture repository holds no other piece's manifest, so that digest is synthetic and
-# says so here rather than looking like a file somebody could open.
-#
-# The control and evidence-item ids are in the reserved synthetic namespaces (zz-*, E-ZZ-*) that
-# contract/README.md sets aside for fixtures. Real catalogue ids must never appear anywhere in this
-# repository — that is contract requirement 9, and fixtures are the obvious loophole.
+# Either it was not effective, or the exception is not really deferred. Both cannot be true.
 version: 0.1.0
 piece: audit-pack
 source:
@@ -95,50 +78,6 @@ inputs:
       file: .noru/review-signoff.yml
       sha256: a1ed68f8663a1ca16db789e1b466d30225defc9920caffe2df2596b0cd0679bf
 workpapers:
-  - key: change-management
-    control_id: zz-01
-    evidence_item_ids:
-      - E-ZZ-01
-    scope: >
-      Tested that every production change in the window was approved before it was deployed, by
-      drawing a sample from the change export and checking the approver and the two dates on each.
-    inspected:
-      - kind: artifact
-        reference: .noru/artifacts/change-tickets-2026h1.csv
-        sha256: 6335fc451a85daabfaa5c3e72e500431521f5c38da91d1c4856062c6bafa56ca
-        note: The change export for the window, sampled below.
-      - kind: evidence
-        reference: EXAMPLE-EVIDENCE-ID
-        note: The procedure the sample was tested against.
-      - kind: manifest
-        reference: .noru/review-signoff.yml
-        sha256: a1ed68f8663a1ca16db789e1b466d30225defc9920caffe2df2596b0cd0679bf
-        note: The reviewed sign-offs that produced the linked records in Noru.
-    population:
-      file: .noru/artifacts/change-tickets-2026h1.csv
-      sha256: 6335fc451a85daabfaa5c3e72e500431521f5c38da91d1c4856062c6bafa56ca
-      size: 12
-    sample:
-      method: deterministic_hash
-      seed: 6335fc451a85daabfaa5c3e72e500431
-      size: 5
-      drawn:
-        - CHG-1005
-        - CHG-1003
-        - CHG-1001
-        - CHG-1012
-        - CHG-1006
-    exceptions: []
-    conclusion: effective
-    refs:
-      - .noru/artifacts/change-tickets-2026h1.csv:1
-    interpretation:
-      owner: sam.okafor@example.com
-      decided_at: 2026-07-15
-      expires_at: 2027-06-30
-      rationale: >
-        Every change in the sample carried an approver other than the deployer and an approval date
-        before the deployment date. The control operated as designed across the window.
   - key: periodic-access-review
     control_id: zz-03
     evidence_item_ids:
@@ -159,7 +98,7 @@ workpapers:
         description: No access review was carried out for the second quarter of the window.
         disposition: deferred
         owner: priya.nair@example.com
-    conclusion: deficient
+    conclusion: effective
     refs:
       - .noru/artifacts/quarterly-access-review.txt:1
     interpretation:

@@ -1,24 +1,7 @@
-# Fixture: a two-control audit pack for one framework over one half-year window. Exit 0.
+# Fixture: a workpaper about a control Noru did not put in scope.
+# Expected: exit 1, "is not in the queue snapshot".
 #
-# What each part is here to show:
-#   * the change-management workpaper draws a REPRODUCIBLE sample. The seed is the population file's
-#     own digest, so anybody holding that file can order it by sha256(seed + "|" + reference) and get
-#     exactly the 5 rows listed below. That is the difference between a sample and a list
-#     somebody typed.
-#   * everything it says it inspected is something the scan digested, at that digest — including
-#     another piece's committed manifest, because a pack should say which reviewed inputs produced
-#     what is in Noru rather than only what the register happens to say today.
-#   * the access-review workpaper concludes DEFICIENT, with an owned exception and a short expiry. A
-#     control you found broken is not something to sign off for a year.
-#
-# The digests and the drawn sample are computed from the real files in tests/fixture-repo, so this
-# fixture is internally true rather than plausible-looking. The one exception is the review-signoff
-# manifest: the fixture repository holds no other piece's manifest, so that digest is synthetic and
-# says so here rather than looking like a file somebody could open.
-#
-# The control and evidence-item ids are in the reserved synthetic namespaces (zz-*, E-ZZ-*) that
-# contract/README.md sets aside for fixtures. Real catalogue ids must never appear anywhere in this
-# repository — that is contract requirement 9, and fixtures are the obvious loophole.
+# Requirement 9. A pack covers what the organization's own framework mapping says is in scope.
 version: 0.1.0
 piece: audit-pack
 source:
@@ -96,7 +79,7 @@ inputs:
       sha256: a1ed68f8663a1ca16db789e1b466d30225defc9920caffe2df2596b0cd0679bf
 workpapers:
   - key: change-management
-    control_id: zz-01
+    control_id: zz-99
     evidence_item_ids:
       - E-ZZ-01
     scope: >
@@ -139,33 +122,3 @@ workpapers:
       rationale: >
         Every change in the sample carried an approver other than the deployer and an approval date
         before the deployment date. The control operated as designed across the window.
-  - key: periodic-access-review
-    control_id: zz-03
-    evidence_item_ids:
-      - E-ZZ-21
-    scope: >
-      Tested whether the quarterly access review was carried out for both quarters in the window, by
-      looking for a completed review with a named signer for each.
-    inspected:
-      - kind: artifact
-        reference: .noru/artifacts/quarterly-access-review.txt
-        sha256: c3119e0dac64f636e06d82858d5343ba1e9ee032c2581ffae3b658e5b7581994
-        note: The only completed review found in the window.
-      - kind: evidence
-        reference: EXAMPLE-EXPIRED-EVIDENCE-ID
-        note: The record Noru holds for the previous period, which expired during the window.
-    exceptions:
-      - reference: 2026-Q2
-        description: No access review was carried out for the second quarter of the window.
-        disposition: deferred
-        owner: priya.nair@example.com
-    conclusion: deficient
-    refs:
-      - .noru/artifacts/quarterly-access-review.txt:1
-    interpretation:
-      owner: sam.okafor@example.com
-      decided_at: 2026-07-15
-      expires_at: 2026-10-01
-      rationale: >
-        One of the two quarters has no review at all, so the control did not operate across the
-        window. Short horizon on purpose: this is a finding to fix, not an answer to file away.
