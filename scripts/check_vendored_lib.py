@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """Keep the vendored library blocks byte-identical across pieces.
 
-An installed plugin has to be self-contained: it cannot import from a sibling plugin, and it cannot
-assume a package was installed. So two small libraries are vendored into every piece:
+An installed plugin has to be self-contained: it cannot import from a sibling plugin, it cannot read
+a file from outside its own directory, and it cannot assume a package was installed. So three things
+are vendored into the pieces that need them:
 
   * contract/lib/yaml_mini.py        -> inlined into plugins/<piece>/scripts/validate_manifest.py
   * plugins/noru/scripts/lib/plan.mjs -> copied to plugins/<piece>/scripts/lib/plan.mjs
+  * contract/lib/taxonomy/*.json      -> copied to plugins/<piece>/references/taxonomy/*.json
 
 Duplication is fine as long as it cannot drift silently. This script is what stops it drifting.
+
+The taxonomy arm is driven by each piece's own `validator.vocabulary` declaration rather than by a
+list kept here: a piece vendors the vocabulary its validator actually loads and nothing more, so
+declaring the file is what opts into the check. A vocabulary file a piece never declared is a file
+nothing loads.
 
 Usage:
     python3 scripts/check_vendored_lib.py [--fix] [--output=json] [--quiet]
@@ -65,6 +72,42 @@ def sync_python(path, block, fix):
     return None
 
 
+def taxonomy_files(piece):
+    """Taxonomy files this piece declares it validates against, from its own piece.json.
+
+    Returns (relative path, canonical path) pairs. A piece opts into the check by declaring the
+    file in validator.vocabulary; nothing here knows which pieces use the taxonomy.
+    """
+    decl = json.loads((piece / "piece.json").read_text(encoding="utf-8"))
+    out = []
+    for rel in decl.get("validator", {}).get("vocabulary", []):
+        parts = pathlib.PurePosixPath(rel).parts
+        if len(parts) == 3 and parts[0] == "references" and parts[1] == "taxonomy":
+            out.append((rel, ROOT / "contract" / "lib" / "taxonomy" / parts[2]))
+    return out
+
+
+def sync_taxonomy(path, canonical, fix):
+    if not canonical.is_file():
+        return (
+            f"{path.relative_to(ROOT)}: declared in piece.json, but there is no canonical "
+            f"{canonical.relative_to(ROOT)} to copy from"
+        )
+    want = canonical.read_bytes()
+    if path.is_file() and path.read_bytes() == want:
+        return None
+    if not fix:
+        if not path.is_file():
+            return f"{path.relative_to(ROOT)}: missing (copy {canonical.relative_to(ROOT)})"
+        return (
+            f"{path.relative_to(ROOT)}: has drifted from {canonical.relative_to(ROOT)} — edit the "
+            "canonical snapshot, never a vendored copy"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(want)
+    return None
+
+
 def sync_plan(path, canonical, fix):
     if path.is_file() and path.read_text(encoding="utf-8") == canonical:
         return None
@@ -119,6 +162,16 @@ def main(argv):
         if piece.name != "noru":
             checked += 1
             problem = sync_plan(plan, plan_text, fix)
+            if problem:
+                problems.append(problem)
+        try:
+            declared = taxonomy_files(piece)
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"plugins/{piece.name}/piece.json: could not be read ({exc})")
+            declared = []
+        for rel, canonical in declared:
+            checked += 1
+            problem = sync_taxonomy(piece / rel, canonical, fix)
             if problem:
                 problems.append(problem)
 
