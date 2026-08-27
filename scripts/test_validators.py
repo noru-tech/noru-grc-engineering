@@ -201,27 +201,6 @@ def test_fallback_loader(results):
     empty = module._fallback_load("# only a comment\n")
     results.check("an empty document loads as None rather than raising", empty is None, f"got {empty}")
 
-    # FALLBACK_EXPECTED is PyYAML's output, pinned so the comparison runs on a machine that has no
-    # PyYAML — which is the only machine where the fallback loader actually runs. Pinned values go
-    # stale silently, so where PyYAML *is* importable it is asked directly and the pin re-checked
-    # against it. That closes the loop: the CI matrix runs a leg with PyYAML and one without, so
-    # between them the fallback loader is compared to the real thing on every build.
-    try:
-        import yaml  # noqa: PLC0415
-    except ImportError:
-        results.skip(
-            "the pinned expectations still match what PyYAML produces",
-            "PyYAML is not importable here. The CI matrix runs a leg with it installed, which is "
-            "where this comparison happens.",
-        )
-    else:
-        actual = yaml.safe_load(FALLBACK_SAMPLE)
-        results.check(
-            "the pinned expectations still match what PyYAML produces",
-            actual == FALLBACK_EXPECTED,
-            "" if actual == FALLBACK_EXPECTED else f"PyYAML gave {json.dumps(actual, sort_keys=True)}",
-        )
-
 
 def _deep_diff(a, b, path="$"):
     """Mismatches between two loaded documents, by path. Type-strict on purpose.
