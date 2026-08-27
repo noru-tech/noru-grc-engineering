@@ -42,6 +42,7 @@ AI_INVENTORY = ROOT / "plugins" / "ai-inventory"
 COLLECTOR = AI_INVENTORY / "scripts" / "collect.mjs"
 VALIDATOR = AI_INVENTORY / "scripts" / "validate_manifest.py"
 PRIVACY_DATAMAP = ROOT / "plugins" / "privacy-datamap"
+PLUGINS = ROOT / "plugins"
 
 
 class Results:
@@ -1179,6 +1180,52 @@ def test_datamap_render_is_gated_and_matches_the_push(results, tmp):
 
 
 
+def test_digest_ignores_the_collectors_own_version(results, tmp):
+    """The derived digest must answer "has the repository changed?" and nothing else.
+
+    `generated_by` used to be inside the hash, which made a plugin upgrade indistinguishable from a
+    schema change: every committed manifest reported drift on the next run and CI mode failed with
+    exit 3 for repositories where nothing had moved. It is asserted here for EVERY piece rather than
+    the one it was found in, because seven collectors carry a byte-identical digestOf() and fixing
+    one is not fixing the property.
+    """
+    probe = pathlib.Path(tmp) / "digest-probe.mjs"
+    for piece in sorted(PLUGINS.glob("*/piece.json")):
+        name = piece.parent.name
+        collector = piece.parent / "scripts" / "collect.mjs"
+        probe.write_text(
+            "import { digestOf } from %r;\n"
+            "const facts = { piece: 'x', generated_by: 'x@0.1.0', findings: [1, 2] };\n"
+            "const bumped = { ...facts, generated_by: 'x@9.9.9' };\n"
+            "const absent = { piece: 'x', findings: [1, 2] };\n"
+            "console.log(JSON.stringify({\n"
+            "  same: digestOf(facts) === digestOf(bumped),\n"
+            "  absent_same: digestOf(facts) === digestOf(absent),\n"
+            "}));\n" % str(collector),
+            encoding="utf-8",
+        )
+        result = run(["node", str(probe)])
+        if not results.check(
+            f"[{name}] digestOf is callable", result.returncode == 0, result.stderr[:200]
+        ):
+            continue
+        out = json.loads(result.stdout)
+        results.check(
+            f"[{name}] the digest ignores the collector's own version",
+            out["same"],
+            "bumping generated_by changed the digest, so upgrading the plugin will report drift "
+            "in every repository that has already run :scan",
+        )
+        # And it must be ignored, not merely stable — a digest that changed when the field was
+        # absent would still break the moment anything stopped emitting it.
+        results.check(
+            f"[{name}] an absent generated_by hashes the same as a present one",
+            out["absent_same"],
+            "the field is excluded inconsistently",
+        )
+
+
+
 def main(argv):
     output_json = False
     quiet = False
@@ -1217,6 +1264,7 @@ def main(argv):
             test_datamap_never_overwrites_a_reviewed_manifest(results, tmp)
             test_datamap_digest_agrees_across_languages(results, tmp)
             test_datamap_render_is_gated_and_matches_the_push(results, tmp)
+            test_digest_ignores_the_collectors_own_version(results, tmp)
             test_iac_never_copies_the_line(results, tmp)
             test_iac_identity_survives_a_move(results, tmp)
             test_iac_absence_is_detectable(results, tmp)
