@@ -16,6 +16,7 @@ dataset:
       - name: accounts
         refs:
           - "db/migrations/0001_create_accounts.sql:2"
+        structure_digest: 4abfeae8e1bec7459d35fab52df76e873996f4d1d79316fe73150ea9c1886b57
         interpretation:
           owner: Dana Okafor
           decided_at: "2026-08-20"

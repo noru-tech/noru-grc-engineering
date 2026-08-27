@@ -144,6 +144,7 @@
       "required": [
         "name",
         "refs",
+        "structure_digest",
         "fields"
       ],
       "properties": {
@@ -172,6 +173,11 @@
           "items": {
             "$ref": "#/$defs/field"
           }
+        },
+        "structure_digest": {
+          "description": "sha256 of this collection's sorted, dotted field NAMES \u2014 not their categories. Resolving a classification keeps the signature; adding, removing or renaming a column breaks it. This is the structural anchor in contract/README.md requirement 8: it pins what a signature was given for, which is what lets this piece anchor its expiry on decided_at honestly.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
         }
       }
     },

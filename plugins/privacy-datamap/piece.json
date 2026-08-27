@@ -31,7 +31,7 @@
     "suggestions": true,
     "exit_codes": {
       "0": "manifest is valid; warnings may be present",
-      "1": "manifest has validation errors",
+      "1": "manifest has validation errors, including a signature whose collection has changed shape and a claim already expired at --as-of",
       "2": "usage error, unreadable file, or unparseable YAML"
     },
     "fixtures": {
@@ -70,6 +70,26 @@
         {
           "path": "fixtures/invalid-duplicate-dataset-key.privacy-datamap.yml",
           "expect_message": "duplicate dataset key"
+        },
+        {
+          "path": "fixtures/invalid-structure-changed.privacy-datamap.yml",
+          "expect_message": "no longer a statement about this table"
+        },
+        {
+          "path": "fixtures/invalid-no-expiry.privacy-datamap.yml",
+          "expect_message": "missing required `expires_at`"
+        },
+        {
+          "path": "fixtures/invalid-expiry-beyond-horizon.privacy-datamap.yml",
+          "expect_message": "may stand for at most"
+        },
+        {
+          "path": "fixtures/invalid-expiry-before-decision.privacy-datamap.yml",
+          "expect_message": "asserts nothing"
+        },
+        {
+          "path": "fixtures/invalid-special-category-horizon.privacy-datamap.yml",
+          "expect_message": "may stand for at most"
         }
       ]
     }

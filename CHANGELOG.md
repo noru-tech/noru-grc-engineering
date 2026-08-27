@@ -8,6 +8,28 @@ one version number; the release workflow fails if they disagree.
 
 ### Added
 
+- `privacy-datamap` puts the **fourth expiry anchor** to work — the one added to
+  `contract/README.md` in this same release and documented there as unused. Every collection now
+  carries a `structure_digest`: a hash of its field *names*, not their categories, so resolving a
+  classification keeps the signature and adding, removing or renaming a column breaks it. The
+  validator recomputes it rather than trusting the stamp, so editing the fields and editing the
+  digest by hand fail the same check.
+
+  That anchor settles a question the other pieces each had to answer differently. `expires_at` is
+  now required and measured from `decided_at` — the plain reading, "how long since a person last
+  looked" — which is honest here and is not elsewhere: the objection to `decided_at` is that a late
+  signature extends what a claim covers, and here it cannot, because the coverage is pinned by
+  digest rather than by date. A signature cannot outlive the structure it was given for. Ordinary
+  data may stand for 365 days, GDPR Article 9 and Article 10 data for 183.
+
+  `--as-of=YYYY-MM-DD` turns an already-expired claim into an error, matching `review-signoff` and
+  `iac-scan`. Nothing reads the clock by itself, so the validator stays deterministic.
+
+  Five new invalid fixtures, and a cross-language test: the digest has a JavaScript implementation
+  in the collector and a Python one in the validator, which is exactly the pair that silently
+  diverges. If they ever disagree, every collection reads as "changed shape since it was signed"
+  for ever and re-running `:scan` does not help — so the agreement is asserted directly, and
+  mutation-tested by changing one side's separator.
 - `privacy-datamap` — the collector, the manifest shape and the validator. It reads SQL DDL, Prisma,
   Django/SQLAlchemy models, protobuf and GraphQL SDL into datasets, collections and fields, each
   carrying the `file:line` that produced it. The README lists what it does *not* read yet

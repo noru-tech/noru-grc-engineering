@@ -12,5 +12,20 @@
     "",
     "What must NEVER go here: framework control text, guidance, or an evidence-item list. A piece",
     "asks Noru what is needed. See contract/README.md, requirement 9."
+  ],
+  "horizon_days": {
+    "standard": 365,
+    "special_category": 183
+  },
+  "_horizon_comment": [
+    "How long a signed collection or declaration may stand, measured from interpretation.decided_at.",
+    "",
+    "decided_at is an honest anchor for THIS piece, and it is not for most. Elsewhere it rewards",
+    "signing late: a claim about March, signed in August, gets its clock started in August. Here it",
+    "cannot, because the thing the claim is about is pinned by structure_digest rather than by date.",
+    "A signature cannot outlive the structure it was given for, whatever the calendar says.",
+    "",
+    "special_category is shorter because GDPR Article 9 data \u2014 and Article 10 criminal-offence",
+    "data \u2014 is the part of a data map that hurts most when it is wrong or out of date."
   ]
 }

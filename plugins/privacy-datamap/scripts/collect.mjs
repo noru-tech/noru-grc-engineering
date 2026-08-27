@@ -362,6 +362,31 @@ export function collectFacts(repo) {
   };
 }
 
+
+/**
+ * The structural anchor (contract/README.md, requirement 8). A digest of the collection's field
+ * NAMES — not their categories — so that resolving a classification does not invalidate the
+ * signature, but adding, removing or renaming a column does.
+ *
+ * This is what lets this piece anchor its expiry on `decided_at` honestly. Elsewhere that anchor
+ * quietly rewards signing late; here it cannot, because the thing the claim is about is pinned by
+ * digest rather than by date. A signature cannot outlive the structure it was given for.
+ *
+ * The validator recomputes this from the manifest, so the two implementations have to agree. They
+ * are kept deliberately trivial for that reason: sorted dotted names, newline-joined, sha256.
+ */
+export function structureDigest(fields) {
+  const names = [];
+  const walkFields = (list, prefix) => {
+    for (const field of list ?? []) {
+      names.push(prefix + field.name);
+      if (field.fields) walkFields(field.fields, `${prefix}${field.name}.`);
+    }
+  };
+  walkFields(fields, "");
+  return createHash("sha256").update(names.sort().join("\n")).digest("hex");
+}
+
 export function digestOf(derived) {
   return createHash("sha256").update(JSON.stringify(derived, null, 0)).digest("hex");
 }
@@ -422,6 +447,7 @@ export function buildSkeleton(derived, provenance) {
       collections: dataset.collections.map((collection) => ({
         name: collection.name,
         refs: [collection.ref],
+        structure_digest: structureDigest(collection.fields),
         // The collection is the claim unit: one owner signs for "these are the categories in this
         // table". Per-field attribution would mean five hundred blocks on a five-hundred-column
         // schema, which is a form nobody fills in.

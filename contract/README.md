@@ -148,6 +148,11 @@ Every piece that carries claims now sits inside the rule, and each is stricter t
   signature would let a stale observation be renewed for ever. Accepting a misconfiguration, or
   calling it a false positive, gets a longer horizon and a hard requirement that the reasoning is
   written out — an acceptance nobody revisits is how a known misconfiguration becomes permanent.
+- `privacy-datamap` makes `expires_at` required and pairs it with a `structure_digest` on every
+  collection: a digest of the field *names* a signature was given for, not their categories, so
+  resolving a classification keeps the signature and adding a column breaks it. The validator
+  recomputes it rather than trusting the stamp, so editing the fields and editing the digest are
+  caught by the same check. Article 9 and Article 10 data gets half the horizon of everything else.
 - `audit-pack` makes `expires_at` required and measures it from the **end of the audit window**, not
   from the signature: a workpaper concludes about a period, and signing it late does not extend what
   it covers. It must also fall *after* the window — a conclusion that expires inside its own period
@@ -164,7 +169,7 @@ different anchors are now in use — a declared cadence, the day the world was o
 the period a conclusion covers — and each is the honest one for its piece. A new piece should say
 which anchor it uses before it says how long the window is.
 
-A fourth anchor is available, and nothing uses it yet. Where a claim is *about a structure* the
+A fourth anchor is now in use, by `privacy-datamap`. Where a claim is *about a structure* the
 collector already digests — a schema, a configuration block, a file with a hash — it can carry that
 digest beside its dates and lapse when the structure changes rather than only when the calendar
 says so. That is strictly stronger than a date, because a date can be renewed by signing it again
@@ -173,6 +178,13 @@ mode already computes the comparison — a collector that no longer agrees with 
 manifest is the drift exit — so a piece taking this anchor is wiring up a signal the repository
 produces anyway. It does not replace `expires_at`. A claim about a structure nobody has touched in
 two years is still a claim nobody has re-owned in two years, and only a date says so.
+
+What it *does* change is which date anchor is honest. Every anchor above `decided_at` exists to stop
+a late signature quietly extending what a claim covers. A piece with a structural anchor does not
+need them, because the coverage is pinned by digest: a signature cannot outlive the structure it was
+given for, whatever date is written next to it. So `privacy-datamap` measures its horizon from
+`decided_at` — the plain reading, "how long since a person last looked" — and is the only piece that
+can do that without the objection applying.
 
 `owner` must be a person. A team alias cannot be asked what it was thinking.
 
