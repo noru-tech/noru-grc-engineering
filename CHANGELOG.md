@@ -27,6 +27,28 @@ one version number; the release workflow fails if they disagree.
 - `contract/audit-pack.schema.json`, `contract/iac-scan.schema.json`.
 - `getOrganizationRisks` and `getSecurityFindings` added to the published-tool list in
   `contract/piece.schema.json`, checked against the tool list the MCP server publishes.
+- `outputs[]` in `contract/piece.schema.json` — the optional declaration of what a piece renders
+  for a human *besides* the manifest: the path, what it is for, why it is not the manifest, and the
+  assertion that it is only ever rendered from a manifest that validated against the repository
+  state it describes. `audit-pack` declares its bundle under `.noru/audit-pack/` there. This closes
+  the gap `contract/README.md` had already written down under "what `:push` means for a piece that
+  assembles" — a produced artifact was undeclared, so nothing could check it. `check_item_2` now
+  requires every declared path to appear in the piece README and to not be the manifest itself; a
+  deliverable that is written into someone else's repository at run time cannot be opened from
+  here, but the declaration drifting away from the documentation can be caught, and that is the
+  failure that actually happens.
+- `getPrivacyDataMap`, `listPrivacyDatasets` and `ingestDatamap` added to the published-tool list in
+  `contract/piece.schema.json`, each confirmed against the tool list the MCP server publishes rather
+  than from memory. `getPrivacyTaxonomy` was already listed.
+- A fourth expiry anchor in `contract/README.md`, documented and not yet used: a claim *about a
+  structure* the collector already digests may carry that digest beside its dates and lapse when
+  the structure changes, not only when the calendar says so. Stronger than a date, because signing
+  again renews a date and cannot renew a digest.
+- `contract/README.md` now says where the line between a bundled **vocabulary** (required by
+  requirement 3) and a bundled **catalogue** (forbidden by requirement 9) falls, because
+  `ai-inventory` ships 85 vendored Fideslang categories and the distinction was folklore. The test
+  is whether the file says what someone must do. Where Noru publishes the same vocabulary, the
+  bundled copy is the offline floor and Noru is the truth.
 - `governance-records` — `:scan` / `:diff` / `:push`. Reads the governance documents a repository
   already holds (minutes, ISMS scope, statement of applicability, internal audit plan, report and
   checklist, finding records, corrective action plans), extracts who was present, what was decided

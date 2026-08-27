@@ -4,6 +4,13 @@
   "contract_version": "0.1.0",
   "artifact": ".noru/audit-pack.yml",
   "manifest_schema": "contract/audit-pack.schema.json",
+  "outputs": [
+    {
+      "path": ".noru/audit-pack/",
+      "purpose": "The pack itself — the index, the workpaper per control, and the sampling worksheets — for a human to hand to an auditor. It is not the manifest: the manifest carries the claims and is what `:push` is bound to, while the pack is the deliverable those claims were assembled into. Pushing a rendered pack into Noru would duplicate a register Noru already keeps, so the pack stays local and only the tested conclusion per control lands.",
+      "rendered_from_validated_manifest": true
+    }
+  ],
   "commands": {
     "scan": "commands/scan.md",
     "diff": "commands/diff.md",

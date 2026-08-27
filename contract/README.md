@@ -31,7 +31,7 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
 | # | Requirement | Enforced by |
 |---|---|---|
 | 1 | `.claude-plugin/plugin.json` + one skill + three commands: `:scan`, `:diff`, `:push` | `contract_test.py::check_item_1` — manifest parses, `piece.json.skill` and all three `commands` exist on disk, command frontmatter names match |
-| 2 | A **collector** producing a typed, human-reviewable, git-committable manifest at `.noru/<piece>.yml`. Deterministic. No network. | `check_item_2` — `artifact` matches `^\.noru/`, collector source contains no socket-opening API, and the collector is run twice on a fixture repo and its derived output diffed byte for byte |
+| 2 | A **collector** producing a typed, human-reviewable, git-committable manifest at `.noru/<piece>.yml`. Deterministic. No network. | `check_item_2` — `artifact` matches `^\.noru/`, collector source contains no socket-opening API, and the collector is run twice on a fixture repo and its derived output diffed byte for byte. Any path declared in the optional `outputs[]` must appear in the piece README and must not be the manifest itself |
 | 3 | A **validator**: stdlib only, no installs, no network, bundled vocabulary, "did you mean …?" hints, exit codes `0` valid / `1` invalid / `2` usage | `check_item_3` — the validator is executed against every declared fixture: valid → 0, each invalid → 1 *and* the expected message, no argument → 2. Imports are checked against the stdlib list |
 | 4 | A **push** that is *one* idempotent operation carrying `slug` + `commitSha` + `branch` — never an unkeyed fan-out of 50 creates | `check_item_4` — every declared operation has an idempotency key, `verified_at` cites the public documentation the behaviour was read from, `client_probe` operations must record what is undocumented, and `keyed_upsert` mode must describe the single operation it would collapse into |
 | 5 | **`:diff` before `:push`** — show what would change in Noru; writes need explicit confirmation | `check_item_5` — the push entrypoint is executed with no `--confirm` and with a stale plan; both must be refused with exit 2 |
@@ -77,16 +77,25 @@ That reading costs nothing for the collector pieces, where the two coincide. It 
 because the next assembling piece will hit the same question, and because "produce an output" is a
 shape the contract's own vocabulary (`collect → validate → push`) does not name.
 
-Two things the contract does **not** currently offer such a piece, and should be revisited before
-there are several of them:
+Two things the contract did **not** offer such a piece. The second is now fixed; the first is still
+open, and should be fixed before there are several more.
 
 - **A read-only piece has nowhere to go.** `scopes.write` may be empty — the schema says so
   explicitly — but `push` is mandatory and `push.operations` has `minItems: 1`. A piece that only
   reported would have to invent a write to satisfy its own declaration. That is an inconsistency in
   the contract, not in the piece.
-- **A produced artifact is undeclared.** `artifact` names the manifest; there is no field for output
-  a piece writes for a human. `audit-pack` documents its bundle in its README and gates it behind a
-  validated manifest, but nothing in `piece.json` says it exists, so nothing can check it.
+- **A produced artifact is now declared.** This said there was no field for output a piece writes
+  for a human, and that `audit-pack` documented its bundle in a README nothing could check. There
+  is one now: `artifact` names the manifest and **`outputs[]`** names what the piece renders
+  besides it — the path, what it is for, why it is not the manifest, and the assertion that it is
+  only ever rendered from a manifest that validated against the repository state it describes.
+  `audit-pack` declares its bundle there.
+
+  The contract test cannot open a deliverable that is written into someone else's repository at run
+  time, so it checks the thing that actually drifts: a declared path must appear in the piece
+  README, because an output nobody documents is an output nobody knows to look for. This was added
+  when a second piece needed a non-manifest deliverable — an export in another tool's own format —
+  which is the threshold this section said to wait for.
 
 Three idempotency kinds, in descending order of strength:
 
@@ -155,6 +164,16 @@ different anchors are now in use — a declared cadence, the day the world was o
 the period a conclusion covers — and each is the honest one for its piece. A new piece should say
 which anchor it uses before it says how long the window is.
 
+A fourth anchor is available, and nothing uses it yet. Where a claim is *about a structure* the
+collector already digests — a schema, a configuration block, a file with a hash — it can carry that
+digest beside its dates and lapse when the structure changes rather than only when the calendar
+says so. That is strictly stronger than a date, because a date can be renewed by signing it again
+and a digest cannot: renewing it requires the thing the claim describes to still be what it was. CI
+mode already computes the comparison — a collector that no longer agrees with the committed
+manifest is the drift exit — so a piece taking this anchor is wiring up a signal the repository
+produces anyway. It does not replace `expires_at`. A claim about a structure nobody has touched in
+two years is still a claim nobody has re-owned in two years, and only a date says so.
+
 `owner` must be a person. A team alias cannot be asked what it was thinking.
 
 ### On requirement 9, and the loophole in it
@@ -172,6 +191,32 @@ The obvious loophole is test fixtures, so the contract closes it: fixtures live 
 `plugins/<piece>/fixtures/` and may only use the reserved synthetic namespaces `E-ZZ-*` for
 evidence items and `zz-*` for controls. Anything catalogue-shaped anywhere else in a plugin
 fails the contract test.
+
+### A vocabulary is not a catalogue
+
+Requirement 3 *requires* a bundled vocabulary and requirement 9 forbids a bundled catalogue, so it
+is worth saying where the line is — because `ai-inventory` ships 85 vendored Fideslang data
+categories, and from a distance that looks like exactly the thing the non-goal prohibits.
+
+A **catalogue** is an opinion about what a framework expects of you: control text, guidance, the
+list of evidence a control needs. It is what Noru serves, it moves when the framework moves, and
+vendoring it means being quietly wrong from the day it changes. For the SCF, licensing (CC BY-ND)
+forbids it outright as well.
+
+A **vocabulary** is the set of words a claim is allowed to use. It encodes no expectation of
+anyone; it is what stops a validator accepting `user.contact.emial`. It *has* to be bundled,
+because requirement 3 says the validator runs with no install and no network, and a vocabulary
+fetched at validation time is a validator that fails on a plane. Fideslang is CC BY 4.0, so
+redistributing it with attribution is permitted, and `NOTICE` carries that attribution.
+
+The test is neither size nor provenance. It is: **does this file say what someone must do?** If it
+does, ask Noru. If it only says what a value may be called, bundle it — pinned to a named upstream
+revision, with the provenance and the refresh recipe written down beside it.
+
+One rule follows. Where Noru publishes the same vocabulary — `getPrivacyTaxonomy` does, for this
+taxonomy — the bundled copy is the **offline floor** and Noru is the truth. A piece that can reach
+Noru reconciles against it and reports a difference; a piece that silently prefers its own snapshot
+has re-created the drift problem the catalogue rule exists to prevent, one layer down.
 
 ## Non-goals, stated so they can be pointed at
 

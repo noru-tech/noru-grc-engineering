@@ -43,6 +43,36 @@
       "type": "string",
       "pattern": "^contract/[a-z0-9-]+\\.schema\\.json$"
     },
+    "outputs": {
+      "description": "Deliverables the piece renders for a human, besides the manifest at `artifact`. A piece that assembles rather than only collects produces something a person hands over — a bundle, or an export in another tool's format — and `collect -> validate -> push` has no word for it. Declaring it here is what lets anything check it exists; a renderer nothing checks is a renderer that quietly stops running. Optional: most pieces produce only the manifest and omit this. (Requirement 2)",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "purpose", "rendered_from_validated_manifest"],
+        "properties": {
+          "path": {
+            "description": "Path, relative to the target repository root, of the file or directory the piece writes. A trailing slash means a directory. This exact string must appear in the piece README, so the declaration and the documentation cannot drift.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?$",
+            "not": { "pattern": "\\.\\." }
+          },
+          "purpose": {
+            "description": "What the output is for and who reads it — and, because the distinction is the whole reason this field exists, why it is not the manifest.",
+            "type": "string"
+          },
+          "format": {
+            "description": "The convention the output follows when it targets another tool, so a reader knows what consumes it (for example 'fideslang' for a .fides/ export).",
+            "type": "string"
+          },
+          "rendered_from_validated_manifest": {
+            "description": "Must be true. An output is only ever rendered from a manifest that passed the validator against the repository state it describes. Rendering from an unvalidated or stale manifest produces a deliverable that looks authoritative and is not, which is worse than producing nothing.",
+            "const": true
+          }
+        }
+      }
+    },
     "commands": {
       "description": "The three mandatory commands. Values are paths relative to the plugin root. (Requirement 1)",
       "type": "object",
@@ -346,12 +376,15 @@
         "getVendorDetails",
         "getOrganizationAssets",
         "getPrivacyTaxonomy",
+        "getPrivacyDataMap",
+        "listPrivacyDatasets",
         "createAsset",
         "updateAsset",
         "createVendor",
         "createEvidence",
         "updateEvidence",
-        "linkEvidenceToControl"
+        "linkEvidenceToControl",
+        "ingestDatamap"
       ]
     },
     "pushOperation": {
