@@ -9,6 +9,9 @@ codex plugin add ai-inventory@noru-grc-engineering
 codex plugin add evidence-push@noru-grc-engineering
 codex plugin add governance-records@noru-grc-engineering
 codex plugin add review-signoff@noru-grc-engineering
+codex plugin add audit-pack@noru-grc-engineering
+codex plugin add iac-scan@noru-grc-engineering
+codex plugin add privacy-datamap@noru-grc-engineering
 ```
 
 Codex reads the marketplace from `.agents/plugins/marketplace.json` and each plugin from
@@ -46,6 +49,11 @@ inlines the value, and do not paste the key into a chat.
 | `evidence-push:push` | adds `write:evidence` |
 | `governance-records:push` | adds `write:evidence` |
 | `review-signoff:push` | adds `write:evidence` |
+| `audit-pack:push` | adds `write:evidence` |
+| `iac-scan:scan` and `:diff` | `read:risks`, `read:assets` — and nothing else |
+| `iac-scan:push` | adds `write:risks` |
+| `privacy-datamap:scan` and `:diff` | `read:datamaps` — and nothing else |
+| `privacy-datamap:push` | adds `write:datamaps` |
 
 ## Headless use
 
@@ -60,7 +68,34 @@ python3 plugins/ai-inventory/scripts/validate_manifest.py .noru/ai-inventory.yml
 Exit codes: `0` success · `1` the thing being checked is wrong (drift, invalid manifest, missing
 input) · `2` you called it wrong, including a push without `--confirm`.
 
-The `:diff` and `:push` steps still need the MCP state snapshot, which an agent session produces.
-A fully headless run — scan, validate, diff, fail-or-push, with a scoped machine key — is not there
-yet; today `collect.mjs --check` is the part that already works and is enough to fail a build on
-drift.
+`scripts/ci_check.py` orchestrates the whole sequence, and
+[`.github/actions/noru-ci`](../../.github/actions/noru-ci/) wraps it for GitHub:
+
+```bash
+python3 scripts/ci_check.py --piece=ai-inventory --mode=warn
+```
+
+Its exit codes are more specific than the per-tool ones above, so a pipeline can react to each gate
+without parsing text: `3` drift · `4` an expired interpretation or one outside the declared cadence
+· `5` the manifest failed validation · `6` a check could not run at all. That last one is not
+suppressed by `--mode=warn`, on purpose — a broken gate should be loud while its findings are still
+advisory.
+
+How far headless actually goes, step by step:
+
+| Step | Headless today | What it needs |
+|---|---|---|
+| `scan`, `validate`, `expiry` | **yes, fully** | nothing — no network, no credential, so it runs on a fork pull request |
+| `diff` | yes, *given* a state snapshot | `.noru/.cache/noru-state.json`. `ci_check.py` does not fetch it; something has to call the piece's read tools over MCP first. Without it the step reports `skipped` and the build stays green |
+| `push` | depends on the piece | `NORU_API_KEY` present in the environment. `evidence-push` completes its own write over REST. The MCP pieces emit an ordered call list to `.noru/.cache/<piece>.calls.json`, which still needs an MCP client to execute |
+
+So the honest summary is narrower than "not there yet": the offline half is done and already gates
+builds. What is missing is state acquisition and MCP call execution without an agent session — two
+specific gaps, not the whole pipeline.
+
+`ci_check.py` never reads the value of `NORU_API_KEY`. Its *presence* decides whether the push step
+can run; the value is passed through the environment to the piece's own push entrypoint, and every
+step that does not need it runs with the variable removed from its child environment.
+
+Exit codes, warn-only adoption, the GitHub Action's inputs and the GitLab and plain-shell recipes:
+[docs/ci-mode.md](../ci-mode.md).
