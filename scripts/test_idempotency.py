@@ -9,8 +9,8 @@ covering half of them launders an untested piece as tested, which is worse than 
 would write, so this asserts the real thing: **if the writes we planned actually happened, does the
 next run correctly decide there is nothing to do?**
 
-This cannot replace running against a live organization — see docs/verification.md for the steps
-that need credentials. What it does replace is the class of idempotency bug that survives review
+This cannot replace running against a live organization — see the Maturity section of
+docs/verification.md. What it does replace is the class of idempotency bug that survives review
 because nobody re-ran the command twice.
 
 Usage:

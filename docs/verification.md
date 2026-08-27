@@ -57,64 +57,22 @@ The contract test has also been checked in the other direction — it was confir
 collector is made non-deterministic, when a hardcoded evidence list is added to a plugin, and when
 the `--confirm` gate is removed. A test that has never failed is not yet a test.
 
-## Not verified — needs a live Noru organization
+## Maturity
 
-**None of the following has been run.** Every one of them needs credentials against a real org, and
-each is a place where a fixture can be right and reality wrong.
+These pieces are **reviewed and internally consistent, not field-tested.** Everything above is
+proven against fixtures on every build; none of it has been exercised against a live organization
+at production scale. Treat a first run as something to check, not something to trust:
 
-1. **Run `ai-inventory` against a large real codebase.** Run `:scan` and hand-check the output
-   against the AI systems known to exist in it. The collector's recall against a real polyglot
-   codebase is unproven; it will certainly miss a provider reached through a hand-rolled HTTP client.
+- A collector's recall against a large polyglot codebase is unproven. It will miss a provider
+  reached through a hand-rolled HTTP client.
+- The Article 50 disclosure states are a *repository* fact. Whether that fact matches the running
+  product — a notice injected by a design system, a disclosure that lives in another repo — is
+  exactly what a scan cannot see. Check both directions by hand the first time.
+- `governance-records`' extractor has only met documents written to its own conventions. A real
+  minute book will not be.
+- The filename-to-expectation matcher in `evidence-push` has only met fixture catalogues.
 
-   Check the Article 50 path specifically, and check it in both directions. Every surface a person
-   interacts with must come back as a trigger with a disclosure state attached, and the state must
-   be right: a `present` that is really a disclosure somewhere else in the product, or an `absent`
-   for a notice a design system injects, are the two ways this check fails quietly. The states the
-   collector reports are a repository fact — `test_collectors.py` proves the rule it applies — and
-   whether that fact matches the running product is exactly what has not been checked.
-
-2. **`:diff` against a dev org with a scoped key.** Confirm the delta is correct and non-empty, and
-   that nothing is written. In particular confirm the state-snapshot shape the commands document
-   matches what `getOrganizationAssets`, `getOrganizationVendors`, `getOrganizationEvidence` and
-   `getOrganizationControls` actually return.
-
-3. **`:push`, then re-scan and re-push unchanged.** The second run must be a no-op *against the real
-   API*. Assert it with `getOrganizationAssets` counts and `updatedAt`. `test_idempotency.py` proves
-   the client-side logic; it cannot prove the API behaves the way its documentation describes.
-   Specifically unproven: that MCP `createAsset` really upserts on `(source, externalId)` rather
-   than creating a second record, as the published upsert behaviour says it does.
-
-4. **The landing shape.** Confirm assets, vendors and evidence appear in the app as intended, that
-   evidence links to the `iso_42001` / `eu_ai_act` controls, and that provenance shows repo and
-   commit. If the shape is wrong, fixing it after v0.1 is a breaking change to a published contract.
-
-5. **`evidence-push` against a real organization's queue.** Confirm `:scan` lists genuinely unmet
-   expectations drawn from `getEvidenceItems` / `getControlContext` for a sample of controls; upload
-   one artifact; confirm it links to the right control and satisfies the catalogue item; then re-run
-   and confirm no duplicate. The filename-to-title matcher has never met a real catalogue.
-
-6. **The `client_probe` fallback under real conditions.** Both pieces probe for a content marker in
-   an evidence description, because no idempotency key is documented for evidence. Confirm
-   `getOrganizationEvidence`'s `search` filter actually matches on description text at the volumes a
-   real org has, and that the marker survives a round trip through the app unchanged.
-
-7. **`governance-records` against a real organization's queue.** Confirm `:scan` lists genuinely
-   unmet expectations; file one record; confirm it links to the right control and that the extracted
-   participants, decisions and actions read correctly against the source document. The extractor has
-   only ever met documents written to its own conventions — a real minute book will not be.
-
-8. **`review-signoff`'s second queue half.** Confirm `getEvidenceForControl` really reports expiry
-   and status for linked evidence at a volume worth filtering, so "which sign-offs have lapsed" is
-   answerable without pulling the whole register. Then push one sign-off and confirm the
-   `updateEvidence` call actually lands the expiry on the record: if it does not, the piece's central
-   claim is in the text and missing from the register.
-
-9. **The dependent call in `review-signoff:push`.** The expiry is set on a record whose id only
-   exists after the preceding call returns. `test_idempotency.py` proves the emitted `depends_on`
-   points at a call in the same push; it cannot prove a client substitutes it correctly. Watch one
-   real push do it.
-
-Until these are done, treat the pieces as reviewed and internally consistent, not as field-tested.
+Run `:diff` before your first `:push`, and read it.
 
 ## Known gaps, stated rather than discovered later
 
@@ -126,10 +84,10 @@ Until these are done, treat the pieces as reviewed and internally consistent, no
 - **No piece is `mode: single_call`.** Every one fans out several individually-keyed writes because
   the published API offers no single ingest operation for these artifacts. Every one declares
   `collapses_to`.
-- **`review-signoff` needs two calls where one would do.** The published `createEvidence` input
-  fields do not include an expiry, so the sign-off's expiry is set by a second, dependent call. An
-  expiry that could be set at creation time would remove the dependency and the whole class of
-  half-applied sign-off that comes with it.
+- **`review-signoff` sets its expiry in a second, dependent call.** The published `createEvidence`
+  input fields do not carry an expiry, so the record is created first and the expiry applied to it
+  afterwards. A push interrupted between the two leaves a sign-off without its expiry; re-running
+  the piece repairs it.
 - **`governance-records` creates rather than updates when an account is rewritten.** The marker
   includes a digest of the rendered record, so re-filed minutes become a second record. For an
   account of a meeting that is arguably correct — an auditor should see both — but it is a

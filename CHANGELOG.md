@@ -157,5 +157,5 @@ First public release.
   `piece.json`.
 - Both pieces are `mode: keyed_upsert` rather than a single ingest call, because the published API
   offers no single ingest operation for these artifacts. Both declare `collapses_to`.
-- The live-organization verification steps in [docs/verification.md](./docs/verification.md) have
-  not been run.
+- These pieces are reviewed and internally consistent, not field-tested against a live
+  organization. See [Maturity](./docs/verification.md#maturity).
