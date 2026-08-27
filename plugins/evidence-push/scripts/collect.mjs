@@ -192,7 +192,16 @@ export function scanArtifacts(repo, artifactDir, queue) {
 }
 
 export function digestOf(derived) {
-  return createHash("sha256").update(JSON.stringify(derived, null, 0)).digest("hex");
+  // `generated_by` is deliberately NOT hashed. This digest answers one question — has the
+  // repository changed since the manifest was written? — and the version of the tool that read it
+  // is not a fact about the repository.
+  //
+  // Hashing it made a plugin upgrade indistinguishable from a schema change: every committed
+  // manifest reported drift on the next run and CI mode failed with exit 3, for repositories where
+  // nothing had moved. It stays in the derived file, and in the manifest, as provenance.
+  const { generated_by, ...facts } = derived;
+  void generated_by;
+  return createHash("sha256").update(JSON.stringify(facts, null, 0)).digest("hex");
 }
 
 // --- minimal deterministic YAML emitter (same shape as the ai-inventory collector) -------------

@@ -6,6 +6,30 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Fixed
+
+- **The collector's own version is no longer part of the derived digest** (#17). `generated_by` was
+  inside the object every `digestOf()` hashes, so bumping a plugin changed the digest of every
+  repository that had already run `:scan` — a plugin upgrade was indistinguishable from a schema
+  change, reporting drift where nothing drifted and failing CI mode with exit `3` on upgrade day.
+  It stays in the derived facts and in the manifest as provenance; it is simply not hashed. The
+  digest answers one question — has the repository changed? — and the version of the tool that read
+  it is not a fact about the repository.
+
+  **Breaking, once.** Every digest changes with this release, because the hashed input changed.
+  On upgrading, each piece will report drift on a manifest that was accurate a moment earlier.
+  Re-run `:scan`, confirm nothing else moved, and commit the new `derived_digest`. This is the last
+  time a version bump will do that, which is the point of the change.
+
+  Asserted for all seven collectors rather than the one it was found in, since they carry a
+  byte-identical `digestOf()` and fixing one is not fixing the property. The test also checks that
+  an absent `generated_by` hashes the same as a present one, so the exclusion cannot be
+  inconsistent.
+
+  This also removes the reason the `0.2.0` release pinned every collector's `VERSION` constant at
+  `0.1.0` while the distribution moved to `0.2.0`. Bumping it is now free, and can happen whenever
+  the next release does.
+
 ## 0.2.0 — 2026-08-27
 
 The release that adds `audit-pack`, `iac-scan`, `governance-records`, `review-signoff` and
