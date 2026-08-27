@@ -1,6 +1,6 @@
 {
   "name": "evidence-push",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Work Noru's own evidence queue: see which catalogue expectations are unmet, stage local artifacts against them, and upload with control mappings.",
   "author": {
     "name": "Noru",

@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "iac-scan",
   "displayName": "Noru IaC Scan",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Scan the Terraform, CloudFormation, Kubernetes and CI configuration a repository actually contains, decide what each finding means in this environment, and land the result in Noru as security findings — closing the ones that no longer reproduce.",
   "author": {
     "name": "Noru",
