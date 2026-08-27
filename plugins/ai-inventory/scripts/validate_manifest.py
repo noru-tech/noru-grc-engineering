@@ -280,7 +280,9 @@ ART5_ARTICLE_RE = re.compile(r"^Article 5\(1\)\([a-h]\)$")
 
 TOP_LEVEL_KEYS = {"version", "piece", "source", "ai_systems", "providers", "findings"}
 SOURCE_KEYS = {"slug", "commit_sha", "branch", "generated_by", "derived_digest"}
-INTERPRETATION_KEYS = {"owner", "decided_at", "expires_at", "rationale", "refs"}
+INTERPRETATION_KEYS = {
+    "owner", "decided_at", "expires_at", "next_review_due", "rationale", "refs",
+}
 SYSTEM_KEYS = {
     "key", "name", "purpose", "provider", "models", "deployment", "autonomy",
     "human_oversight", "inputs", "outputs", "retrieval", "evals", "data_categories",
@@ -323,8 +325,9 @@ TRIGGER_REQUIRED_ACTION = {
     "public_interest_text": {"disclose_artificial_content"},
 }
 
-# Claim kinds whose truth depends on a configuration that can silently change. Contract
-# requirement 8 scopes expiry to exactly these; a procedural claim may omit expires_at.
+# Claim kinds whose truth depends on a configuration that can silently change. Requirement 8
+# scopes `expires_at` to exactly these. A procedural claim may name `next_review_due` instead --
+# same intent, a date a validator can compare -- but naming neither is an error, not a warning.
 TECHNICAL_CLAIM_KINDS = {"no_training", "zero_retention", "retention_period", "data_residency"}
 
 
@@ -387,7 +390,7 @@ def check_interpretation(rep, path, obj, expiry_required):
     if not owner or not isinstance(owner, str) or len(owner) < 3:
         rep.err(f"{ipath}.owner", "missing or too short — must name a person, not a team alias")
 
-    for field in ("decided_at", "expires_at"):
+    for field in ("decided_at", "expires_at", "next_review_due"):
         value = block.get(field)
         if value is None:
             continue
@@ -411,10 +414,12 @@ def check_interpretation(rep, path, obj, expiry_required):
                 "missing required `expires_at` — this is a technical claim, and a technical claim "
                 "goes stale when the configuration behind it changes",
             )
-        else:
-            rep.warn(
+        elif block.get("next_review_due") is None:
+            rep.err(
                 f"{ipath}.expires_at",
-                "no expiry set; acceptable only for a genuinely point-in-time claim",
+                "no `expires_at` and no `next_review_due` — a procedural claim runs on a review "
+                "cadence, so say when someone must look at this again. An open-ended claim is one "
+                "nobody will ever revisit",
             )
 
     if isinstance(block.get("refs"), list):

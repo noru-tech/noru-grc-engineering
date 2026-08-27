@@ -22,6 +22,7 @@ providers:
     interpretation:
       owner: dana.reed@example.com
       decided_at: 2026-08-20
+      next_review_due: 2027-02-01
       rationale: The only image generation provider reachable from the studio at this commit.
 ai_systems:
   - key: image-composer

@@ -84,7 +84,7 @@ training, board oversight) are legitimately point-in-time on a review cadence; t
 
 That carve-out was written before anything was built on it, and "if the rationale says why" turned
 out to be unenforceable — no validator can read a sentence and decide whether it earned an omission.
-Two pieces now sit at opposite ends of the rule, and both are stricter than the prose was:
+All three pieces that carry claims now sit inside the rule, and each is stricter than the prose was:
 
 - `governance-records` accepts an omitted `expires_at` **only** when the record carries
   `next_review_due` instead. Same intent as the carve-out, but a date a validator can check, and a
@@ -92,6 +92,11 @@ Two pieces now sit at opposite ends of the rule, and both are stricter than the 
 - `review-signoff` makes `expires_at` **required**, and additionally requires it to fall inside the
   window the review's declared `cadence` implies. A quarterly review signed off for two years is not
   a quarterly review, and nothing else in the manifest would ever say so.
+- `ai-inventory` requires `expires_at` on a technical claim — a "zero data retention" configuration
+  goes stale when the configuration changes — and accepts `next_review_due` in its place on a
+  procedural one. Naming neither is an error. This last case was a warning until the rule above was
+  written, and the warning was doing nothing: every valid fixture in the piece had an open-ended
+  claim in it, and tightening the check is what surfaced them.
 
 The general rule the two agree on: **a claim must name the date it stops being current, in some
 field the validator can compare.** Whether that field is `expires_at` or a cadence-shaped substitute

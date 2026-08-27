@@ -54,7 +54,6 @@ providers:
         interpretation:
           owner: sam.okafor@example.com
           decided_at: 2026-03-20
-          next_review_due: 2027-02-01
           rationale: >
             Procedural obligation reviewed on the contract renewal cadence rather than on a
             technical expiry, so no expires_at is set.

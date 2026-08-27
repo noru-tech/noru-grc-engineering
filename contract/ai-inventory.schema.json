@@ -5,39 +5,65 @@
   "description": "A reviewable, git-committable inventory of the AI systems a repository contains, the model providers it calls, and the findings those two produce. Every finding carries the repository evidence that produced it (refs) and the human who stands behind it (interpretation). Enforced by plugins/ai-inventory/scripts/validate_manifest.py.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "piece", "source", "ai_systems"],
+  "required": [
+    "version",
+    "piece",
+    "source",
+    "ai_systems"
+  ],
   "properties": {
     "version": {
       "description": "Manifest format version, written by the piece that produced the derived section.",
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+$"
     },
-    "piece": { "const": "ai-inventory" },
-    "source": { "$ref": "#/$defs/source" },
+    "piece": {
+      "const": "ai-inventory"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
     "ai_systems": {
       "type": "array",
-      "items": { "$ref": "#/$defs/aiSystem" }
+      "items": {
+        "$ref": "#/$defs/aiSystem"
+      }
     },
     "providers": {
       "type": "array",
-      "items": { "$ref": "#/$defs/provider" }
+      "items": {
+        "$ref": "#/$defs/provider"
+      }
     },
-    "findings": { "$ref": "#/$defs/findings" }
+    "findings": {
+      "$ref": "#/$defs/findings"
+    }
   },
   "$defs": {
     "source": {
       "description": "Provenance carried into Noru on every write this manifest produces.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["slug", "commit_sha", "branch", "generated_by"],
+      "required": [
+        "slug",
+        "commit_sha",
+        "branch",
+        "generated_by"
+      ],
       "properties": {
         "slug": {
           "description": "Stable identifier for this repository, unique per organization (for example acme/platform). Mirrors the `slug` argument of Noru's published ingestDatamap tool.",
           "type": "string",
           "minLength": 1
         },
-        "commit_sha": { "type": "string", "minLength": 7 },
-        "branch": { "type": "string", "minLength": 1 },
+        "commit_sha": {
+          "type": "string",
+          "minLength": 7
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
         "generated_by": {
           "description": "piece@version that wrote the derived section.",
           "type": "string",
@@ -58,13 +84,19 @@
     "refs": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/ref" }
+      "items": {
+        "$ref": "#/$defs/ref"
+      }
     },
     "interpretation": {
       "description": "Requirement 8. Who decided this, when, until when, and why. A claim without one is a validator error, not a warning.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["owner", "decided_at", "rationale"],
+      "required": [
+        "owner",
+        "decided_at",
+        "rationale"
+      ],
       "properties": {
         "owner": {
           "description": "A person, not a team alias or a tool. Email or a Noru personnel/user id.",
@@ -80,8 +112,18 @@
           "type": "string",
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
-        "rationale": { "type": "string", "minLength": 10 },
-        "refs": { "$ref": "#/$defs/refs" }
+        "rationale": {
+          "type": "string",
+          "minLength": 10
+        },
+        "refs": {
+          "$ref": "#/$defs/refs"
+        },
+        "next_review_due": {
+          "description": "When someone must look at this claim again. The alternative to `expires_at` for a procedural claim, which does not go stale on its own but still needs a cadence. A claim with neither is rejected.",
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
       }
     },
     "aiSystem": {
@@ -102,8 +144,14 @@
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9._-]*$"
         },
-        "name": { "type": "string", "minLength": 1 },
-        "purpose": { "type": "string", "minLength": 10 },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 10
+        },
         "provider": {
           "description": "Key of an entry in providers[].",
           "type": "string"
@@ -111,34 +159,62 @@
         "models": {
           "description": "Concrete model identifiers as they appear in the code.",
           "type": "array",
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "deployment": {
-          "enum": ["hosted_api", "self_hosted", "on_device", "embedded_library"]
+          "enum": [
+            "hosted_api",
+            "self_hosted",
+            "on_device",
+            "embedded_library"
+          ]
         },
         "autonomy": {
           "description": "assistive = output is shown to a person who acts. supervised = the system acts but a person approves first. autonomous = the system acts without a person in the loop.",
-          "enum": ["assistive", "supervised", "autonomous"]
+          "enum": [
+            "assistive",
+            "supervised",
+            "autonomous"
+          ]
         },
         "human_oversight": {
           "type": "array",
-          "items": { "$ref": "#/$defs/oversightPoint" }
+          "items": {
+            "$ref": "#/$defs/oversightPoint"
+          }
         },
-        "inputs": { "$ref": "#/$defs/dataFlow" },
-        "outputs": { "$ref": "#/$defs/dataFlow" },
+        "inputs": {
+          "$ref": "#/$defs/dataFlow"
+        },
+        "outputs": {
+          "$ref": "#/$defs/dataFlow"
+        },
         "retrieval": {
           "description": "Retrieval sources and vector stores this system reads from.",
           "type": "array",
-          "items": { "$ref": "#/$defs/retrievalSource" }
+          "items": {
+            "$ref": "#/$defs/retrievalSource"
+          }
         },
-        "evals": { "$ref": "#/$defs/evals" },
+        "evals": {
+          "$ref": "#/$defs/evals"
+        },
         "data_categories": {
           "description": "Fideslang data category keys, from the bundled snapshot in plugins/ai-inventory/references/taxonomy/. Using the published Fideslang taxonomy keeps data-category vocabulary consistent across manifests.",
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "refs": { "$ref": "#/$defs/refs" },
-        "interpretation": { "$ref": "#/$defs/interpretation" },
+        "refs": {
+          "$ref": "#/$defs/refs"
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        },
         "needs_review": {
           "description": "Set by the collector on any field it could not derive. A manifest is not ready to push while this is true.",
           "type": "boolean"
@@ -148,7 +224,11 @@
     "oversightPoint": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "description", "refs"],
+      "required": [
+        "type",
+        "description",
+        "refs"
+      ],
       "properties": {
         "type": {
           "enum": [
@@ -160,29 +240,55 @@
             "none"
           ]
         },
-        "description": { "type": "string", "minLength": 5 },
-        "refs": { "$ref": "#/$defs/refs" }
+        "description": {
+          "type": "string",
+          "minLength": 5
+        },
+        "refs": {
+          "$ref": "#/$defs/refs"
+        }
       }
     },
     "dataFlow": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "description": { "type": "string" },
+        "description": {
+          "type": "string"
+        },
         "data_categories": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "sources": { "type": "array", "items": { "type": "string" } },
-        "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } }
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        }
       }
     },
     "retrievalSource": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "kind", "refs"],
+      "required": [
+        "name",
+        "kind",
+        "refs"
+      ],
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
         "kind": {
           "enum": [
             "vector_store",
@@ -195,26 +301,47 @@
         },
         "data_categories": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "refs": { "$ref": "#/$defs/refs" }
+        "refs": {
+          "$ref": "#/$defs/refs"
+        }
       }
     },
     "evals": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["suites", "ci_gated"],
+      "required": [
+        "suites",
+        "ci_gated"
+      ],
       "properties": {
         "suites": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "path"],
+            "required": [
+              "name",
+              "path"
+            ],
             "properties": {
-              "name": { "type": "string", "minLength": 1 },
-              "path": { "type": "string", "minLength": 1 },
-              "measures": { "type": "array", "items": { "type": "string" } }
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "measures": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
             }
           }
         },
@@ -222,13 +349,23 @@
           "description": "Whether a CI workflow fails when these evals fail. An eval suite nothing gates on is not a control.",
           "type": "boolean"
         },
-        "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } }
+        "refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        }
       }
     },
     "provider": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["key", "vendor_name", "refs", "interpretation"],
+      "required": [
+        "key",
+        "vendor_name",
+        "refs",
+        "interpretation"
+      ],
       "properties": {
         "key": {
           "type": "string",
@@ -254,22 +391,38 @@
         },
         "endpoints": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "claims": {
           "description": "Retention, training and residency claims. Each one must say where it came from. We have already been bitten by an unverified provider zero-retention claim; provenance here is mandatory for that reason.",
           "type": "array",
-          "items": { "$ref": "#/$defs/providerClaim" }
+          "items": {
+            "$ref": "#/$defs/providerClaim"
+          }
         },
-        "dpa_reference": { "type": "string" },
-        "refs": { "$ref": "#/$defs/refs" },
-        "interpretation": { "$ref": "#/$defs/interpretation" }
+        "dpa_reference": {
+          "type": "string"
+        },
+        "refs": {
+          "$ref": "#/$defs/refs"
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        }
       }
     },
     "providerClaim": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "value", "source", "interpretation"],
+      "required": [
+        "kind",
+        "value",
+        "source",
+        "interpretation"
+      ],
       "properties": {
         "kind": {
           "enum": [
@@ -281,16 +434,25 @@
             "subprocessor_list"
           ]
         },
-        "value": { "type": "string", "minLength": 1 },
-        "source": { "$ref": "#/$defs/claimSource" },
-        "interpretation": { "$ref": "#/$defs/interpretation" }
+        "value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "$ref": "#/$defs/claimSource"
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        }
       }
     },
     "claimSource": {
-      "description": "Where the claim came from. repo_config means a flag in our own code; the other kinds are the provider's word, and 'the provider says so' is a weaker claim than 'we configured it' — the distinction is the point of this field.",
+      "description": "Where the claim came from. repo_config means a flag in our own code; the other kinds are the provider's word, and 'the provider says so' is a weaker claim than 'we configured it' \u2014 the distinction is the point of this field.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "properties": {
         "type": {
           "enum": [
@@ -305,8 +467,12 @@
           "description": "file:line when type is repo_config.",
           "$ref": "#/$defs/ref"
         },
-        "url": { "type": "string" },
-        "document": { "type": "string" },
+        "url": {
+          "type": "string"
+        },
+        "document": {
+          "type": "string"
+        },
         "retrieved_on": {
           "type": "string",
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
@@ -315,7 +481,11 @@
     },
     "findingStatus": {
       "description": "Always starts as suggested. A human moves it to accepted or rejected; the piece never sets those itself.",
-      "enum": ["suggested", "accepted", "rejected"]
+      "enum": [
+        "suggested",
+        "accepted",
+        "rejected"
+      ]
     },
     "needsReview": {
       "description": "Set by the collector on a finding it proposed but could not decide. A manifest is not ready to push while this is true.",
@@ -334,22 +504,30 @@
         "prohibited_practices": {
           "description": "Article 5. Rare, and the only category where the correct outcome is to stop, not to document.",
           "type": "array",
-          "items": { "$ref": "#/$defs/prohibitedPracticeFinding" }
+          "items": {
+            "$ref": "#/$defs/prohibitedPracticeFinding"
+          }
         },
         "transparency_obligations": {
           "description": "Article 50. A trigger alone is not the finding: the finding is whether the required disclosure or content marking is actually present.",
           "type": "array",
-          "items": { "$ref": "#/$defs/transparencyFinding" }
+          "items": {
+            "$ref": "#/$defs/transparencyFinding"
+          }
         },
         "role_and_risk": {
           "description": "Role under the Regulation and risk tier. Kept, but not led with: its obligations apply from the date each finding states in enforceable_from.",
           "type": "array",
-          "items": { "$ref": "#/$defs/roleAndRiskFinding" }
+          "items": {
+            "$ref": "#/$defs/roleAndRiskFinding"
+          }
         },
         "standards_alignment": {
           "description": "ISO/IEC 42001 references and NIST AI RMF function tags.",
           "type": "array",
-          "items": { "$ref": "#/$defs/standardsFinding" }
+          "items": {
+            "$ref": "#/$defs/standardsFinding"
+          }
         }
       }
     },
@@ -391,17 +569,29 @@
         },
         "determination": {
           "description": "indicated = the repository shows something that looks like this practice and the system must stop until counsel says otherwise. needs_legal_review = a signal was found and it is genuinely unclear. no_indication = the screen ran and found nothing.",
-          "enum": ["indicated", "needs_legal_review", "no_indication"]
+          "enum": [
+            "indicated",
+            "needs_legal_review",
+            "no_indication"
+          ]
         },
         "action": {
           "description": "What happens next. Required unless the determination is no_indication, because 'stop' is an instruction and an instruction needs an addressee.",
           "type": "string",
           "minLength": 10
         },
-        "status": { "$ref": "#/$defs/findingStatus" },
-        "needs_review": { "$ref": "#/$defs/needsReview" },
-        "refs": { "$ref": "#/$defs/refs" },
-        "interpretation": { "$ref": "#/$defs/interpretation" }
+        "status": {
+          "$ref": "#/$defs/findingStatus"
+        },
+        "needs_review": {
+          "$ref": "#/$defs/needsReview"
+        },
+        "refs": {
+          "$ref": "#/$defs/refs"
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        }
       }
     },
     "transparencyFinding": {
@@ -424,7 +614,7 @@
           "type": "string"
         },
         "trigger": {
-          "description": "What brings the system inside Article 50. emotion_recognition and biometric_categorisation are the Regulation's defined terms, which are grounded in biometric data — sentiment analysis of text is not one of them.",
+          "description": "What brings the system inside Article 50. emotion_recognition and biometric_categorisation are the Regulation's defined terms, which are grounded in biometric data \u2014 sentiment analysis of text is not one of them.",
           "enum": [
             "direct_human_interaction",
             "synthetic_content_generation",
@@ -434,7 +624,9 @@
             "public_interest_text"
           ]
         },
-        "article": { "$ref": "#/$defs/articleRef" },
+        "article": {
+          "$ref": "#/$defs/articleRef"
+        },
         "required_action": {
           "description": "What the cited paragraph requires. Marking under Article 50(2) is machine-readable and about the output; informing under Article 50(1) and 50(3) is about the person. A visible label is not a machine-readable mark, and the two are not interchangeable.",
           "enum": [
@@ -445,24 +637,43 @@
         },
         "applies_to_role": {
           "description": "Which role the cited paragraph puts the duty on.",
-          "enum": ["provider", "deployer"]
+          "enum": [
+            "provider",
+            "deployer"
+          ]
         },
-        "disclosure": { "$ref": "#/$defs/disclosureCheck" },
-        "status": { "$ref": "#/$defs/findingStatus" },
-        "needs_review": { "$ref": "#/$defs/needsReview" },
-        "refs": { "$ref": "#/$defs/refs" },
-        "interpretation": { "$ref": "#/$defs/interpretation" }
+        "disclosure": {
+          "$ref": "#/$defs/disclosureCheck"
+        },
+        "status": {
+          "$ref": "#/$defs/findingStatus"
+        },
+        "needs_review": {
+          "$ref": "#/$defs/needsReview"
+        },
+        "refs": {
+          "$ref": "#/$defs/refs"
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        }
       }
     },
     "disclosureCheck": {
       "description": "Whether the required disclosure or marking is present. This is the piece's highest-value output and the reason an Article 50 finding is not just a label.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["state"],
+      "required": [
+        "state"
+      ],
       "properties": {
         "state": {
           "description": "present = the code that runs the model also emits the disclosure or the mark. unclear = something that looks like a disclosure exists somewhere, but nothing ties it to this surface. absent = nothing was found in the places listed under searched.",
-          "enum": ["present", "unclear", "absent"]
+          "enum": [
+            "present",
+            "unclear",
+            "absent"
+          ]
         },
         "mechanism": {
           "description": "How the disclosure or mark is produced, in a sentence. Required when the state is present.",
@@ -477,12 +688,17 @@
         "searched": {
           "description": "Where the check looked. Required when the state is absent, because 'absent' is only ever absent from somewhere: a disclosure rendered by a design system, a CMS, a mobile client or another repository is invisible to a repository scan, and saying so is the difference between a gap and a wrong accusation.",
           "type": "array",
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "refs": {
           "description": "file:line of the disclosure or marking evidence found. Required when the state is present or unclear.",
           "type": "array",
-          "items": { "$ref": "#/$defs/ref" }
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
         }
       }
     },
@@ -517,7 +733,9 @@
             "authorised_representative"
           ]
         },
-        "role_article": { "$ref": "#/$defs/articleRef" },
+        "role_article": {
+          "$ref": "#/$defs/articleRef"
+        },
         "tier": {
           "description": "The terms 'limited risk' and 'minimal risk' are commentary shorthand rather than terms of the Regulation, so they are not here: the transparency duties they usually stand for are their own finding category.",
           "enum": [
@@ -529,7 +747,9 @@
             "undetermined"
           ]
         },
-        "tier_article": { "$ref": "#/$defs/articleRef" },
+        "tier_article": {
+          "$ref": "#/$defs/articleRef"
+        },
         "annex_iii_area": {
           "description": "Which Annex III area the system falls in, or none where the screen concluded it falls in no area.",
           "enum": [
@@ -544,23 +764,37 @@
             "justice_and_democratic_processes"
           ]
         },
-        "not_high_risk_assessment": { "$ref": "#/$defs/notHighRiskAssessment" },
+        "not_high_risk_assessment": {
+          "$ref": "#/$defs/notHighRiskAssessment"
+        },
         "enforceable_from": {
           "description": "The date from which the obligations that follow from this tier apply to this system. Required, and the rationale should cite the provision that sets it. This field exists so that a finding serving a future deadline cannot be presented as due today.",
           "type": "string",
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
-        "status": { "$ref": "#/$defs/findingStatus" },
-        "needs_review": { "$ref": "#/$defs/needsReview" },
-        "refs": { "$ref": "#/$defs/refs" },
-        "interpretation": { "$ref": "#/$defs/interpretation" }
+        "status": {
+          "$ref": "#/$defs/findingStatus"
+        },
+        "needs_review": {
+          "$ref": "#/$defs/needsReview"
+        },
+        "refs": {
+          "$ref": "#/$defs/refs"
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        }
       }
     },
     "notHighRiskAssessment": {
       "description": "The Article 6(3) assessment, required where the conclusion is that an Annex III system is not high-risk. Recording the ground and the profiling answer is what makes the conclusion reviewable rather than asserted.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["ground", "profiling", "article"],
+      "required": [
+        "ground",
+        "profiling",
+        "article"
+      ],
       "properties": {
         "ground": {
           "description": "Which of the Article 6(3) conditions the conclusion rests on.",
@@ -575,10 +809,14 @@
           "description": "Whether the system performs profiling of natural persons. Article 6(3) does not allow the not-high-risk conclusion where it does, so this is a gate rather than a note.",
           "type": "boolean"
         },
-        "article": { "$ref": "#/$defs/articleRef" },
+        "article": {
+          "$ref": "#/$defs/articleRef"
+        },
         "refs": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ref" }
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
         }
       }
     },
@@ -586,13 +824,25 @@
       "description": "A management-system or framework alignment tag. No control text is vendored here; the reference is a citation the reader resolves in the standard itself.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["system", "scheme", "value", "status", "refs", "interpretation"],
+      "required": [
+        "system",
+        "scheme",
+        "value",
+        "status",
+        "refs",
+        "interpretation"
+      ],
       "properties": {
         "system": {
           "description": "key of an entry in ai_systems[].",
           "type": "string"
         },
-        "scheme": { "enum": ["iso_42001", "nist_ai_rmf"] },
+        "scheme": {
+          "enum": [
+            "iso_42001",
+            "nist_ai_rmf"
+          ]
+        },
         "value": {
           "description": "For nist_ai_rmf, one of the four functions. For iso_42001, free text naming what the system evidences.",
           "type": "string",
@@ -602,10 +852,18 @@
           "description": "The clause or annex reference in the standard, as a citation only.",
           "type": "string"
         },
-        "status": { "$ref": "#/$defs/findingStatus" },
-        "needs_review": { "$ref": "#/$defs/needsReview" },
-        "refs": { "$ref": "#/$defs/refs" },
-        "interpretation": { "$ref": "#/$defs/interpretation" }
+        "status": {
+          "$ref": "#/$defs/findingStatus"
+        },
+        "needs_review": {
+          "$ref": "#/$defs/needsReview"
+        },
+        "refs": {
+          "$ref": "#/$defs/refs"
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        }
       }
     }
   }

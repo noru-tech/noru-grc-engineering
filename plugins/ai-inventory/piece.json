@@ -14,7 +14,9 @@
     "entrypoint": "scripts/collect.mjs",
     "deterministic": true,
     "network": false,
-    "inputs": [".noru/.cache/noru-state.json"]
+    "inputs": [
+      ".noru/.cache/noru-state.json"
+    ]
   },
   "validator": {
     "entrypoint": "scripts/validate_manifest.py",
@@ -79,6 +81,10 @@
         {
           "path": "fixtures/invalid-art6-3-profiling.ai-inventory.yml",
           "expect_message": "does not allow that conclusion"
+        },
+        {
+          "path": "fixtures/invalid-open-ended-claim.ai-inventory.yml",
+          "expect_message": "no `expires_at` and no `next_review_due`"
         }
       ]
     }
@@ -97,7 +103,10 @@
         "scope": "write:assets",
         "idempotency": {
           "kind": "server_upsert",
-          "key": ["source", "externalId"],
+          "key": [
+            "source",
+            "externalId"
+          ],
           "verified_at": "https://api.noru.tech/llms.txt, \"Idempotency/Upsert Behavior\": an asset whose (source, externalId) already exists in the org returns 200 and is updated in place, otherwise 201 and created. The published createAsset tool description at https://api.noru.tech/v1/mcp says the same: \"Create or update (upsert by externalId)\"."
         }
       },
@@ -107,7 +116,10 @@
         "scope": "write:vendors",
         "idempotency": {
           "kind": "server_dedupe",
-          "key": ["organizationId", "name"],
+          "key": [
+            "organizationId",
+            "name"
+          ],
           "verified_at": "Published createVendor tool description at https://api.noru.tech/v1/mcp: \"If a vendor with the same name already exists, the existing record is returned.\""
         }
       },
@@ -117,7 +129,9 @@
         "scope": "write:evidence",
         "idempotency": {
           "kind": "client_probe",
-          "key": ["description contains marker"],
+          "key": [
+            "description contains marker"
+          ],
           "verified_at": "https://api.noru.tech/llms.txt: the documented \"Idempotency/Upsert Behavior\" covers assets and security findings, and neither it nor the published createEvidence tool description documents an idempotency key for evidence. The piece therefore does not assume one.",
           "gap": "No idempotency key is documented for evidence creation, so the piece does not rely on one being there: it embeds a content marker in the description and probes getOrganizationEvidence with `search` before writing. If a documented idempotency key for evidence, or a single documented ingest operation, becomes available, the probe can be dropped."
         }
@@ -128,7 +142,10 @@
         "scope": "write:evidence",
         "idempotency": {
           "kind": "client_probe",
-          "key": ["evidenceId", "controlId"],
+          "key": [
+            "evidenceId",
+            "controlId"
+          ],
           "verified_at": "Published linkEvidenceToControl tool description at https://api.noru.tech/v1/mcp: it links an evidence record to a control and documents no idempotency key, so the piece checks before linking rather than assuming a repeat is free.",
           "gap": "The published read surface has no call that directly answers 'is this evidence already linked to this control', so the piece reads getControlContext and compares before linking."
         }
@@ -151,13 +168,17 @@
       "read:assets",
       "read:vendors"
     ],
-    "write": ["write:assets", "write:vendors", "write:evidence"]
+    "write": [
+      "write:assets",
+      "write:vendors",
+      "write:evidence"
+    ]
   },
   "queue": {
     "source": [
       {
         "kind": "repository",
-        "note": "The inventory itself is discovered in the repository — that is the whole point of this piece, and it is the one place Noru's server-side integrations cannot see."
+        "note": "The inventory itself is discovered in the repository \u2014 that is the whole point of this piece, and it is the one place Noru's server-side integrations cannot see."
       },
       {
         "kind": "mcp_tool",
