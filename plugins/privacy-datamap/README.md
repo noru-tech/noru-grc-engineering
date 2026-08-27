@@ -154,8 +154,10 @@ schema does. `https://api.noru.tech/llms.txt` documents the `write:datamaps` sco
 
 So `:diff` reads `getPrivacyDataMap` and `listPrivacyDatasets` first and shows you the change set
 rather than asserting what the server will do with it. If that behaviour gets documented as an
-upsert on `slug`, this becomes `server_upsert`, the pre-read goes, and the piece is the shape
-requirement 4 actually asks for.
+upsert on `slug`, this becomes `server_upsert` and the piece is the shape requirement 4 actually
+asks for — the pre-read stays either way, because `:diff` has to read Noru's current state whatever
+the guarantee is. Tracked at
+[#15](https://github.com/noru-tech/noru-grc-engineering/issues/15).
 
 A second `:scan` + `:diff` on unchanged input must produce a plan of all `skip`. If it does
 not, that is a bug — `scripts/test_idempotency.py` asserts it.
