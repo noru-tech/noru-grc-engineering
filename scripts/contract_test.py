@@ -197,6 +197,33 @@ def check_item_2(piece, decl, fail, workdir):
             "different derived output",
         )
 
+    # A declared output is a deliverable a human is handed, so the one thing that can be checked
+    # from here is that the declaration and the documentation agree. An output nobody documents is
+    # an output nobody knows to look for, and a path that moves without the README moving with it
+    # sends someone to a directory that is no longer there.
+    outputs = decl.get("outputs") or []
+    if outputs:
+        readme = piece / "README.md"
+        if not readme.is_file():
+            fail.add(piece.name, 2, "piece declares outputs but has no README.md to document them in")
+            return
+        text = readme.read_text(encoding="utf-8")
+        for output in outputs:
+            path = output["path"]
+            if path not in text:
+                fail.add(
+                    piece.name, 2,
+                    f"output {path} is declared in piece.json but absent from README.md — the "
+                    "deliverable has to be documented where the person who has to hand it over "
+                    "will look",
+                )
+            if path == decl["artifact"]:
+                fail.add(
+                    piece.name, 2,
+                    f"output {path} is the manifest itself; outputs[] names what a piece renders "
+                    "*besides* the manifest",
+                )
+
 
 def check_item_3(piece, decl, fail):
     """Stdlib-only validator with did-you-mean hints and 0/1/2 exit codes, proven on fixtures."""
