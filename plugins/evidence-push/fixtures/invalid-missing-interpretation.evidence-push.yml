@@ -1,0 +1,33 @@
+# Fixture: an artifact uploaded against an expectation with nobody standing behind the judgement
+# that it satisfies that expectation. So much of what an auditor asks for is exactly "a named person
+# did or approved X on date Y" that this is the common case, not an edge case.
+# Expected: exit 1, "missing required `interpretation`".
+version: 0.1.0
+piece: evidence-push
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: evidence-push@0.1.0
+queue_snapshot:
+  fetched_at: 2026-08-27T09:14:00Z
+  via:
+    - getOrganizationControls
+  controls:
+    - control_id: zz-01
+      display_id: ZZ-01
+      name: Example periodic reconciliation control
+      unmet_evidence_items:
+        - id: E-ZZ-01
+          title: Example Reconciliation Records
+          type: record
+uploads:
+  - file: .noru/artifacts/q2-access-review.pdf
+    sha256: f19f04ccd4f78265f2bc2ca433f49ce7eb415877a7254df93420effa0fe8da50
+    size_bytes: 284915
+    mime_type: application/pdf
+    title: Q2 2026 quarterly access review
+    control_mappings:
+      - control_id: zz-01
+        evidence_item_ids:
+          - E-ZZ-01

@@ -1,0 +1,81 @@
+name: release
+
+# The second — and last — workflow. Resist adding a third until there is traffic that justifies it:
+# a marketplace this small is better served by one gate everyone reads than by six nobody does.
+#
+# A marketplace release is a version bump in several files at once. This runs the full gate again
+# and then asserts the thing CI cannot know on a normal push: that the tag, the marketplace entries
+# and every plugin manifest all agree on one version.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to verify, without the leading v (for example 0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify the release is consistent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: full gate
+        run: |
+          set -euo pipefail
+          python3 scripts/check_repo.py
+          python3 scripts/check_vendored_lib.py
+          python3 scripts/test_validators.py
+          python3 scripts/test_idempotency.py
+          python3 scripts/contract_test.py
+
+      - name: tag, marketplace entries and plugin manifests agree on one version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_VERSION:-}" ]; then
+            version="$INPUT_VERSION"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "expecting version $version"
+          python3 - "$version" <<'PY'
+          import json, pathlib, sys
+
+          expected = sys.argv[1]
+          problems = []
+          marketplace = json.loads(pathlib.Path(".claude-plugin/marketplace.json").read_text())
+          for entry in marketplace["plugins"]:
+              name = entry["name"]
+              if entry.get("version") != expected:
+                  problems.append(
+                      f"marketplace entry '{name}' is {entry.get('version')}, expected {expected}"
+                  )
+              for client in (".claude-plugin", ".codex-plugin"):
+                  path = pathlib.Path(entry["source"]) / client / "plugin.json"
+                  manifest = json.loads(path.read_text())
+                  if manifest.get("version") != expected:
+                      problems.append(f"{path} is {manifest.get('version')}, expected {expected}")
+
+          changelog = pathlib.Path("CHANGELOG.md")
+          if changelog.is_file() and f"## {expected}" not in changelog.read_text():
+              problems.append(f"CHANGELOG.md has no '## {expected}' section")
+
+          for problem in problems:
+              print(f"  FAIL  {problem}")
+          if problems:
+              print(f"\nFAILED: {len(problems)} inconsistency/inconsistencies.")
+              raise SystemExit(1)
+          print(f"OK: every manifest and marketplace entry is at {expected}.")
+          PY

@@ -1,0 +1,30 @@
+noru-grc-engineering
+Copyright (c) 2026 noru.tech
+
+This product includes software developed by Noru (https://noru.tech), licensed under the MIT
+License. See LICENSE.
+
+--------------------------------------------------------------------------------
+Third-party content
+--------------------------------------------------------------------------------
+
+Fideslang taxonomy
+------------------
+Files:   plugins/ai-inventory/references/taxonomy/data_categories.json
+Source:  https://github.com/ethyca/fideslang
+         src/fideslang/default_taxonomy/data_categories.py
+Author:  © Ethyca, Inc.
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+         https://creativecommons.org/licenses/by/4.0/
+
+This is a MODIFIED redistribution: the upstream Python definitions were reformatted to JSON and
+reduced to the `fides_key`, `name` and `description` fields. No other change was made to the
+meaning of any entry.
+
+The taxonomy is used as the bundled data-category vocabulary for the `ai-inventory` validator, so
+that an AI inventory and a Fides privacy data map describe data in the same language.
+
+Snapshot provenance, and how to refresh it, are documented in
+plugins/ai-inventory/references/taxonomy/SOURCE.md.
+
+This repository's own code is MIT-licensed. The taxonomy data directory remains CC BY 4.0.

@@ -1,0 +1,163 @@
+# Fixture: a complete, attributed AI inventory. The validator must exit 0 on this file.
+# Everything here is invented for the test; no customer data, no real credentials, no catalogue ids.
+version: 0.1.0
+piece: ai-inventory
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: ai-inventory@0.1.0
+  derived_digest: 3b1f0c9a7d24e658b0c1a3f57d9e2b846c0f1a2d3e4b5c6d7a8e9f0b1c2d3e4f
+providers:
+  - key: example-llm
+    vendor_name: Example LLM Provider
+    category: software_as_a_service
+    endpoints:
+      - https://api.example-llm.test/v1
+    claims:
+      - kind: zero_retention
+        value: Zero data retention enabled for this account
+        source:
+          type: repo_config
+          ref: packages/inference/src/client.ts:37
+        interpretation:
+          owner: dana.reed@example.com
+          decided_at: 2026-08-01
+          expires_at: 2027-02-01
+          rationale: >
+            The client is constructed with store disabled and the account-level retention setting is
+            asserted in the same module, so the claim is ours to make and ours to keep true.
+      - kind: no_training
+        value: Provider states customer API data is not used for training
+        source:
+          type: vendor_documentation
+          url: https://example-llm.test/legal/data-usage
+          retrieved_on: 2026-08-01
+        interpretation:
+          owner: dana.reed@example.com
+          decided_at: 2026-08-01
+          expires_at: 2027-02-01
+          rationale: >
+            This is the provider's published statement, not something we configured or verified.
+            It is recorded as their word so a reviewer can tell the two kinds of claim apart.
+      - kind: dpa
+        value: DPA executed 2026-03-14, standard contractual clauses annexed
+        source:
+          type: contract
+          document: contracts/example-llm-dpa-2026-03-14.pdf
+        interpretation:
+          owner: sam.okafor@example.com
+          decided_at: 2026-03-20
+          rationale: >
+            Procedural obligation reviewed on the contract renewal cadence rather than on a
+            technical expiry, so no expires_at is set.
+    refs:
+      - packages/inference/src/client.ts:12
+      - packages/inference/src/client.ts:37
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      rationale: >
+        Confirmed this is the only model provider reachable from production code paths as of this
+        commit; reviewed with the platform team.
+ai_systems:
+  - key: support-triage
+    name: Support ticket triage
+    purpose: Classifies inbound support tickets by urgency and routes them to the right queue.
+    provider: example-llm
+    models:
+      - gpt-5-mini
+    deployment: hosted_api
+    autonomy: supervised
+    human_oversight:
+      - type: human_approval_gate
+        description: A support lead approves any routing the model marks as urgent.
+        refs:
+          - apps/support/src/triage/review-queue.ts:88
+      - type: override_or_kill_switch
+        description: The triage path is behind a feature flag that disables it instantly.
+        refs:
+          - apps/support/src/triage/flags.ts:14
+    inputs:
+      description: Ticket body and requester metadata.
+      data_categories:
+        - user.contact.email
+        - user.behavior
+      refs:
+        - apps/support/src/triage/handler.ts:41
+    outputs:
+      description: A queue name and an urgency score written back to the ticket.
+      refs:
+        - apps/support/src/triage/handler.ts:73
+    retrieval:
+      - name: support-articles
+        kind: vector_store
+        data_categories:
+          - system.operations
+        refs:
+          - apps/support/src/triage/retrieval.ts:23
+    evals:
+      suites:
+        - name: triage-accuracy
+          path: apps/support/evals/triage
+          measures:
+            - routing accuracy
+            - urgency false-negative rate
+      ci_gated: true
+      refs:
+        - .github/workflows/evals.yml:19
+    data_categories:
+      - user.contact.email
+      - user.behavior
+    refs:
+      - apps/support/src/triage/handler.ts:41
+      - apps/support/src/triage/handler.ts:73
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      expires_at: 2027-02-01
+      rationale: >
+        Walked the triage path end to end with the support engineering lead and confirmed the
+        approval gate is the only way an urgent routing reaches a customer.
+classifications:
+  - system: support-triage
+    scheme: eu_ai_act_role
+    value: deployer
+    driver: Article 3(4)
+    status: suggested
+    refs:
+      - apps/support/src/triage/handler.ts:41
+    interpretation:
+      owner: sam.okafor@example.com
+      decided_at: 2026-08-02
+      expires_at: 2027-02-02
+      rationale: >
+        We use a third-party model under our own authority rather than placing a system on the
+        market, which is the deployer role; suggested for legal review, not asserted.
+  - system: support-triage
+    scheme: eu_ai_act_tier
+    value: limited_risk
+    driver: Article 50(1)
+    status: suggested
+    refs:
+      - apps/support/src/triage/review-queue.ts:88
+    interpretation:
+      owner: sam.okafor@example.com
+      decided_at: 2026-08-02
+      expires_at: 2027-02-02
+      rationale: >
+        No decision reaches a person without a human approval step and the system does not fall in
+        an Annex III area, so the transparency obligations look like the operative ones.
+  - system: support-triage
+    scheme: nist_ai_rmf
+    value: measure
+    status: suggested
+    refs:
+      - .github/workflows/evals.yml:19
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-02
+      expires_at: 2027-02-02
+      rationale: >
+        CI-gated evals are the measurable half of this system's governance; tagged so the gap in
+        the other three functions is visible.

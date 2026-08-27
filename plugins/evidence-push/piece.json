@@ -1,0 +1,126 @@
+{
+  "$schema": "../../contract/piece.schema.json",
+  "piece": "evidence-push",
+  "contract_version": "0.1.0",
+  "artifact": ".noru/evidence-push.yml",
+  "manifest_schema": "contract/evidence-push.schema.json",
+  "commands": {
+    "scan": "commands/scan.md",
+    "diff": "commands/diff.md",
+    "push": "commands/push.md"
+  },
+  "skill": "skills/evidence-push/SKILL.md",
+  "collector": {
+    "entrypoint": "scripts/collect.mjs",
+    "deterministic": true,
+    "network": false,
+    "inputs": [".noru/.cache/evidence-queue.json", ".noru/artifacts/"]
+  },
+  "validator": {
+    "entrypoint": "scripts/validate_manifest.py",
+    "runtime": "python3-stdlib",
+    "vocabulary": ["references/vocabulary.json"],
+    "suggestions": true,
+    "exit_codes": {
+      "0": "manifest is valid; warnings may be present",
+      "1": "manifest has validation errors",
+      "2": "usage error, unreadable file, or unparseable YAML"
+    },
+    "fixtures": {
+      "valid": ["fixtures/valid.evidence-push.yml"],
+      "invalid": [
+        {
+          "path": "fixtures/invalid-off-queue-control.evidence-push.yml",
+          "expect_message": "is not in the queue snapshot"
+        },
+        {
+          "path": "fixtures/invalid-unknown-mime.evidence-push.yml",
+          "expect_message": "is not accepted by POST /v1/evidence/upload"
+        },
+        {
+          "path": "fixtures/invalid-oversize.evidence-push.yml",
+          "expect_message": "exceeds the 50MB cap"
+        },
+        {
+          "path": "fixtures/invalid-missing-interpretation.evidence-push.yml",
+          "expect_message": "missing required `interpretation`"
+        },
+        {
+          "path": "fixtures/invalid-duplicate-artifact.evidence-push.yml",
+          "expect_message": "the same file content is already uploaded"
+        }
+      ]
+    }
+  },
+  "push": {
+    "entrypoint": "scripts/push.mjs",
+    "mode": "keyed_upsert",
+    "collapses_to": {
+      "tool": "an idempotency-keyed variant of POST /v1/evidence/upload, if one is published",
+      "tracked_at": "https://github.com/noru-tech/noru-grc-engineering/issues"
+    },
+    "operations": [
+      {
+        "name": "POST /v1/evidence/upload",
+        "transport": "rest",
+        "scope": "write:evidence",
+        "idempotency": {
+          "kind": "client_probe",
+          "key": ["description contains marker"],
+          "verified_at": "https://api.noru.tech/llms.txt: \"Evidence Upload Guidance\" documents POST /v1/evidence/upload, its 50MB cap and its accepted MIME types, and the documented \"Idempotency/Upsert Behavior\" covers assets and security findings only. No idempotency key is documented for this endpoint, so the piece does not assume one.",
+          "gap": "No idempotency key is documented for this endpoint, so the piece does not rely on one: it embeds the artifact's sha256 in the evidence description and probes getOrganizationEvidence before uploading. A documented idempotency key for evidence — an externalId or a content hash — would let the probe go away."
+        }
+      }
+    ],
+    "provenance": {
+      "slug": true,
+      "commit_sha": true,
+      "branch": true
+    },
+    "diff_required": true,
+    "requires_confirmation": true
+  },
+  "scopes": {
+    "read": ["read:organization", "read:controls", "read:evidence"],
+    "write": ["write:evidence"]
+  },
+  "queue": {
+    "source": [
+      {
+        "kind": "mcp_tool",
+        "tool": "getOrganizationControls",
+        "note": "The organization's controls and their coverage. Ids come from Noru; this plugin ships none."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getControlContext",
+        "note": "predefinedEvidenceItems (the framework's expectation), linkedEvidenceItems with qualifiesRequirement (what is already satisfied), and control_guidance.testing (how an auditor tests it). The difference between the first two IS the queue."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getEvidenceItems",
+        "note": "The catalogue of evidence-item templates, used to resolve titles and types for items the control context returns by id."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getEvidenceForControl",
+        "note": "Cross-check of what is already attached to a control before proposing another upload."
+      }
+    ],
+    "hardcoded_expectations": false
+  },
+  "interpretation": {
+    "required": true,
+    "level": "per_claim",
+    "unattributed": "error"
+  },
+  "ci": {
+    "output_json": true,
+    "quiet": true,
+    "exit_codes": {
+      "0": "success",
+      "1": "drift, validation failure, missing prerequisite input, missing credential, or a failed upload",
+      "2": "usage error, including a push without --confirm"
+    }
+  }
+}

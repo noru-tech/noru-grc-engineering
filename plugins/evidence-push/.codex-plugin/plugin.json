@@ -1,0 +1,41 @@
+{
+  "name": "evidence-push",
+  "version": "0.1.0",
+  "description": "Work Noru's own evidence queue: see which catalogue expectations are unmet, stage local artifacts against them, and upload with control mappings.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech",
+    "url": "https://noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "evidence",
+    "audit",
+    "soc2",
+    "iso-27001",
+    "upload",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Noru Evidence Push",
+    "shortDescription": "Work Noru's evidence queue with local artifacts.",
+    "longDescription": "Asks Noru which catalogue expectations are unmet for your controls, matches local artifacts against that queue, and uploads them as file evidence with control mappings over the REST API. File upload is deliberately not available over MCP, so this piece uses REST with a scoped key read at the point of use.",
+    "developerName": "Noru",
+    "category": "Productivity",
+    "capabilities": [
+      "Unmet evidence expectations from Noru's own catalogue",
+      "Local artifact matching and validation",
+      "Multipart upload with control mappings",
+      "Attributed, expiring sign-off per artifact"
+    ],
+    "websiteURL": "https://noru.tech",
+    "defaultPrompt": "Show me which evidence expectations are unmet and what I have locally that could satisfy them."
+  }
+}

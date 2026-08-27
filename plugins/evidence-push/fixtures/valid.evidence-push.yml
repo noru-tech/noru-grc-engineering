@@ -1,0 +1,85 @@
+# Fixture: two artifacts staged against a queue Noru returned. The validator must exit 0.
+#
+# The control and evidence-item ids below are in the reserved synthetic namespaces (zz-*, E-ZZ-*)
+# that contract/README.md sets aside for fixtures. Real catalogue ids must never appear anywhere in
+# this repository — that is contract requirement 9, and fixtures are the obvious loophole, so the
+# contract test checks these namespaces specifically.
+version: 0.1.0
+piece: evidence-push
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: evidence-push@0.1.0
+queue_snapshot:
+  fetched_at: 2026-08-27T09:14:00Z
+  via:
+    - getOrganizationControls
+    - getControlContext
+  controls:
+    - control_id: zz-01
+      display_id: ZZ-01
+      name: Example periodic reconciliation control
+      status: in_progress
+      coverage: 33
+      testing_guidance_available: true
+      unmet_evidence_items:
+        - id: E-ZZ-01
+          title: Example Reconciliation Records
+          type: record
+        - id: E-ZZ-02
+          title: Example Quarterly Access Review
+          type: record
+    - control_id: zz-02
+      display_id: ZZ-02
+      name: Example third-party testing control
+      status: not_implemented
+      coverage: 0
+      testing_guidance_available: true
+      unmet_evidence_items:
+        - id: E-ZZ-03
+          title: Example Penetration Test Report
+          type: document
+uploads:
+  - file: .noru/artifacts/q2-access-review.pdf
+    sha256: f19f04ccd4f78265f2bc2ca433f49ce7eb415877a7254df93420effa0fe8da50
+    size_bytes: 284915
+    mime_type: application/pdf
+    title: Q2 2026 quarterly access review
+    description: Signed reconciliation of production access against the personnel directory.
+    tags:
+      - evidence-push
+      - access-review
+    expiry_date: 2026-12-31T23:59:59Z
+    control_mappings:
+      - control_id: zz-01
+        evidence_item_ids:
+          - E-ZZ-02
+    interpretation:
+      owner: priya.nair@example.com
+      decided_at: 2026-08-27
+      expires_at: 2026-11-30
+      rationale: >
+        I ran the reconciliation, signed the result on page 4, and the report covers every
+        production system in scope for the quarter. Next review is due before the Q4 close.
+  - file: .noru/artifacts/2026-pentest-report.pdf
+    sha256: 88e551d5c4a9781222bdf851d56e06072d189b01144b1edfc9cf435b83791f7f
+    size_bytes: 1904221
+    mime_type: application/pdf
+    title: 2026 external penetration test report
+    description: Third-party penetration test, remediation summary appended.
+    tags:
+      - evidence-push
+      - pentest
+    expiry_date: 2027-06-30T23:59:59Z
+    control_mappings:
+      - control_id: zz-02
+        evidence_item_ids:
+          - E-ZZ-03
+    interpretation:
+      owner: sam.okafor@example.com
+      decided_at: 2026-08-27
+      expires_at: 2027-06-30
+      rationale: >
+        Commissioned and reviewed this engagement; scope matches the production estate and all
+        high findings are closed. Annual cadence, so it expires when the next test is due.

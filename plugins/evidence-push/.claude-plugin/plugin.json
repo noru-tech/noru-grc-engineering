@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "evidence-push",
+  "displayName": "Noru Evidence Push",
+  "version": "0.1.0",
+  "description": "Work Noru's own evidence queue: see which catalogue expectations are unmet, stage local artifacts against them, and upload with control mappings.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "evidence",
+    "audit",
+    "soc2",
+    "iso-27001",
+    "upload",
+    "mcp"
+  ]
+}

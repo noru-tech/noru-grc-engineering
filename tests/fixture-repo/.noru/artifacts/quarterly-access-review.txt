@@ -1,0 +1,4 @@
+Fixture artifact for the evidence-push collector determinism test.
+
+Stands in for a signed quarterly access review. Its filename is what the collector scores against
+the queue's own item titles, so this file exercises the matching path without shipping a binary.

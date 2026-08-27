@@ -1,0 +1,36 @@
+# Fixture: an artifact over Noru's 50MB upload cap.
+# Expected: exit 1, "exceeds the 50MB cap".
+version: 0.1.0
+piece: evidence-push
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: evidence-push@0.1.0
+queue_snapshot:
+  fetched_at: 2026-08-27T09:14:00Z
+  via:
+    - getOrganizationControls
+  controls:
+    - control_id: zz-02
+      display_id: ZZ-02
+      name: Example third-party testing control
+      unmet_evidence_items:
+        - id: E-ZZ-03
+          title: Example Penetration Test Report
+          type: document
+uploads:
+  - file: .noru/artifacts/full-scan-archive.zip
+    sha256: 88e551d5c4a9781222bdf851d56e06072d189b01144b1edfc9cf435b83791f7f
+    size_bytes: 78643200
+    mime_type: application/zip
+    title: Full scan archive
+    control_mappings:
+      - control_id: zz-02
+        evidence_item_ids:
+          - E-ZZ-03
+    interpretation:
+      owner: sam.okafor@example.com
+      decided_at: 2026-08-27
+      expires_at: 2027-06-30
+      rationale: Raw scanner output archive from the annual external penetration test engagement.

@@ -1,0 +1,8 @@
+# Fixture workflow. The collector reads this to decide whether evals are CI-gated.
+name: ci
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "run the eval suite; a failure fails the build"

@@ -1,0 +1,344 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/ai-inventory.schema.json",
+  "title": "Noru AI system inventory manifest (.noru/ai-inventory.yml)",
+  "description": "A reviewable, git-committable inventory of the AI systems a repository contains, the model providers it calls, and the classification suggestions those two produce. Every claim carries the repository evidence that produced it (refs) and the human who stands behind it (interpretation). Enforced by plugins/ai-inventory/scripts/validate_manifest.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "piece", "source", "ai_systems"],
+  "properties": {
+    "version": {
+      "description": "Manifest format version. Matches contract_version of the piece that wrote it.",
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "piece": { "const": "ai-inventory" },
+    "source": { "$ref": "#/$defs/source" },
+    "ai_systems": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/aiSystem" }
+    },
+    "providers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/provider" }
+    },
+    "classifications": {
+      "description": "Regulatory and standards classification. Always suggestions with citations, never silent assertions: they land in Noru for a human to accept or reject.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/classification" }
+    }
+  },
+  "$defs": {
+    "source": {
+      "description": "Provenance carried into Noru on every write this manifest produces.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "commit_sha", "branch", "generated_by"],
+      "properties": {
+        "slug": {
+          "description": "Stable identifier for this repository, unique per organization (for example acme/platform). Mirrors the `slug` argument of Noru's published ingestDatamap tool.",
+          "type": "string",
+          "minLength": 1
+        },
+        "commit_sha": { "type": "string", "minLength": 7 },
+        "branch": { "type": "string", "minLength": 1 },
+        "generated_by": {
+          "description": "piece@version that wrote the derived section.",
+          "type": "string",
+          "minLength": 1
+        },
+        "derived_digest": {
+          "description": "sha256 of the collector's derived section. Lets :diff and CI tell 'the repo changed' apart from 'a human edited the judgement fields'.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "ref": {
+      "description": "A citation into the repository, as file:line. This is what makes a claim checkable by the next reader.",
+      "type": "string",
+      "pattern": "^[^:\\s][^:]*:[0-9]+$"
+    },
+    "refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/ref" }
+    },
+    "interpretation": {
+      "description": "Requirement 8. Who decided this, when, until when, and why. A claim without one is a validator error, not a warning.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "decided_at", "rationale"],
+      "properties": {
+        "owner": {
+          "description": "A person, not a team alias or a tool. Email or a Noru personnel/user id.",
+          "type": "string",
+          "minLength": 3
+        },
+        "decided_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "expires_at": {
+          "description": "When this decision goes stale. Required for technical claims. Omit only for a genuinely point-in-time procedural claim, and say why in rationale.",
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "rationale": { "type": "string", "minLength": 10 },
+        "refs": { "$ref": "#/$defs/refs" }
+      }
+    },
+    "aiSystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "name",
+        "purpose",
+        "deployment",
+        "autonomy",
+        "refs",
+        "interpretation"
+      ],
+      "properties": {
+        "key": {
+          "description": "Stable identifier. Becomes the externalId half of the Noru asset upsert key, so it must not change between scans of the same system.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "purpose": { "type": "string", "minLength": 10 },
+        "provider": {
+          "description": "Key of an entry in providers[].",
+          "type": "string"
+        },
+        "models": {
+          "description": "Concrete model identifiers as they appear in the code.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "deployment": {
+          "enum": ["hosted_api", "self_hosted", "on_device", "embedded_library"]
+        },
+        "autonomy": {
+          "description": "assistive = output is shown to a person who acts. supervised = the system acts but a person approves first. autonomous = the system acts without a person in the loop.",
+          "enum": ["assistive", "supervised", "autonomous"]
+        },
+        "human_oversight": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/oversightPoint" }
+        },
+        "inputs": { "$ref": "#/$defs/dataFlow" },
+        "outputs": { "$ref": "#/$defs/dataFlow" },
+        "retrieval": {
+          "description": "Retrieval sources and vector stores this system reads from.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/retrievalSource" }
+        },
+        "evals": { "$ref": "#/$defs/evals" },
+        "data_categories": {
+          "description": "Fideslang data category keys, from the bundled snapshot in plugins/ai-inventory/references/taxonomy/. Using the published Fideslang taxonomy keeps data-category vocabulary consistent across manifests.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "refs": { "$ref": "#/$defs/refs" },
+        "interpretation": { "$ref": "#/$defs/interpretation" },
+        "needs_review": {
+          "description": "Set by the collector on any field it could not derive. A manifest is not ready to push while this is true.",
+          "type": "boolean"
+        }
+      }
+    },
+    "oversightPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "description", "refs"],
+      "properties": {
+        "type": {
+          "enum": [
+            "human_review_before_action",
+            "human_approval_gate",
+            "human_in_the_loop_editing",
+            "override_or_kill_switch",
+            "post_hoc_audit",
+            "none"
+          ]
+        },
+        "description": { "type": "string", "minLength": 5 },
+        "refs": { "$ref": "#/$defs/refs" }
+      }
+    },
+    "dataFlow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "data_categories": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "sources": { "type": "array", "items": { "type": "string" } },
+        "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } }
+      }
+    },
+    "retrievalSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "refs"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "kind": {
+          "enum": [
+            "vector_store",
+            "sql",
+            "document_store",
+            "web",
+            "filesystem",
+            "api"
+          ]
+        },
+        "data_categories": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "refs": { "$ref": "#/$defs/refs" }
+      }
+    },
+    "evals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["suites", "ci_gated"],
+      "properties": {
+        "suites": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "path"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "path": { "type": "string", "minLength": 1 },
+              "measures": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "ci_gated": {
+          "description": "Whether a CI workflow fails when these evals fail. An eval suite nothing gates on is not a control.",
+          "type": "boolean"
+        },
+        "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "vendor_name", "refs", "interpretation"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "vendor_name": {
+          "description": "Becomes the Noru vendor name. createVendor deduplicates on name within the organization, so this must be stable.",
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "description": "Noru vendor category. Canonical values from the \"Canonical Values Reference\" section of https://api.noru.tech/llms.txt, and from the published createVendor tool description.",
+          "enum": [
+            "cloud",
+            "infrastructure",
+            "software_as_a_service",
+            "finance",
+            "marketing",
+            "sales",
+            "hr",
+            "other"
+          ]
+        },
+        "endpoints": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "claims": {
+          "description": "Retention, training and residency claims. Each one must say where it came from. We have already been bitten by an unverified provider zero-retention claim; provenance here is mandatory for that reason.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/providerClaim" }
+        },
+        "dpa_reference": { "type": "string" },
+        "refs": { "$ref": "#/$defs/refs" },
+        "interpretation": { "$ref": "#/$defs/interpretation" }
+      }
+    },
+    "providerClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value", "source", "interpretation"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "no_training",
+            "zero_retention",
+            "retention_period",
+            "data_residency",
+            "dpa",
+            "subprocessor_list"
+          ]
+        },
+        "value": { "type": "string", "minLength": 1 },
+        "source": { "$ref": "#/$defs/claimSource" },
+        "interpretation": { "$ref": "#/$defs/interpretation" }
+      }
+    },
+    "claimSource": {
+      "description": "Where the claim came from. repo_config means a flag in our own code; the other kinds are the provider's word, and 'the provider says so' is a weaker claim than 'we configured it' — the distinction is the point of this field.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": [
+            "repo_config",
+            "vendor_documentation",
+            "contract",
+            "vendor_assertion",
+            "unverified"
+          ]
+        },
+        "ref": {
+          "description": "file:line when type is repo_config.",
+          "$ref": "#/$defs/ref"
+        },
+        "url": { "type": "string" },
+        "document": { "type": "string" },
+        "retrieved_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system", "scheme", "value", "status", "refs", "interpretation"],
+      "properties": {
+        "system": {
+          "description": "key of an entry in ai_systems[].",
+          "type": "string"
+        },
+        "scheme": { "enum": ["eu_ai_act_role", "eu_ai_act_tier", "iso_42001", "nist_ai_rmf"] },
+        "value": { "type": "string", "minLength": 1 },
+        "driver": {
+          "description": "The specific provision that drives the value, for example 'Article 50(1)'. Free text: this repository deliberately bundles no framework control text.",
+          "type": "string"
+        },
+        "status": {
+          "description": "Always starts as suggested. A human moves it to accepted or rejected; the piece never sets those itself.",
+          "enum": ["suggested", "accepted", "rejected"]
+        },
+        "refs": { "$ref": "#/$defs/refs" },
+        "interpretation": { "$ref": "#/$defs/interpretation" }
+      }
+    }
+  }
+}

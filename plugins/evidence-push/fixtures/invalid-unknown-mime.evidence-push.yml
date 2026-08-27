@@ -1,0 +1,38 @@
+# Fixture: a file type Noru's upload endpoint does not accept. Catching this locally is the
+# difference between a validator run and a 400 halfway through an upload batch.
+# Expected: exit 1, "is not accepted by POST /v1/evidence/upload".
+version: 0.1.0
+piece: evidence-push
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: evidence-push@0.1.0
+queue_snapshot:
+  fetched_at: 2026-08-27T09:14:00Z
+  via:
+    - getOrganizationControls
+    - getControlContext
+  controls:
+    - control_id: zz-01
+      display_id: ZZ-01
+      name: Example periodic reconciliation control
+      unmet_evidence_items:
+        - id: E-ZZ-01
+          title: Example Reconciliation Records
+          type: record
+uploads:
+  - file: .noru/artifacts/reconciliation.heic
+    sha256: f19f04ccd4f78265f2bc2ca433f49ce7eb415877a7254df93420effa0fe8da50
+    size_bytes: 44210
+    mime_type: image/heic
+    title: Reconciliation screenshot
+    control_mappings:
+      - control_id: zz-01
+        evidence_item_ids:
+          - E-ZZ-01
+    interpretation:
+      owner: priya.nair@example.com
+      decided_at: 2026-08-27
+      expires_at: 2026-11-30
+      rationale: Screenshot of the reconciliation dashboard taken at the close of the quarter.

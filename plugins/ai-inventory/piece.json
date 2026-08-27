@@ -1,0 +1,166 @@
+{
+  "$schema": "../../contract/piece.schema.json",
+  "piece": "ai-inventory",
+  "contract_version": "0.1.0",
+  "artifact": ".noru/ai-inventory.yml",
+  "manifest_schema": "contract/ai-inventory.schema.json",
+  "commands": {
+    "scan": "commands/scan.md",
+    "diff": "commands/diff.md",
+    "push": "commands/push.md"
+  },
+  "skill": "skills/ai-inventory/SKILL.md",
+  "collector": {
+    "entrypoint": "scripts/collect.mjs",
+    "deterministic": true,
+    "network": false,
+    "inputs": [".noru/.cache/noru-state.json"]
+  },
+  "validator": {
+    "entrypoint": "scripts/validate_manifest.py",
+    "runtime": "python3-stdlib",
+    "vocabulary": [
+      "references/vocabulary.json",
+      "references/taxonomy/data_categories.json"
+    ],
+    "suggestions": true,
+    "exit_codes": {
+      "0": "manifest is valid; warnings may be present",
+      "1": "manifest has validation errors",
+      "2": "usage error, unreadable file, or unparseable YAML"
+    },
+    "fixtures": {
+      "valid": ["fixtures/valid.ai-inventory.yml"],
+      "invalid": [
+        {
+          "path": "fixtures/invalid-missing-interpretation.ai-inventory.yml",
+          "expect_message": "missing required `interpretation`"
+        },
+        {
+          "path": "fixtures/invalid-unattributed-claim.ai-inventory.yml",
+          "expect_message": "missing required `refs`"
+        },
+        {
+          "path": "fixtures/invalid-unknown-data-category.ai-inventory.yml",
+          "expect_message": "unknown fideslang data category"
+        },
+        {
+          "path": "fixtures/invalid-needs-review.ai-inventory.yml",
+          "expect_message": "needs_review"
+        },
+        {
+          "path": "fixtures/invalid-no-expiry-on-technical-claim.ai-inventory.yml",
+          "expect_message": "missing required `expires_at`"
+        }
+      ]
+    }
+  },
+  "push": {
+    "entrypoint": "scripts/push.mjs",
+    "mode": "keyed_upsert",
+    "collapses_to": {
+      "tool": "a single idempotent server-side ingest operation for an AI inventory, if one is published",
+      "tracked_at": "https://github.com/noru-tech/noru-grc-engineering/issues"
+    },
+    "operations": [
+      {
+        "name": "createAsset",
+        "transport": "mcp",
+        "scope": "write:assets",
+        "idempotency": {
+          "kind": "server_upsert",
+          "key": ["source", "externalId"],
+          "verified_at": "https://api.noru.tech/llms.txt, \"Idempotency/Upsert Behavior\": an asset whose (source, externalId) already exists in the org returns 200 and is updated in place, otherwise 201 and created. The published createAsset tool description at https://api.noru.tech/v1/mcp says the same: \"Create or update (upsert by externalId)\"."
+        }
+      },
+      {
+        "name": "createVendor",
+        "transport": "mcp",
+        "scope": "write:vendors",
+        "idempotency": {
+          "kind": "server_dedupe",
+          "key": ["organizationId", "name"],
+          "verified_at": "Published createVendor tool description at https://api.noru.tech/v1/mcp: \"If a vendor with the same name already exists, the existing record is returned.\""
+        }
+      },
+      {
+        "name": "createEvidence",
+        "transport": "mcp",
+        "scope": "write:evidence",
+        "idempotency": {
+          "kind": "client_probe",
+          "key": ["description contains marker"],
+          "verified_at": "https://api.noru.tech/llms.txt: the documented \"Idempotency/Upsert Behavior\" covers assets and security findings, and neither it nor the published createEvidence tool description documents an idempotency key for evidence. The piece therefore does not assume one.",
+          "gap": "No idempotency key is documented for evidence creation, so the piece does not rely on one being there: it embeds a content marker in the description and probes getOrganizationEvidence with `search` before writing. If a documented idempotency key for evidence, or a single documented ingest operation, becomes available, the probe can be dropped."
+        }
+      },
+      {
+        "name": "linkEvidenceToControl",
+        "transport": "mcp",
+        "scope": "write:evidence",
+        "idempotency": {
+          "kind": "client_probe",
+          "key": ["evidenceId", "controlId"],
+          "verified_at": "Published linkEvidenceToControl tool description at https://api.noru.tech/v1/mcp: it links an evidence record to a control and documents no idempotency key, so the piece checks before linking rather than assuming a repeat is free.",
+          "gap": "The published read surface has no call that directly answers 'is this evidence already linked to this control', so the piece reads getControlContext and compares before linking."
+        }
+      }
+    ],
+    "provenance": {
+      "slug": true,
+      "commit_sha": true,
+      "branch": true
+    },
+    "diff_required": true,
+    "requires_confirmation": true
+  },
+  "scopes": {
+    "read": [
+      "read:organization",
+      "read:frameworks",
+      "read:controls",
+      "read:evidence",
+      "read:assets",
+      "read:vendors"
+    ],
+    "write": ["write:assets", "write:vendors", "write:evidence"]
+  },
+  "queue": {
+    "source": [
+      {
+        "kind": "repository",
+        "note": "The inventory itself is discovered in the repository — that is the whole point of this piece, and it is the one place Noru's server-side integrations cannot see."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getOrganizationFrameworks",
+        "note": "Which AI frameworks the organization has actually enabled. The piece never assumes."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getOrganizationControls",
+        "note": "The controls under those frameworks, filtered by frameworkIds. Their ids come from Noru, never from this plugin."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getControlContext",
+        "note": "predefinedEvidenceItems, coverage and control_guidance.testing for the controls the evidence will link to."
+      }
+    ],
+    "hardcoded_expectations": false
+  },
+  "interpretation": {
+    "required": true,
+    "level": "per_claim",
+    "unattributed": "error"
+  },
+  "ci": {
+    "output_json": true,
+    "quiet": true,
+    "exit_codes": {
+      "0": "success",
+      "1": "drift, validation failure, or missing prerequisite input",
+      "2": "usage error, including a push without --confirm"
+    }
+  }
+}

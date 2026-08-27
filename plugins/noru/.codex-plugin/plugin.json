@@ -1,0 +1,39 @@
+{
+  "name": "noru",
+  "version": "0.1.0",
+  "description": "Hub for the Noru last-mile pieces: connect, doctor, and repository context shared by every piece.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech",
+    "url": "https://noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "grc",
+    "mcp",
+    "hub",
+    "audit"
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Noru GRC Engineering",
+    "shortDescription": "Connect, check and share context for the Noru last-mile pieces.",
+    "longDescription": "The hub for Noru's last-mile GRC pieces. It verifies the Noru MCP connection and the local toolchain, reports which scopes a piece needs, and gathers the repository context every piece reuses. Install it alongside any piece.",
+    "developerName": "Noru",
+    "category": "Productivity",
+    "capabilities": [
+      "Noru MCP connection check",
+      "Least-privilege scope reporting",
+      "Repository provenance",
+      "Shared diff and plan helpers"
+    ],
+    "websiteURL": "https://noru.tech",
+    "defaultPrompt": "Check my Noru connection and tell me which last-mile pieces this repository can use."
+  }
+}

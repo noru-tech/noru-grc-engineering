@@ -1,0 +1,38 @@
+# Fixture: an upload mapped to a control Noru never said was unmet. This is the exact drift
+# contract requirement 9 exists to prevent — a piece deciding for itself what a control needs.
+# Expected: exit 1, "is not in the queue snapshot".
+version: 0.1.0
+piece: evidence-push
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: evidence-push@0.1.0
+queue_snapshot:
+  fetched_at: 2026-08-27T09:14:00Z
+  via:
+    - getOrganizationControls
+    - getControlContext
+  controls:
+    - control_id: zz-01
+      display_id: ZZ-01
+      name: Example periodic reconciliation control
+      unmet_evidence_items:
+        - id: E-ZZ-01
+          title: Example Reconciliation Records
+          type: record
+uploads:
+  - file: .noru/artifacts/q2-access-review.pdf
+    sha256: f19f04ccd4f78265f2bc2ca433f49ce7eb415877a7254df93420effa0fe8da50
+    size_bytes: 284915
+    mime_type: application/pdf
+    title: Q2 2026 quarterly access review
+    control_mappings:
+      - control_id: zz-99
+        evidence_item_ids:
+          - E-ZZ-01
+    interpretation:
+      owner: priya.nair@example.com
+      decided_at: 2026-08-27
+      expires_at: 2026-11-30
+      rationale: I ran the reconciliation and signed the result on page 4 of the report.

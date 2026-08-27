@@ -1,0 +1,31 @@
+# Fixture: a zero-data-retention claim with no review date. Retention posture is a configuration,
+# and a configuration changes; a claim about it that never goes stale is a claim nobody re-checks.
+# This is the exact failure we have already been bitten by once with a provider ZDR claim.
+# Expected: exit 1, "missing required `expires_at`" on the claim's interpretation.
+version: 0.1.0
+piece: ai-inventory
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: ai-inventory@0.1.0
+providers:
+  - key: example-llm
+    vendor_name: Example LLM Provider
+    claims:
+      - kind: zero_retention
+        value: Zero data retention enabled for this account
+        source:
+          type: repo_config
+          ref: packages/inference/src/client.ts:37
+        interpretation:
+          owner: dana.reed@example.com
+          decided_at: 2026-08-01
+          rationale: The client is constructed with store disabled, so no prompt is retained.
+    refs:
+      - packages/inference/src/client.ts:12
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      rationale: Only model provider reachable from production code paths at this commit.
+ai_systems: []

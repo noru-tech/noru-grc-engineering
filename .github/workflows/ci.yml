@@ -1,0 +1,123 @@
+name: ci
+
+# Everything this repository checks, in one workflow. There is deliberately no dependency install
+# step anywhere below: collectors are Node built-ins only and validators are Python standard library
+# only, so if CI ever needs `npm install` or `pip install`, something has broken the atomicity
+# promise in CONTRIBUTING.md and this file should fail rather than paper over it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    name: syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: node --check every .mjs
+        run: |
+          set -euo pipefail
+          find . -path ./.git -prune -o -name '*.mjs' -print | sort | while read -r f; do
+            echo "checking $f"
+            node --check "$f"
+          done
+      - name: python3 -m py_compile every .py
+        run: |
+          set -euo pipefail
+          find . -path ./.git -prune -o -name '*.py' -print | sort | while read -r f; do
+            echo "checking $f"
+            python3 -m py_compile "$f"
+          done
+      - name: the generated templates must be syntactically valid too
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          for f in scripts/templates/*.mjs.tmpl; do
+            out="$tmp/$(basename "${f%.tmpl}")"
+            sed 's/__PIECE__/sample-piece/g' "$f" > "$out"
+            node --check "$out"
+          done
+          for f in scripts/templates/*.py.tmpl; do
+            out="$tmp/$(basename "${f%.tmpl}")"
+            sed 's/__PIECE__/sample_piece/g' "$f" > "$out"
+            python3 -m py_compile "$out"
+          done
+      - name: every JSON file parses
+        run: |
+          set -euo pipefail
+          find . -path ./.git -prune -o -name '*.json' -print | sort | while read -r f; do
+            python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f"
+          done
+
+  repo:
+    name: marketplace and hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: marketplace manifests, schema sync, secret hygiene
+        run: python3 scripts/check_repo.py
+      - name: vendored libraries have not drifted
+        run: python3 scripts/check_vendored_lib.py
+
+  tests:
+    name: tests (node ${{ matrix.node }}, python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor is what CONTRIBUTING.md promises: Node 18 for global fetch/FormData/Blob, and a
+        # Python old enough that "it works on the machine in front of you" is a safe assumption.
+        include:
+          - node: "18"
+            python: "3.9"
+          - node: "20"
+            python: "3.12"
+          - node: "22"
+            python: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: schema fixtures and validator unit tests
+        run: python3 scripts/test_validators.py
+      - name: a second push must be a no-op
+        run: python3 scripts/test_idempotency.py
+      - name: every plugin satisfies contract requirements 1-9
+        run: python3 scripts/contract_test.py
+
+  scaffold:
+    name: a scaffolded piece satisfies the contract
+    runs-on: ubuntu-latest
+    # If this fails, the contract has moved and the scaffolder has not. That is the moment to fix
+    # the scaffolder, because every future piece starts from it.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: scaffold a throwaway piece
+        run: node scripts/scaffold-piece.mjs ci-scaffold-probe
+      - name: it must pass the contract test unmodified
+        run: python3 scripts/contract_test.py --piece=ci-scaffold-probe
+      - name: and its validator must pass its own fixtures
+        run: python3 scripts/test_validators.py
+      - name: clean up so nothing is committed by accident
+        if: always()
+        run: rm -rf plugins/ci-scaffold-probe contract/ci-scaffold-probe.schema.json

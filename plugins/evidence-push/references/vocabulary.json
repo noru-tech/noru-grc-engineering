@@ -1,0 +1,61 @@
+{
+  "_comment": [
+    "Bundled vocabulary for the evidence-push validator (contract requirement 3).",
+    "Everything here mirrors Noru's published upload contract: the \"Evidence Upload Guidance\"",
+    "section of https://api.noru.tech/llms.txt. Kept in sync with",
+    "contract/evidence-push.schema.json by scripts/check_repo.py.",
+    "",
+    "What is deliberately NOT here: any evidence-item or control identifier. The list of what is",
+    "needed comes from the customer's own organization at scan time via MCP, never from this file.",
+    "See contract/README.md, requirement 9."
+  ],
+  "max_file_bytes": 52428800,
+  "mime_types": [
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    "text/csv",
+    "application/json",
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "application/zip",
+    "application/x-zip-compressed"
+  ],
+  "extension_to_mime": {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".txt": "text/plain",
+    ".log": "text/plain",
+    ".md": "text/plain",
+    ".csv": "text/csv",
+    ".json": "application/json",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".zip": "application/zip"
+  },
+  "queue_tools": [
+    "getOrganizationControls",
+    "getPendingControls",
+    "getControlContext",
+    "getEvidenceItems",
+    "getEvidenceForControl"
+  ],
+  "evidence_status": ["valid", "pending_review", "expired"],
+  "upload_endpoint": "POST /v1/evidence/upload",
+  "upload_scope": "write:evidence"
+}

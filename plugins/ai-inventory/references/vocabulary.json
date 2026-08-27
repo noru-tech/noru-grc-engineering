@@ -1,0 +1,89 @@
+{
+  "_comment": [
+    "Bundled vocabulary for the ai-inventory validator (contract requirement 3).",
+    "The enums also present in contract/ai-inventory.schema.json are kept in sync by",
+    "scripts/check_repo.py; if you change one, change both.",
+    "",
+    "What is deliberately NOT here: any framework control text or control identifier list.",
+    "ISO/IEC 42001 Annex A references are free text on purpose - this repository vendors no",
+    "standard's control catalogue (see contract/README.md, non-goals). EU AI Act roles and risk",
+    "tiers, and the four NIST AI RMF functions, are named in the public instruments themselves and",
+    "are enumerated here only so a typo gets a 'did you mean ...?' instead of landing in Noru."
+  ],
+  "deployment": [
+    "hosted_api",
+    "self_hosted",
+    "on_device",
+    "embedded_library"
+  ],
+  "autonomy": ["assistive", "supervised", "autonomous"],
+  "oversight_type": [
+    "human_review_before_action",
+    "human_approval_gate",
+    "human_in_the_loop_editing",
+    "override_or_kill_switch",
+    "post_hoc_audit",
+    "none"
+  ],
+  "retrieval_kind": [
+    "vector_store",
+    "sql",
+    "document_store",
+    "web",
+    "filesystem",
+    "api"
+  ],
+  "provider_category": [
+    "cloud",
+    "infrastructure",
+    "software_as_a_service",
+    "finance",
+    "marketing",
+    "sales",
+    "hr",
+    "other"
+  ],
+  "claim_kind": [
+    "no_training",
+    "zero_retention",
+    "retention_period",
+    "data_residency",
+    "dpa",
+    "subprocessor_list"
+  ],
+  "claim_source_type": [
+    "repo_config",
+    "vendor_documentation",
+    "contract",
+    "vendor_assertion",
+    "unverified"
+  ],
+  "classification_scheme": [
+    "eu_ai_act_role",
+    "eu_ai_act_tier",
+    "iso_42001",
+    "nist_ai_rmf"
+  ],
+  "classification_status": ["suggested", "accepted", "rejected"],
+  "classification_values": {
+    "eu_ai_act_role": [
+      "provider",
+      "deployer",
+      "importer",
+      "distributor",
+      "product_manufacturer",
+      "authorised_representative"
+    ],
+    "eu_ai_act_tier": [
+      "prohibited",
+      "high_risk",
+      "limited_risk",
+      "minimal_risk",
+      "gpai",
+      "gpai_systemic_risk"
+    ],
+    "nist_ai_rmf": ["govern", "map", "measure", "manage"]
+  },
+  "schemes_requiring_driver": ["eu_ai_act_role", "eu_ai_act_tier"],
+  "technical_claim_requires_expiry": true
+}

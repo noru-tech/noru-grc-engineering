@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/evidence-push.schema.json",
+  "title": "Noru evidence upload manifest (.noru/evidence-push.yml)",
+  "description": "A reviewable plan for uploading local artifacts into Noru as file evidence, mapped to the catalogue expectations they satisfy. The queue half is a snapshot of what Noru said was unmet; the uploads half is what a human proposes to do about it. Enforced by plugins/evidence-push/scripts/validate_manifest.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "piece", "source", "queue_snapshot", "uploads"],
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "piece": { "const": "evidence-push" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "commit_sha", "branch", "generated_by"],
+      "properties": {
+        "slug": { "type": "string", "minLength": 1 },
+        "commit_sha": { "type": "string", "minLength": 7 },
+        "branch": { "type": "string", "minLength": 1 },
+        "generated_by": { "type": "string", "minLength": 1 },
+        "derived_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "queue_snapshot": {
+      "description": "What Noru's own catalogue said was unmet, at the moment :scan ran. Written from MCP output by the client; never invented by this plugin. Requirement 9.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fetched_at", "via", "controls"],
+      "properties": {
+        "fetched_at": { "type": "string", "minLength": 10 },
+        "via": {
+          "description": "The MCP tools the snapshot came from.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "getOrganizationControls",
+              "getPendingControls",
+              "getControlContext",
+              "getEvidenceItems",
+              "getEvidenceForControl"
+            ]
+          }
+        },
+        "controls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/queueControl" }
+        }
+      }
+    },
+    "uploads": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/upload" }
+    }
+  },
+  "$defs": {
+    "ref": { "type": "string", "pattern": "^[^:\\s][^:]*:[0-9]+$" },
+    "interpretation": {
+      "description": "Requirement 8. For this piece the claim being attributed is 'this artifact satisfies this catalogue expectation', which is exactly the judgement an auditor asks a named person to stand behind.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "decided_at", "rationale"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 3 },
+        "decided_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "expires_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "rationale": { "type": "string", "minLength": 10 },
+        "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } }
+      }
+    },
+    "queueControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control_id", "unmet_evidence_items"],
+      "properties": {
+        "control_id": {
+          "description": "The canonical lowercase internal control id returned as `id` by getOrganizationControls. MCP normalizes the uppercase display form, but store the canonical one.",
+          "type": "string",
+          "minLength": 1
+        },
+        "display_id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "type": "string" },
+        "coverage": { "type": "number" },
+        "unmet_evidence_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "title": { "type": "string", "minLength": 1 },
+              "type": { "type": "string" }
+            }
+          }
+        },
+        "testing_guidance_available": {
+          "description": "Whether getControlContext returned control_guidance.testing for this control. The guidance text itself is deliberately not stored: it is the API's to serve, not ours to vendor.",
+          "type": "boolean"
+        }
+      }
+    },
+    "upload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "sha256",
+        "size_bytes",
+        "mime_type",
+        "title",
+        "control_mappings",
+        "interpretation"
+      ],
+      "properties": {
+        "file": {
+          "description": "Path to the artifact, relative to the repository root.",
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "size_bytes": {
+          "description": "Noru rejects anything over 50MB (52428800 bytes).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 52428800
+        },
+        "mime_type": {
+          "description": "Must be one of the types POST /v1/evidence/upload accepts, as published under \"Evidence Upload Guidance\" at https://api.noru.tech/llms.txt.",
+          "enum": [
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "text/plain",
+            "text/csv",
+            "application/json",
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "image/webp",
+            "application/zip",
+            "application/x-zip-compressed"
+          ]
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "expiry_date": {
+          "description": "ISO 8601. Sent as the expiryDate form field.",
+          "type": "string",
+          "minLength": 10
+        },
+        "control_mappings": {
+          "description": "Sent as the controlMappings form field. Preferred over the legacy controlIds field, which this piece never sends.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["control_id"],
+            "properties": {
+              "control_id": { "type": "string", "minLength": 1 },
+              "evidence_item_ids": {
+                "description": "Omit or leave empty for a generic control-level link; name the catalogue items to satisfy a specific expectation.",
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        },
+        "interpretation": { "$ref": "#/$defs/interpretation" },
+        "needs_review": { "type": "boolean" }
+      }
+    }
+  }
+}

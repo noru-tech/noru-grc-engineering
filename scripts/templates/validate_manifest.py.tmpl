@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+"""Validate .noru/__PIECE__.yml against the BUNDLED vocabulary.
+
+Self-contained and atomic: Python standard library only, no pip install, no network.
+
+Contract requirement 8 is the rule that makes this piece worth trusting: every item must carry
+refs[] citing the lines that produced it AND a complete interpretation block naming the person who
+stands behind it. An unattributed claim is an ERROR, never a warning.
+
+Usage:
+    python3 validate_manifest.py <manifest.yml> [--output=json] [--quiet] [--emit-parsed=<path>]
+Exit codes: 0 = valid (warnings allowed), 1 = validation errors, 2 = usage / load error.
+"""
+import json
+import pathlib
+import sys
+
+#VENDORED_YAML_MINI#
+
+REFERENCES = pathlib.Path(__file__).resolve().parent.parent / "references"
+PIECE = "__PIECE__"
+
+REF_RE = re.compile(r"^[^:\s][^:]*:[0-9]+$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
+
+TOP_LEVEL_KEYS = {"version", "piece", "source", "items"}
+SOURCE_KEYS = {"slug", "commit_sha", "branch", "generated_by", "derived_digest"}
+INTERPRETATION_KEYS = {"owner", "decided_at", "expires_at", "rationale", "refs"}
+ITEM_KEYS = {"key", "kind", "title", "refs", "interpretation", "needs_review"}
+
+
+def load_vocabulary():
+    return json.loads((REFERENCES / "vocabulary.json").read_text(encoding="utf-8"))
+
+
+def check_unknown_keys(rep, path, obj, allowed):
+    for key in obj:
+        if key not in allowed:
+            rep.err(f"{path}.{key}", f"unknown key '{key}'" + suggest(key, allowed))
+
+
+def check_refs(rep, path, obj):
+    refs = obj.get("refs")
+    if refs is None:
+        rep.err(path, "missing required `refs` — every claim must cite the lines that produced it")
+        return
+    if not isinstance(refs, list) or len(refs) == 0:
+        rep.err(f"{path}.refs", "must be a non-empty list — an unattributed claim is an error")
+        return
+    for i, ref in enumerate(refs):
+        if not isinstance(ref, str) or not REF_RE.match(ref):
+            rep.err(f"{path}.refs[{i}]", f"'{ref}' is not a 'file:line' citation")
+
+
+def check_interpretation(rep, path, obj):
+    block = obj.get("interpretation")
+    if block is None:
+        rep.err(
+            path,
+            "missing required `interpretation` — name the person who decided this, when, "
+            "until when, and why",
+        )
+        return
+    ipath = f"{path}.interpretation"
+    if not isinstance(block, dict):
+        rep.err(ipath, "must be a mapping")
+        return
+    check_unknown_keys(rep, ipath, block, INTERPRETATION_KEYS)
+
+    owner = block.get("owner")
+    if not owner or not isinstance(owner, str) or len(owner) < 3:
+        rep.err(f"{ipath}.owner", "missing or too short — must name a person, not a team alias")
+    if block.get("decided_at") is None:
+        rep.err(f"{ipath}.decided_at", "missing required `decided_at` (YYYY-MM-DD)")
+    for field in ("decided_at", "expires_at"):
+        value = block.get(field)
+        if value is not None and (not isinstance(value, str) or not DATE_RE.match(value)):
+            rep.err(f"{ipath}.{field}", f"'{value}' is not an ISO date (YYYY-MM-DD)")
+    rationale = block.get("rationale")
+    if not rationale or not isinstance(rationale, str) or len(rationale.strip()) < 10:
+        rep.err(f"{ipath}.rationale", "missing or too short — say why this claim holds")
+    if block.get("expires_at") is None:
+        rep.warn(f"{ipath}.expires_at", "no expiry set; acceptable only for a point-in-time claim")
+
+
+def check_source(rep, doc):
+    src = doc.get("source")
+    if not isinstance(src, dict):
+        rep.err("source", "missing required `source` block")
+        return
+    check_unknown_keys(rep, "source", src, SOURCE_KEYS)
+    for field in ("slug", "commit_sha", "branch", "generated_by"):
+        if not src.get(field) or not isinstance(src.get(field), str):
+            rep.err(
+                f"source.{field}",
+                f"missing required `{field}` — push provenance is not optional (requirement 4)",
+            )
+
+
+def validate(doc, vocab):
+    rep = Report()
+    counts = {"items": 0}
+    if not isinstance(doc, dict):
+        rep.err("<root>", "manifest must be a mapping with `version`, `piece`, `source`, `items`")
+        return rep, counts
+
+    check_unknown_keys(rep, "<root>", doc, TOP_LEVEL_KEYS)
+    version = doc.get("version")
+    if not version or not isinstance(version, str) or not SEMVER_RE.match(version):
+        rep.err("version", f"'{version}' is not a semantic version (for example 0.1.0)")
+    if doc.get("piece") != PIECE:
+        rep.err("piece", f"expected '{PIECE}', found '{doc.get('piece')}'")
+
+    check_source(rep, doc)
+
+    items = doc.get("items")
+    if items is None:
+        rep.err("items", "missing required `items` (an empty list is a valid answer)")
+        items = []
+    elif not isinstance(items, list):
+        rep.err("items", "must be a list")
+        items = []
+
+    seen = set()
+    for i, item in enumerate(items):
+        path = f"items[{i}]"
+        if not isinstance(item, dict):
+            rep.err(path, "item must be a mapping")
+            continue
+        check_unknown_keys(rep, path, item, ITEM_KEYS)
+        key = item.get("key")
+        if not key or not isinstance(key, str) or not KEY_RE.match(key):
+            rep.err(f"{path}.key", f"'{key}' is not a stable lowercase key")
+        elif key in seen:
+            rep.err(f"{path}.key", f"duplicate key '{key}' — keys must be unique and stable")
+        else:
+            seen.add(key)
+        if not item.get("title"):
+            rep.err(f"{path}.title", "missing required `title`")
+        kind = item.get("kind")
+        if kind is None:
+            rep.err(f"{path}.kind", "missing required `kind`")
+        elif kind not in vocab["item_kind"]:
+            rep.err(
+                f"{path}.kind",
+                f"unknown item kind '{kind}'" + suggest(kind, vocab["item_kind"]),
+            )
+        check_refs(rep, path, item)
+        check_interpretation(rep, path, item)
+        if item.get("needs_review") is True:
+            rep.err(
+                f"{path}.needs_review",
+                "still true — a human has not resolved this; resolve it and remove the flag "
+                "before pushing",
+            )
+    counts["items"] = len(items)
+    return rep, counts
+
+
+USAGE = (
+    "usage: validate_manifest.py <manifest.yml> [--output=json] [--quiet] "
+    "[--emit-parsed=<path.json>]\n"
+)
+
+
+def main(argv):
+    output_json = False
+    quiet = False
+    emit_parsed = None
+    positional = []
+    for arg in argv:
+        if arg == "--output=json":
+            output_json = True
+        elif arg == "--output=text":
+            output_json = False
+        elif arg == "--quiet":
+            quiet = True
+        elif arg.startswith("--emit-parsed="):
+            emit_parsed = arg.split("=", 1)[1]
+        elif arg in ("-h", "--help"):
+            sys.stdout.write(USAGE)
+            return 0
+        elif arg.startswith("-"):
+            sys.stderr.write(f"error: unknown option '{arg}'\n" + USAGE)
+            return 2
+        else:
+            positional.append(arg)
+
+    if len(positional) != 1:
+        sys.stderr.write(USAGE)
+        return 2
+    path = pathlib.Path(positional[0])
+    if not path.is_file():
+        sys.stderr.write(f"error: no such file: {path}\n")
+        return 2
+    try:
+        doc, loader = load_yaml(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"error: could not parse YAML ({exc})\n")
+        return 2
+    try:
+        vocab = load_vocabulary()
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"error: could not load bundled vocabulary ({exc})\n")
+        return 2
+
+    rep, counts = validate(doc, vocab)
+    ok = not rep.errors
+
+    if ok and emit_parsed:
+        try:
+            parsed_path = pathlib.Path(emit_parsed)
+            parsed_path.parent.mkdir(parents=True, exist_ok=True)
+            parsed_path.write_text(
+                json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"error: could not write {emit_parsed} ({exc})\n")
+            return 2
+
+    if output_json:
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "piece": PIECE,
+                    "manifest": str(path),
+                    "ok": ok,
+                    "loader": loader,
+                    "counts": counts,
+                    "errors": [{"path": p, "message": m} for p, m in rep.errors],
+                    "warnings": [{"path": p, "message": m} for p, m in rep.warnings],
+                },
+                indent=None if quiet else 2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        return 0 if ok else 1
+
+    if not quiet:
+        print(f"(parsed with {loader})")
+        for p, m in rep.warnings:
+            print(f"  WARN  {p}: {m}")
+    for p, m in rep.errors:
+        print(f"  ERROR {p}: {m}")
+    if not ok:
+        print(f"\nFAILED: {len(rep.errors)} error(s), {len(rep.warnings)} warning(s).")
+        return 1
+    if not quiet:
+        print(f"\nOK: {counts['items']} item(s), all keys valid ({len(rep.warnings)} warning(s)).")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

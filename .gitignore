@@ -1,0 +1,33 @@
+# Machine state and snapshots of an organization's compliance data. Never commit this — it holds
+# control ids, coverage and evidence titles read from a real Noru organization.
+.noru/.cache/
+
+# Local artifacts staged for evidence-push. The manifest that describes them is committed; the pen
+# test PDF usually should not be.
+.noru/artifacts/
+
+# …except this repository's own test fixtures, which are exactly a .noru/ tree and must be
+# committed. Re-including the directories (not just the files) is what makes this work.
+!tests/fixture-repo/.noru/.cache/
+!tests/fixture-repo/.noru/artifacts/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+
+# Environment and credentials — nothing here should ever be committed
+.env
+.env.*
+!.env.example
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

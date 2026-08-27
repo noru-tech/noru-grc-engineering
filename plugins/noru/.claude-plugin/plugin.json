@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "noru",
+  "displayName": "Noru GRC Engineering",
+  "version": "0.1.0",
+  "description": "Hub for the Noru last-mile pieces: connect, doctor, and repository context shared by every piece.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "grc",
+    "mcp",
+    "hub",
+    "audit"
+  ]
+}

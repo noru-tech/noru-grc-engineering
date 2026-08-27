@@ -1,0 +1,402 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/piece.schema.json",
+  "title": "Noru last-mile piece declaration",
+  "description": "Machine-readable contract declaration shipped by every piece at plugins/<piece>/piece.json. Each property maps to a numbered requirement in contract/README.md; the numbers in the descriptions are those requirement numbers. scripts/contract_test.py validates this file against this schema AND then checks that each declaration is actually true of the plugin on disk.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "piece",
+    "contract_version",
+    "artifact",
+    "commands",
+    "collector",
+    "validator",
+    "push",
+    "scopes",
+    "queue",
+    "interpretation",
+    "ci"
+  ],
+  "properties": {
+    "$schema": {
+      "description": "Relative path back to this schema, so an editor can offer completion inside piece.json.",
+      "type": "string"
+    },
+    "piece": {
+      "description": "Piece name. Must equal the plugin directory name and the plugin manifest `name`. (Requirement 1)",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "contract_version": {
+      "description": "Version of contract/piece.schema.json this piece was written against.",
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "artifact": {
+      "description": "Path, relative to the target repository root, of the committed manifest the collector produces. Must live under .noru/. (Requirement 2)",
+      "type": "string",
+      "pattern": "^\\.noru/[a-z0-9-]+\\.ya?ml$"
+    },
+    "manifest_schema": {
+      "description": "Path, relative to this repository root, of the JSON Schema describing the artifact.",
+      "type": "string",
+      "pattern": "^contract/[a-z0-9-]+\\.schema\\.json$"
+    },
+    "commands": {
+      "description": "The three mandatory commands. Values are paths relative to the plugin root. (Requirement 1)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scan", "diff", "push"],
+      "properties": {
+        "scan": { "$ref": "#/$defs/pluginRelativePath" },
+        "diff": { "$ref": "#/$defs/pluginRelativePath" },
+        "push": { "$ref": "#/$defs/pluginRelativePath" }
+      }
+    },
+    "skill": {
+      "description": "Path to the piece's single skill, relative to the plugin root. (Requirement 1)",
+      "type": "string",
+      "pattern": "^skills/[a-z0-9-]+/SKILL\\.md$"
+    },
+    "collector": {
+      "description": "The deterministic, offline collector. (Requirement 2)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entrypoint", "deterministic", "network"],
+      "properties": {
+        "entrypoint": { "$ref": "#/$defs/pluginRelativePath" },
+        "deterministic": {
+          "description": "Must be true. Same repository state must produce a byte-identical derived section.",
+          "const": true
+        },
+        "network": {
+          "description": "Must be false. Collectors never open a socket; anything that needs Noru is fetched by the MCP client and handed to the collector as a local file.",
+          "const": false
+        },
+        "inputs": {
+          "description": "Local files the collector reads besides the repository itself (for example a queue snapshot written by :scan from MCP output).",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "validator": {
+      "description": "The self-contained validator. (Requirement 3)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entrypoint", "runtime", "exit_codes"],
+      "properties": {
+        "entrypoint": { "$ref": "#/$defs/pluginRelativePath" },
+        "runtime": {
+          "description": "Only the Python 3 standard library is permitted. No pip install, no network.",
+          "const": "python3-stdlib"
+        },
+        "vocabulary": {
+          "description": "Bundled vocabulary files the validator checks against. Never framework control text — see the non-goals in contract/README.md.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "suggestions": {
+          "description": "Whether unknown keys get a difflib 'did you mean ...?' hint. Must be true.",
+          "const": true
+        },
+        "exit_codes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["0", "1", "2"],
+          "properties": {
+            "0": { "type": "string" },
+            "1": { "type": "string" },
+            "2": { "type": "string" }
+          }
+        },
+        "fixtures": {
+          "description": "Fixture manifests the contract test runs the validator against.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["valid", "invalid"],
+          "properties": {
+            "valid": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string" }
+            },
+            "invalid": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "expect_message"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "expect_message": {
+                    "description": "Substring the contract test requires to appear in the validator's output, so an invalid fixture proves a useful message and not just a non-zero exit.",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "push": {
+      "description": "How the piece lands the manifest in Noru. (Requirements 4 and 5)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entrypoint",
+        "mode",
+        "operations",
+        "provenance",
+        "diff_required",
+        "requires_confirmation"
+      ],
+      "properties": {
+        "entrypoint": { "$ref": "#/$defs/pluginRelativePath" },
+        "mode": {
+          "description": "single_call = one idempotent server-side ingest tool (the target shape). keyed_upsert = several writes, each individually idempotent on a declared key, applied as one reviewed plan. keyed_upsert is a transitional shape and MUST carry `collapses_to`.",
+          "enum": ["single_call", "keyed_upsert"]
+        },
+        "collapses_to": {
+          "description": "Required when mode is keyed_upsert: the shape of the single server-side operation that would replace the fan-out, and where that is tracked publicly. Describe the operation; do not name an operation that is not published.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tool", "tracked_at"],
+          "properties": {
+            "tool": { "type": "string" },
+            "tracked_at": { "type": "string" }
+          }
+        },
+        "operations": {
+          "description": "Every write this piece performs. Each must declare how re-running it stays a no-op.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/pushOperation" }
+        },
+        "provenance": {
+          "description": "Provenance carried on every write. All three are mandatory. (Requirement 4)",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slug", "commit_sha", "branch"],
+          "properties": {
+            "slug": { "const": true },
+            "commit_sha": { "const": true },
+            "branch": { "const": true }
+          }
+        },
+        "diff_required": {
+          "description": "Must be true. push refuses to run without a plan produced by diff from the current manifest. (Requirement 5)",
+          "const": true
+        },
+        "requires_confirmation": {
+          "description": "Must be true. push refuses to run without an explicit --confirm. (Requirement 5)",
+          "const": true
+        }
+      }
+    },
+    "scopes": {
+      "description": "Least-privilege scopes, declared here and repeated in the piece README. (Requirement 6)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["read", "write"],
+      "properties": {
+        "read": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/readScope" },
+          "uniqueItems": true
+        },
+        "write": {
+          "description": "May be empty: read-only is the default posture and a piece that only reports needs no write scope.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/writeScope" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "queue": {
+      "description": "Where the piece's idea of 'what is needed' comes from. (Requirement 9)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "hardcoded_expectations"],
+      "properties": {
+        "source": {
+          "description": "Noru tools consulted to build the work queue, or the literal 'repository' for a piece whose queue is the target repo itself.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind"],
+            "properties": {
+              "kind": { "enum": ["mcp_tool", "repository"] },
+              "tool": { "$ref": "#/$defs/mcpTool" },
+              "note": { "type": "string" }
+            }
+          }
+        },
+        "hardcoded_expectations": {
+          "description": "Must be false. A piece never ships its own evidence or control list; it asks Noru. (Requirement 9)",
+          "const": false
+        }
+      }
+    },
+    "interpretation": {
+      "description": "Attribution of claims. (Requirement 8)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "level", "unattributed"],
+      "properties": {
+        "required": { "const": true },
+        "level": {
+          "description": "per_claim = every individual claim carries its own block. per_manifest = one block covers the whole artifact (only acceptable for a piece whose artifact is a single indivisible claim).",
+          "enum": ["per_claim", "per_manifest"]
+        },
+        "unattributed": {
+          "description": "Must be 'error'. An unattributed claim fails the validator; it is never a warning.",
+          "const": "error"
+        }
+      }
+    },
+    "ci": {
+      "description": "Headless operation. (Requirement 7)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["output_json", "quiet", "exit_codes"],
+      "properties": {
+        "output_json": {
+          "description": "Every entrypoint supports --output=json.",
+          "const": true
+        },
+        "quiet": {
+          "description": "Every entrypoint supports --quiet.",
+          "const": true
+        },
+        "exit_codes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["0", "1", "2"],
+          "properties": {
+            "0": { "type": "string" },
+            "1": { "type": "string" },
+            "2": { "type": "string" }
+          },
+          "propertyNames": { "pattern": "^[0-9]+$" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "pluginRelativePath": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+$",
+      "not": { "pattern": "\\.\\." }
+    },
+    "readScope": {
+      "description": "Noru read scopes, as published in the \"Scopes\" section of Noru's API documentation at https://api.noru.tech/llms.txt.",
+      "enum": [
+        "read:organization",
+        "read:users",
+        "read:frameworks",
+        "read:controls",
+        "read:risks",
+        "read:evidence",
+        "read:policies",
+        "read:vendors",
+        "read:assets",
+        "read:personnel",
+        "read:datamaps",
+        "read:internal-audits"
+      ]
+    },
+    "writeScope": {
+      "description": "Noru write scopes, as published in the \"Scopes\" section of Noru's API documentation at https://api.noru.tech/llms.txt.",
+      "enum": [
+        "write:policies",
+        "write:controls",
+        "write:compliance",
+        "write:risks",
+        "write:evidence",
+        "write:assets",
+        "write:vendors",
+        "write:personnel",
+        "write:datamaps",
+        "write:internal-audits"
+      ]
+    },
+    "mcpTool": {
+      "description": "Name of a tool published by Noru's MCP server at https://api.noru.tech/v1/mcp. Extending this list requires confirming the tool is there — call the server's own tools/list and read the published tool description. Never guess a name.",
+      "enum": [
+        "findOrganization",
+        "getUser",
+        "getAllFrameworks",
+        "getOrganizationFrameworks",
+        "getOrganizationControls",
+        "getPendingControls",
+        "getControlStatus",
+        "getControlContext",
+        "getOrganizationEvidence",
+        "getEvidenceItems",
+        "getEvidenceForControl",
+        "getOrganizationVendors",
+        "getVendorDetails",
+        "getOrganizationAssets",
+        "getPrivacyTaxonomy",
+        "createAsset",
+        "updateAsset",
+        "createVendor",
+        "createEvidence",
+        "updateEvidence",
+        "linkEvidenceToControl"
+      ]
+    },
+    "pushOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "transport", "idempotency"],
+      "properties": {
+        "name": {
+          "description": "MCP tool name, or 'METHOD /path' for a REST endpoint.",
+          "type": "string"
+        },
+        "transport": { "enum": ["mcp", "rest"] },
+        "scope": { "type": "string" },
+        "idempotency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "key", "verified_at"],
+          "properties": {
+            "kind": {
+              "description": "server_upsert = the server updates in place on the key. server_dedupe = the server returns the existing record unchanged on the key. client_probe = the server has no key, so the piece must read Noru first and skip an existing record; this is a gap, and `gap` must say so.",
+              "enum": ["server_upsert", "server_dedupe", "client_probe"]
+            },
+            "key": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string" }
+            },
+            "verified_at": {
+              "description": "Where this idempotency behaviour is documented publicly — a section of https://api.noru.tech/llms.txt, or the tool description published by https://api.noru.tech/v1/mcp — so a reader can check the claim instead of taking it on trust. If the behaviour is not documented anywhere public, say that here and treat the claim as unverified rather than citing something a reader cannot open.",
+              "type": "string"
+            },
+            "gap": {
+              "description": "Required when kind is client_probe: what is missing server-side and what would fix it.",
+              "type": "string"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "kind": { "const": "client_probe" } },
+                "required": ["kind"]
+              },
+              "then": { "required": ["gap"] }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

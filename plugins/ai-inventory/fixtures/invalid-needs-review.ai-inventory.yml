@@ -1,0 +1,34 @@
+# Fixture: the collector could not derive a field and flagged it, and nobody resolved the flag.
+# A skeleton must not be pushable just because someone pasted an owner into it.
+# Expected: exit 1, "needs_review" still true.
+version: 0.1.0
+piece: ai-inventory
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: ai-inventory@0.1.0
+providers:
+  - key: example-llm
+    vendor_name: Example LLM Provider
+    refs:
+      - packages/inference/src/client.ts:12
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      rationale: Only model provider reachable from production code paths at this commit.
+ai_systems:
+  - key: support-triage
+    name: Support ticket triage
+    purpose: Classifies inbound support tickets by urgency and routes them.
+    provider: example-llm
+    deployment: hosted_api
+    autonomy: supervised
+    refs:
+      - apps/support/src/triage/handler.ts:41
+    interpretation:
+      owner: dana.reed@example.com
+      decided_at: 2026-08-01
+      expires_at: 2027-02-01
+      rationale: Walked the triage path with the support engineering lead and confirmed the gate.
+    needs_review: true

@@ -1,0 +1,19 @@
+{
+  "_comment": "Fixture queue for the evidence-push collector determinism test. In real use this file is written by the skill from getOrganizationControls + getControlContext. The ids below are in the reserved synthetic namespaces (zz-*, E-ZZ-*) that contract/README.md sets aside so no real catalogue id ever enters this repository.",
+  "fetched_at": "2026-08-27T09:14:00Z",
+  "via": ["getOrganizationControls", "getControlContext"],
+  "controls": [
+    {
+      "control_id": "zz-01",
+      "display_id": "ZZ-01",
+      "name": "Example periodic reconciliation control",
+      "status": "in_progress",
+      "coverage": 33,
+      "testing_guidance_available": true,
+      "unmet_evidence_items": [
+        { "id": "E-ZZ-01", "title": "Example Reconciliation Records", "type": "record" },
+        { "id": "E-ZZ-02", "title": "Example Quarterly Access Review", "type": "record" }
+      ]
+    }
+  ]
+}
