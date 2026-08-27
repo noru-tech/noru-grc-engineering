@@ -8,6 +8,35 @@ one version number; the release workflow fails if they disagree.
 
 ### Added
 
+- `privacy-datamap` — the piece skeleton, its declaration and its push. Supersedes
+  [`noru-tech/privacy-taxonomy`](https://github.com/noru-tech/privacy-taxonomy), whose skill name it
+  keeps, so `/privacy-datamap` and "generate a Fides data map for this repo" go on working; the
+  plugin name and the install path change. **It collects nothing yet** — the collector and the
+  manifest schema land next, and the valid fixture still carries the scaffold's generic shape.
+
+  What is real is the push, and it is the first one in this repository that requirement 4 describes
+  literally: `mode: single_call`, one operation, `ingestDatamap`, carrying `slug` + `commitSha` +
+  `branch`. Nothing to fan out over — the tool takes the whole data map for a source, so a
+  repository with four hundred fields is one write.
+
+  Its idempotency is declared `server_dedupe`, not `server_upsert`, and the gap is written down.
+  The published tool description says "identical content is a no-op", which covers re-running CI on
+  an unchanged repository. It does not say what happens when the same slug is pushed with *changed*
+  content, which is the ordinary case, and `llms.txt` documents no datamap endpoint and no
+  idempotency rule for one. So `:diff` reads `getPrivacyDataMap` and `listPrivacyDatasets` first and
+  reports the change set rather than asserting what the server will do with it.
+
+  The piece's own bookkeeping — `refs`, `interpretation`, `needs_review` — is stripped before
+  anything is sent: it is how a human reviews the manifest in a pull request, and a Fides manifest
+  carrying it is one no other Fides tool can read. The payload is hashed over a key-sorted
+  canonical form, because a JSON object is not guaranteed to come back with its key order intact and
+  hashing the unsorted form would make every second run look like a change.
+
+  Its idempotency test asserts the single call, the argument names taken from the published tool
+  schema, the provenance, and that a second run is a no-op. Two further assertions — that no
+  bookkeeping reaches the wire, and that key order alone is not a change — **report themselves
+  skipped**, because the fixture has no collections yet and they would otherwise pass whether or not
+  the code did anything. They activate on their own once the schema and fixture carry real content.
 - `audit-pack` — `:scan` / `:diff` / `:push`. Assembles what an auditor asks for, for one framework
   over one window: the controls in scope with what is expected of each and what is actually linked,
   the local artifacts an integration cannot reach, the other pieces' committed manifests, and a

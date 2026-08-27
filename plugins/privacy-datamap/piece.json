@@ -1,0 +1,130 @@
+{
+  "$schema": "../../contract/piece.schema.json",
+  "piece": "privacy-datamap",
+  "contract_version": "0.1.0",
+  "artifact": ".noru/privacy-datamap.yml",
+  "manifest_schema": "contract/privacy-datamap.schema.json",
+  "commands": {
+    "scan": "commands/scan.md",
+    "diff": "commands/diff.md",
+    "push": "commands/push.md"
+  },
+  "skill": "skills/privacy-datamap/SKILL.md",
+  "collector": {
+    "entrypoint": "scripts/collect.mjs",
+    "deterministic": true,
+    "network": false
+  },
+  "validator": {
+    "entrypoint": "scripts/validate_manifest.py",
+    "runtime": "python3-stdlib",
+    "vocabulary": [
+      "references/vocabulary.json",
+      "references/taxonomy/data_categories.json",
+      "references/taxonomy/data_uses.json",
+      "references/taxonomy/data_subjects.json"
+    ],
+    "suggestions": true,
+    "exit_codes": {
+      "0": "manifest is valid; warnings may be present",
+      "1": "manifest has validation errors",
+      "2": "usage error, unreadable file, or unparseable YAML"
+    },
+    "fixtures": {
+      "valid": [
+        "fixtures/valid.privacy-datamap.yml"
+      ],
+      "invalid": [
+        {
+          "path": "fixtures/invalid-missing-interpretation.privacy-datamap.yml",
+          "expect_message": "missing required `interpretation`"
+        },
+        {
+          "path": "fixtures/invalid-unknown-kind.privacy-datamap.yml",
+          "expect_message": "unknown item kind"
+        }
+      ]
+    }
+  },
+  "push": {
+    "entrypoint": "scripts/push.mjs",
+    "mode": "single_call",
+    "operations": [
+      {
+        "name": "ingestDatamap",
+        "transport": "mcp",
+        "scope": "write:datamaps",
+        "idempotency": {
+          "kind": "server_dedupe",
+          "key": [
+            "slug",
+            "manifest content"
+          ],
+          "verified_at": "The ingestDatamap tool description published by https://api.noru.tech/v1/mcp reads: \"Ingest a Fideslang privacy manifest (parsed .fides/datamap.yml) for a source. Idempotent: identical content is a no-op.\" It documents `slug` as \"Stable source identifier, unique per org (e.g. noru-tech/app).\" That covers the case this piece actually re-runs in: CI on an unchanged repository pushes the same manifest and nothing changes. It does not cover the changed-content path \u2014 see `gap`. https://api.noru.tech/llms.txt confirms the scope verbatim (`write:datamaps` \u2014 \"Push fideslang privacy manifests (`.fides/datamap.yml`) from CI\"), but its \"Idempotency/Upsert Behavior\" section names only POST /v1/assets and POST /v1/security-findings, and the document publishes no REST endpoint for datamap ingestion at all. So there is one public source for this behaviour, not two.",
+          "gap": "What is documented is a no-op on identical content, not an upsert on `slug`. Nothing public says what happens when the same slug is pushed with a CHANGED manifest \u2014 replaced, merged, or filed alongside as a second record \u2014 and that is the ordinary case, because the manifest changes every time the schema does. Until it is documented, `:diff` reads getPrivacyDataMap and listPrivacyDatasets first and the piece shows the change set rather than asserting what the server will do with it. A documented upsert on `slug` would let this be declared server_upsert \u2014 the shape requirement 4 asks for \u2014 and would let the pre-read go."
+        }
+      }
+    ],
+    "provenance": {
+      "slug": true,
+      "commit_sha": true,
+      "branch": true
+    },
+    "diff_required": true,
+    "requires_confirmation": true
+  },
+  "scopes": {
+    "read": [
+      "read:datamaps"
+    ],
+    "write": [
+      "write:datamaps"
+    ]
+  },
+  "queue": {
+    "source": [
+      {
+        "kind": "repository",
+        "note": "The schemas, models, migrations and API contracts the repository actually contains. This half of the queue is repo-resident truth: no server-side integration can see which columns exist on a branch that has not merged, and no API key can read a migration."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getPrivacyTaxonomy",
+        "note": "The vocabulary Noru itself holds. The bundled snapshot under references/taxonomy/ is the offline floor required by requirement 3; where the piece can reach Noru it reconciles against this and reports a difference rather than silently preferring what is on disk."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getPrivacyDataMap",
+        "note": "What the organization's data map already says, so :diff shows a real change set instead of reporting an established data map as entirely new."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "listPrivacyDatasets",
+        "note": "The datasets Noru already holds for this source, so a collection that moved between stores reads as a move rather than as a deletion and an unrelated creation."
+      }
+    ],
+    "hardcoded_expectations": false
+  },
+  "interpretation": {
+    "required": true,
+    "level": "per_claim",
+    "unattributed": "error"
+  },
+  "ci": {
+    "output_json": true,
+    "quiet": true,
+    "exit_codes": {
+      "0": "success",
+      "1": "drift, validation failure, an unresolved needs_review claim, or a stale plan",
+      "2": "usage error, including a push without --confirm"
+    }
+  },
+  "outputs": [
+    {
+      "path": ".fides/datamap.yml",
+      "purpose": "The data map in Ethyca's own on-disk format, for the `fides` CLI and anything else that reads a Fides manifest. It is not the manifest: `.noru/privacy-datamap.yml` carries the citations, the attribution and the review state, and is what `:push` is bound to; this is that content projected down to plain Fideslang with the piece's own bookkeeping removed. Keeping the conventional path is the whole point \u2014 a data map the ecosystem's tooling cannot read is a data map that only Noru can use.",
+      "format": "fideslang",
+      "rendered_from_validated_manifest": true
+    }
+  ]
+}

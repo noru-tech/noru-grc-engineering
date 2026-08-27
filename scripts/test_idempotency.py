@@ -1112,6 +1112,171 @@ def test_loader_independence(results, tmp):
 
 # Every piece, and the test that proves re-running it is a no-op. A piece missing from this table is
 # reported as a failure by main() — see the note in the module docstring about gates that overclaim.
+def test_privacy_datamap(results, tmp):
+    """The first piece whose push is a single call, so idempotency is a property of one payload.
+
+    Every other piece here proves that a fan-out of writes settles: each write finds its own record
+    and skips. This one has nothing to fan out over — ingestDatamap takes the whole data map for a
+    source — so what has to be proved instead is that the payload is stable. If the same repository
+    serialises to a payload that hashes differently on a second run, the server's documented
+    "identical content is a no-op" never fires and every scan re-ingests the map.
+    """
+    repo, piece, decl, manifest = prepare(tmp, "privacy-datamap")
+    label = "privacy-datamap"
+    push = piece / "scripts" / "push.mjs"
+
+    validate_and_parse(piece, manifest, repo, results, label)
+    write_state(repo, {"fetched_at": "2026-08-27T09:00:00Z"})
+
+    first = diff(piece, repo)
+    if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
+        return
+    plan = json.loads(first.stdout)
+
+    results.check(
+        f"[{label}] the plan is ONE call, not a fan-out",
+        len(plan["operations"]) == 1,
+        json.dumps(plan["summary"]),
+    )
+    op = plan["operations"][0]
+    results.check(
+        f"[{label}] the one call is the declared ingestDatamap",
+        op["operation"] == decl["push"]["operations"][0]["name"],
+        op["operation"],
+    )
+    # The argument names are the tool's own, from its published schema. Getting one wrong is a
+    # runtime failure no local test would otherwise catch.
+    results.check(
+        f"[{label}] the call carries slug, manifest, commitSha and branch",
+        sorted(op["arguments"]) == ["branch", "commitSha", "manifest", "slug"],
+        json.dumps(sorted(op["arguments"])),
+    )
+    results.check(
+        f"[{label}] provenance on the call matches the manifest",
+        op["arguments"]["slug"] == plan["provenance"]["slug"]
+        and op["arguments"]["commitSha"] == plan["provenance"]["commit_sha"]
+        and op["arguments"]["branch"] == plan["provenance"]["branch"],
+        json.dumps(op["arguments"].get("slug")),
+    )
+
+    # refs, interpretation and needs_review are how a human reviews the manifest in a pull request.
+    # None of them is Noru's business, and a Fides manifest carrying them is one no other Fides tool
+    # can read. This asserts they never reach the wire, at any depth.
+    def keys_at_every_depth(node):
+        if isinstance(node, list):
+            for item in node:
+                yield from keys_at_every_depth(item)
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                yield key
+                yield from keys_at_every_depth(value)
+
+    payload = op["arguments"]["manifest"]
+    has_content = bool(payload.get("dataset") or payload.get("system"))
+    leaked = sorted(
+        set(keys_at_every_depth(payload)) & {"refs", "interpretation", "needs_review"}
+    )
+    if has_content:
+        results.check(
+            f"[{label}] the piece's own bookkeeping never reaches Noru",
+            not leaked,
+            f"leaked: {leaked}",
+        )
+    else:
+        results.skip(
+            f"[{label}] the piece's own bookkeeping never reaches Noru",
+            "the valid fixture carries no dataset or system yet, so the projection has nothing to "
+            "strip and this would pass whether or not toFideslang stripped anything. It activates "
+            "on its own once the manifest schema and the fixture carry real collections.",
+        )
+
+    refused = run(["node", str(push), f"--repo={repo}"])
+    results.check(
+        f"[{label}] push without --confirm is refused with exit 2",
+        refused.returncode == 2,
+        refused.stderr[:200],
+    )
+
+    confirmed = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    if not results.check(
+        f"[{label}] confirmed push emits the call", confirmed.returncode == 0, confirmed.stderr
+    ):
+        return
+    results.check(
+        f"[{label}] the confirmed push emits exactly one call",
+        len(json.loads(confirmed.stdout)["calls"]) == 1,
+        confirmed.stdout[:200],
+    )
+
+    # Now Noru holds exactly what was sent. A second run must recognise its own work.
+    write_state(
+        repo,
+        {"fetched_at": "2026-08-27T10:00:00Z", "datamap": op["arguments"]["manifest"]},
+    )
+
+    second = diff(piece, repo)
+    if not results.check(f"[{label}] second diff succeeds", second.returncode == 0, second.stderr):
+        return
+    plan2 = json.loads(second.stdout)
+    non_skip = [o for o in plan2["operations"] if o["effect"] != "skip"]
+    results.check(
+        f"[{label}] SECOND DIFF IS A NO-OP (every operation skipped)",
+        len(non_skip) == 0,
+        "; ".join(f"{o['operation']} {o['effect']} {o['subject']}" for o in non_skip),
+    )
+
+    second_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    results.check(
+        f"[{label}] SECOND PUSH MAKES NO CALLS",
+        second_push.returncode == 0 and len(json.loads(second_push.stdout)["calls"]) == 0,
+        second_push.stdout[:200],
+    )
+
+    # Key order is not guaranteed to survive a round trip through an API. If the digest were taken
+    # over the unsorted form, a re-serialised map would look changed on every run and the server's
+    # content no-op would never fire.
+    if has_content:
+        shuffled = {
+            "system": payload.get("system", []),
+            "dataset": [
+                {key: entry[key] for key in reversed(list(entry))}
+                for entry in payload.get("dataset", [])
+            ],
+        }
+        write_state(repo, {"fetched_at": "2026-08-27T10:05:00Z", "datamap": shuffled})
+        third = diff(piece, repo)
+        if third.returncode == 0:
+            plan3 = json.loads(third.stdout)
+            results.check(
+                f"[{label}] key order alone does not read as a change",
+                plan3["operations"][0]["effect"] == "skip",
+                plan3["operations"][0]["reason"],
+            )
+        write_state(
+            repo,
+            {"fetched_at": "2026-08-27T10:00:00Z", "datamap": payload},
+        )
+        diff(piece, repo)
+    else:
+        results.skip(
+            f"[{label}] key order alone does not read as a change",
+            "there are no collections to reorder yet. toFideslang rebuilds the top level in a fixed "
+            "order, so with an empty payload this would pass even without the canonical sort that "
+            "makes it true. It activates once the fixture carries real collections.",
+        )
+
+    # Editing the manifest must invalidate the reviewed plan.
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "\n# edited after the plan\n", encoding="utf-8"
+    )
+    stale = run(["node", str(push), f"--repo={repo}", "--confirm"])
+    results.check(
+        f"[{label}] editing the manifest invalidates the plan",
+        stale.returncode == 1 and "manifest changed" in stale.stderr,
+        stale.stderr[:200],
+    )
+
+
 IDEMPOTENCY_TESTS = {
     "ai-inventory": test_ai_inventory,
     "evidence-push": test_evidence_push,
@@ -1119,6 +1284,7 @@ IDEMPOTENCY_TESTS = {
     "review-signoff": test_review_signoff,
     "iac-scan": test_iac_scan,
     "audit-pack": test_audit_pack,
+    "privacy-datamap": test_privacy_datamap,
 }
 
 
