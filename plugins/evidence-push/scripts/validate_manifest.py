@@ -37,6 +37,13 @@ import re
 
 _BLOCK_SCALAR_RE = re.compile(r"^[>|](?:[+-]\d*|\d*[+-]?)$")  # >, |, >-, |+, >2, |2-, |-2, …
 
+# The YAML 1.1 boolean spellings PyYAML's SafeLoader resolves, so `ci_gated: yes` is a bool under
+# both loaders. Deliberately not `y`/`n`: YAML 1.1 lists them but PyYAML's resolver does not match
+# them, so accepting them here would invent a divergence in the other direction. Mixed case
+# (`yEs`) is a plain string to PyYAML too, hence exact membership rather than a lowercased compare.
+_TRUE_WORDS = frozenset(("true", "True", "TRUE", "yes", "Yes", "YES", "on", "On", "ON"))
+_FALSE_WORDS = frozenset(("false", "False", "FALSE", "no", "No", "NO", "off", "Off", "OFF"))
+
 
 def load_yaml(text):
     """Return (document, loader_name).
@@ -47,6 +54,12 @@ def load_yaml(text):
     our manifests is an ISO string by contract, so we strip the timestamp resolver rather than
     converting after the fact -- that keeps the author's exact text, which the error messages
     quote back at them.
+
+    Booleans converge the other way round. PyYAML resolves the YAML 1.1 spellings too -- `yes`,
+    `no`, `on`, `off` -- and `ci_gated`, `needs_review`, `profiling` and
+    `testing_guidance_available` are booleans by contract, not strings, so here it is the fallback
+    that learns PyYAML's set (see _TRUE_WORDS). Same rule in both directions: converge on the type
+    the contract asks for.
     """
     try:
         import yaml  # type: ignore
@@ -89,9 +102,9 @@ def _scalar(raw):
     s = raw.strip()
     if s == "" or s in ("null", "~", "Null", "NULL"):
         return None
-    if s in ("true", "True", "TRUE"):
+    if s in _TRUE_WORDS:
         return True
-    if s in ("false", "False", "FALSE"):
+    if s in _FALSE_WORDS:
         return False
     if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
         return s[1:-1]
