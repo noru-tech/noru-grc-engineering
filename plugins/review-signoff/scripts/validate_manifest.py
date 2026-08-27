@@ -52,13 +52,44 @@ _BLOCK_SCALAR_RE = re.compile(r"^[>|][+\-]?\d*$")  # >, |, >-, >+, |-, |+, >2, |
 
 
 def load_yaml(text):
-    """Return (document, loader_name)."""
+    """Return (document, loader_name).
+
+    The two loaders must agree on types, or a manifest that validates on one machine fails on
+    another. PyYAML resolves an unquoted `2026-08-01` to a datetime.date and an unquoted
+    timestamp to a datetime.datetime; the fallback loader leaves both as strings. Every date in
+    our manifests is an ISO string by contract, so we strip the timestamp resolver rather than
+    converting after the fact -- that keeps the author's exact text, which the error messages
+    quote back at them.
+    """
     try:
         import yaml  # type: ignore
-
-        return yaml.safe_load(text), "PyYAML"
     except ImportError:
         return _fallback_load(text), "bundled fallback loader"
+
+    return yaml.load(text, Loader=_string_dates_loader(yaml)), "PyYAML"
+
+
+_TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
+_loader_cache = {}
+
+
+def _string_dates_loader(yaml):
+    """A SafeLoader with the implicit timestamp resolver removed, so dates stay strings."""
+    cached = _loader_cache.get("loader")
+    if cached is not None:
+        return cached
+
+    class _StringDatesLoader(yaml.SafeLoader):
+        pass
+
+    # yaml_implicit_resolvers is a class attribute shared with the parent until reassigned, so
+    # rebuild it here rather than mutating the lists in place and poisoning yaml.SafeLoader.
+    _StringDatesLoader.yaml_implicit_resolvers = {
+        ch: [(tag, regexp) for tag, regexp in resolvers if tag != _TIMESTAMP_TAG]
+        for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+    }
+    _loader_cache["loader"] = _StringDatesLoader
+    return _StringDatesLoader
 
 
 def suggest(key, valid):

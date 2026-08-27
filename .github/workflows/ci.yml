@@ -73,20 +73,34 @@ jobs:
         run: python3 scripts/check_vendored_lib.py
 
   tests:
-    name: tests (node ${{ matrix.node }}, python ${{ matrix.python }})
+    name: tests (node ${{ matrix.node }}, python ${{ matrix.python }}, ${{ matrix.yaml }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         # The floor is what CONTRIBUTING.md promises: Node 18 for global fetch/FormData/Blob, and a
         # Python old enough that "it works on the machine in front of you" is a safe assumption.
+        # The `yaml` dimension is not cosmetic. The validators ship a bundled fallback parser and
+        # use PyYAML when it happens to be importable, so there are two loaders in production and a
+        # manifest must validate identically under both. Testing only the clean interpreter hid a
+        # bug where PyYAML resolved unquoted dates to datetime.date and every valid fixture failed
+        # on any machine that had PyYAML installed.
         include:
           - node: "18"
             python: "3.9"
+            yaml: "no pyyaml"
           - node: "20"
             python: "3.12"
+            yaml: "no pyyaml"
+          - node: "20"
+            python: "3.12"
+            yaml: "pyyaml"
           - node: "22"
             python: "3.13"
+            yaml: "no pyyaml"
+          - node: "22"
+            python: "3.13"
+            yaml: "pyyaml"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -95,6 +109,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: install PyYAML so the other loader is exercised
+        if: matrix.yaml == 'pyyaml'
+        run: python3 -m pip install --quiet pyyaml
+      - name: confirm the intended loader is the one in use
+        run: |
+          python3 - <<'EOF'
+          import importlib.util, os, sys
+          have = importlib.util.find_spec("yaml") is not None
+          want = os.environ["WANT"] == "pyyaml"
+          if have != want:
+              sys.exit(f"expected pyyaml={want}, found {have}")
+          print("loader as expected: pyyaml" if have else "loader as expected: bundled fallback")
+          EOF
+        env:
+          WANT: ${{ matrix.yaml }}
       - name: schema fixtures and validator unit tests
         run: python3 scripts/test_validators.py
       - name: a second push must be a no-op
