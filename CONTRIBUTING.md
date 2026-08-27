@@ -171,5 +171,7 @@ The temporary `CODEX_HOME` keeps this out of your real configuration.
 4. Describe the behaviour change, how you tested it, and any security implication.
 
 By contributing you agree that your code and documentation are licensed under this project's MIT
-license. The vendored Fideslang taxonomy under `plugins/ai-inventory/references/taxonomy/` remains
-CC BY 4.0 — see [`NOTICE`](./NOTICE).
+license. The vendored Fideslang taxonomy under `contract/lib/taxonomy/`, and every verbatim copy of
+it under `plugins/<piece>/references/taxonomy/`, remains CC BY 4.0 — see [`NOTICE`](./NOTICE).
+Refresh it in the canonical directory only, then run `python3 scripts/check_vendored_lib.py --fix`;
+never edit a vendored copy.

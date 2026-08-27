@@ -111,6 +111,25 @@ one version number; the release workflow fails if they disagree.
 
 ### Changed
 
+- The Fideslang snapshot is now **canonical in one place**, `contract/lib/taxonomy/`, alongside
+  `yaml_mini.py` and for the same reason. `ai-inventory` keeps its verbatim copy of
+  `data_categories.json` — an installed plugin cannot read a file from outside its own directory —
+  and `scripts/check_vendored_lib.py` grew a third arm that fails the build if a copy drifts,
+  is missing, or is declared with no canonical to copy from. `--fix` re-copies it.
+
+  The arm is driven by each piece's own `validator.vocabulary` list rather than by a table kept in
+  the checker, so declaring the file is what opts a piece into the check and a piece vendors only
+  the vocabulary its validator actually loads. `ai-inventory` loads data categories and nothing
+  else, so that is all it carries.
+
+  `data_uses.json` (56 entries) and `data_subjects.json` (15) join the canonical directory although
+  no piece loads them yet. The refresh recipe regenerates all three from one upstream revision in
+  one pass, and a snapshot that holds only what today's pieces happen to need is a snapshot that
+  needs a second procedure the moment one of them needs more. The `Used by` column in
+  `contract/lib/taxonomy/SOURCE.md` says which are live.
+
+  Two refresh recipes existed for this same pinned upstream commit, one here and one in
+  `noru-tech/privacy-taxonomy`, and they had already diverged in wording. There is one now.
 - `contract/README.md` now records what `:push` means for a piece that **assembles** rather than
   collects — the artifact stays local and the judgements inside it land — along with two gaps the
   first such piece exposed: a read-only piece cannot satisfy a mandatory `push`, and a piece that
