@@ -1,0 +1,18 @@
+{
+  "$comment": "GDPR Article 9 special categories, plus Article 10 criminal-offence data, expressed as Fideslang keys. This is a property of the law applied to the taxonomy, not an opinion about what any framework wants of you, so it is a vocabulary and not a catalogue under contract/README.md. Matching is by dotted prefix: a key listed here covers itself and everything beneath it, so `user.biometric` covers `user.biometric.fingerprint`. The Fideslang keys are Ethyca's under CC BY 4.0 (see SOURCE.md); the selection of which of them the law treats as special is this repository's own and is MIT-licensed with the rest of the code.",
+  "basis": [
+    "Regulation (EU) 2016/679 Article 9(1) — racial or ethnic origin, political opinions, religious or philosophical beliefs, trade union membership, genetic data, biometric data processed for unique identification, health data, and data concerning sex life or sexual orientation.",
+    "Regulation (EU) 2016/679 Article 10 — personal data relating to criminal convictions and offences."
+  ],
+  "$reads_broadly": "Article 9 covers biometric data only where it is processed for the purpose of uniquely identifying a natural person, and this list cannot see the purpose — a stored photograph is biometric data without necessarily being Article 9 data. The whole `user.biometric` subtree is listed anyway, because over-reporting a special category costs a reviewer one conversation and under-reporting one costs a data subject their rights. Narrow it in the baseline's scopes, per system, with a rationale — never here.",
+  "fides_keys": [
+    "user.authorization.biometric",
+    "user.biometric",
+    "user.criminal_history",
+    "user.demographic.political_opinion",
+    "user.demographic.race_ethnicity",
+    "user.demographic.religious_belief",
+    "user.demographic.sexual_orientation",
+    "user.health_and_medical"
+  ]
+}

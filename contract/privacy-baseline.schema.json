@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/privacy-baseline.schema.json",
+  "title": "Noru privacy baseline (.noru/privacy-baseline.yml)",
+  "description": "The agreed privacy taxonomy, as an offline floor. Noru holds the truth — getPrivacyTaxonomy, getPrivacySettings, getRopa and listProcessingActivities are where an organization's agreed categories, purposes and processing activities actually live. This file exists so the gate can run on a fork pull request with no credential, which is the only place a privacy gate is worth having. It is a pinned snapshot that reconciles against Noru and reports a difference; a repository that silently prefers this file to Noru has re-created the drift problem one layer down. It is also a claim like any other, so it carries an interpretation block: a policy nobody has re-owned in two years is not a policy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "kind", "source", "interpretation"],
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "kind": { "const": "privacy-baseline" },
+    "source": { "$ref": "#/$defs/source" },
+    "data_categories": { "$ref": "#/$defs/rule" },
+    "data_uses": { "$ref": "#/$defs/rule" },
+    "data_subjects": { "$ref": "#/$defs/rule" },
+    "forbidden_pairs": {
+      "description": "Combinations that are permitted apart and forbidden together. The category may be allowed and the use may be allowed while the join of the two is the thing nobody agreed to — health data used for advertising is the canonical example, and neither single-axis list can express it.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/pair" }
+    },
+    "scopes": {
+      "description": "Narrowings that apply to one dataset or one system only. A category permitted organization-wide can be confined here to the store that is allowed to hold it: credit card numbers in the payments database and nowhere else.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/scope" }
+    },
+    "systems": { "$ref": "#/$defs/systems" },
+    "interpretation": { "$ref": "#/$defs/interpretation" }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pinned_from"],
+      "properties": {
+        "pinned_from": {
+          "description": "Which Noru state this floor was taken from. Without it nobody can tell a floor that is one day behind from one that is two years behind.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fetched_at", "via"],
+          "properties": {
+            "fetched_at": { "type": "string", "minLength": 10 },
+            "via": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "enum": [
+                  "getPrivacyTaxonomy",
+                  "getPrivacySettings",
+                  "getRopa",
+                  "listProcessingActivities",
+                  "getRegulationCoverage"
+                ]
+              }
+            },
+            "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "note": { "type": "string" }
+          }
+        }
+      }
+    },
+    "rule": {
+      "description": "One axis of the taxonomy. `allow` is closed-world by default: naming it makes everything unnamed unpermitted, which is what makes this a policy rather than a wish. `deny` always wins over `allow`, and the more specific of the two wins where both match.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allow": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "deny": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "allow_unlisted": {
+          "description": "Open the world back up: report an unlisted value rather than failing on it. For a team adopting the gate on an existing map that nobody has reconciled yet. `--mode=warn` is the better on-ramp, because it keeps the policy honest while the findings are still advisory.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["categories", "uses", "reason"],
+      "properties": {
+        "categories": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "uses": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "reason": {
+          "description": "Why this join is forbidden. A finding that cannot say why is one a team argues with rather than fixes.",
+          "type": "string",
+          "minLength": 10
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason"],
+      "properties": {
+        "dataset": { "type": "string", "minLength": 1 },
+        "system": { "type": "string", "minLength": 1 },
+        "allow": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "deny": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "confine": {
+          "description": "Categories that may appear HERE and nowhere else. This is the direction that actually gets asked for — not 'what may payments hold' but 'where is the only place a card number is allowed to be'.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "reason": { "type": "string", "minLength": 10 }
+      }
+    },
+    "systems": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "closed": {
+          "description": "When true, a system in the data map that this baseline does not name is a finding. A new service that started processing personal data without anyone agreeing to it is exactly the drift this gate exists to catch.",
+          "type": "boolean",
+          "default": false
+        },
+        "allow": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "interpretation": {
+      "description": "Contract requirement 8. The baseline is a claim: somebody agreed this taxonomy, on a date, until a date, for a reason.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "decided_at", "expires_at", "rationale"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 3 },
+        "decided_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "expires_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "rationale": { "type": "string", "minLength": 10 },
+        "refs": { "type": "array", "items": { "type": "string", "pattern": "^[^:\\s][^:]*:[0-9]+$" } }
+      }
+    }
+  }
+}
