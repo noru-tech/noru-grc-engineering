@@ -143,12 +143,15 @@ before one:
     mode: warn      # switch to gate once the report is quiet
 ```
 
-Two things fail a build, and **both are computed from the repository and a calendar** — no network,
-no credential, so this works on a pull request from a fork:
+Three things fail a build, and **all of them are computed from the repository, a calendar and a
+committed file** — no network, no credential, so this works on a pull request from a fork:
 
 - **drift** — the collector no longer agrees with the committed manifest, so someone changed the
   code without updating the record (exit `3`)
 - **an expired interpretation** — nobody has stood behind this claim since it went stale (exit `4`)
+- **personal data nobody agreed to** — the data map processes a category, purpose or subject the
+  committed privacy baseline does not permit (exit `7`). Drift asks whether someone *looked*; this
+  asks whether the answer was allowed to be yes
 
 `:diff` and `:push` need a key, so they are an opt-in job that runs only where secrets exist, and
 report as skipped rather than failing when there is none. Exit codes, warn-only adoption, and the

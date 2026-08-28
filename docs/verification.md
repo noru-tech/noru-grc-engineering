@@ -13,7 +13,8 @@ python3 scripts/test_validators.py     # schema fixtures + validator unit tests
 python3 scripts/test_collectors.py     # collectors detect what the pieces claim they detect
 python3 scripts/test_idempotency.py    # a second push is a no-op, end to end
 python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
-python3 scripts/test_ci_mode.py        # CI mode fails on drift and on an expired interpretation
+python3 scripts/test_ci_mode.py        # CI mode fails on drift, on an expired claim, and on
+                                       # personal data the baseline does not permit
 ```
 
 | Property | How it is proven |
@@ -40,6 +41,12 @@ python3 scripts/test_ci_mode.py        # CI mode fails on drift and on an expire
 | No credential leaks into the repository | the tree is scanned for credential-shaped strings |
 | A scaffolded piece satisfies the contract | CI scaffolds one and runs the contract test against it |
 | **CI mode fails on drift** | `test_ci_mode.py` adds a model provider to a copy of the fixture repo and asserts exit `3`, that the message names the provider and the `file:line` it arrived at, and that the gate clears again when the file is removed |
+| **CI mode fails on personal data the baseline does not permit** | `test_ci_mode.py` builds a repository whose data map matches it, commits a baseline narrower than the map, and asserts exit `7` with an `unpermitted_category` finding. Both routes to that finding are exercised separately, because the fix differs: an explicit `deny` entry, and a value absent from a closed `allow` list |
+| A permissive baseline clears the same gate | the same repository with a baseline written in prefixes (`user.contact` for `user.contact.email`) exits `0`, so the gate is not merely always-red |
+| **No baseline is reported as skipped, never as passed** | the same repository with no `.noru/privacy-baseline.yml` exits `0` with the policy step's status asserted to be `skipped` — this tool ships no default policy, and the absence of one must not read as a clean result |
+| A `--baseline` that does not exist is a broken gate | exits `6`, and `--mode=warn` does not suppress it |
+| The baseline is itself aged | `check_expiry.py` run against a baseline whose `expires_at` has passed exits `1`: the policy is a claim like any other |
+| The special-category list cannot drift | `check_repo.py` asserts every key `privacy-datamap` treats as Article 9/10 is covered by a prefix root in `contract/lib/taxonomy/special_categories.json`, and that every root is a real Fideslang category. Checked in the other direction by removing a root and adding a fake one |
 | **CI mode fails on an expired interpretation** | the same manifest with every `expires_at` moved into the past must exit `4`, name the owner, and *not* report drift — the code did not change |
 | Both at once is distinguishable from either | exit `1`, with both kinds in the report |
 | An invalid manifest is its own exit code | a fixture violating a piece's own cadence rule exits `5`, carries the validator's message through, and blocks the expiry step rather than passing it |
@@ -143,6 +150,20 @@ Run `:diff` before your first `:push`, and read it.
   particular pull request changed: the previous derived facts live in `.noru/.cache/` and are not
   committed. So the itemisation under a drift failure can include things that were already untracked
   before the change, and it is empty when only line numbers moved — it says so when that happens.
+- **The policy gate trusts a file that people edit.** Nothing offline distinguishes an agreed
+  taxonomy from one widened on Tuesday to make a build green. The baseline carries an owner, a date
+  and an expiry, and widening it is a diff in a pull request rather than a silent setting — but the
+  only thing that actually reconciles it against what the organization agreed is a credentialed job
+  reading Noru, and that job is not written yet. Until it is, the floor is trusted.
+- **The policy gate sees stored columns, not flows.** It reads what a data map says a repository
+  holds. Personal data sent to a third party, written to a log, or placed in a prompt without ever
+  being stored is invisible to it. `ai-inventory` covers the model-call half; third-party egress is
+  covered by nothing.
+- **An empty data map satisfies the policy gate.** `privacy-datamap` reads five schema formats, so a
+  repository whose schema lives only in TypeORM, Mongoose, ActiveRecord, Ecto or a Zod DTO produces
+  an empty map — and an empty map contains no unpermitted category. The gate is sound and its input
+  may be silently incomplete, which is the more dangerous of the two failure modes and is not yet
+  closed.
 - **CI mode checks the repository's record, not Noru's.** Offline it cannot see whether a control is
   still satisfied, whether the evidence is still linked, or whether someone deleted the record last
   week. A fork pull request gets the two local gates and nothing else, which is the honest ceiling

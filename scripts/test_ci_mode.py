@@ -172,10 +172,174 @@ def case_green(results, tmp):
     )
     results.check(
         "green: every step ran",
-        report is not None
-        and [s["status"] for s in report["steps"]] == ["pass", "pass", "pass"],
+        report is not None and step_statuses(report) == GREEN_STEPS,
         (report or {}).get("steps"),
     )
+
+
+# (step, status) for the offline half of a green run. Named rather than counted so a step that
+# silently stops running is a failure here and not a smaller list nobody looks at.
+#
+# `policy` is `skipped` because build_green_repo commits no privacy baseline: the orchestrator has
+# no default policy of its own and must never report the absence of one as a pass. The repo that
+# does commit one is case_policy below.
+GREEN_STEPS = [
+    ("scan", "pass"),
+    ("validate", "pass"),
+    ("expiry", "pass"),
+    ("policy", "skipped"),
+]
+
+
+def step_statuses(report):
+    return [(s["step"], s["status"]) for s in report["steps"]]
+
+
+# A baseline that permits exactly what the privacy-datamap fixture contains, and one that does not.
+# Written as prefixes because Fideslang is a tree and the baseline has to be readable: `user.contact`
+# standing for `user.contact.email` is the whole reason the allow list is three lines and not thirty.
+BASELINE_PERMISSIVE = """version: 0.1.0
+kind: privacy-baseline
+source:
+  pinned_from:
+    fetched_at: 2026-08-27T09:00:00Z
+    via: [getPrivacyTaxonomy]
+data_categories:
+  allow: [user.contact, user.device, user.authorization]
+data_uses:
+  allow: [essential]
+data_subjects:
+  allow: [customer]
+interpretation:
+  owner: fixture.owner@example.com
+  decided_at: 2026-08-01
+  expires_at: 2027-08-01
+  rationale: The taxonomy this fixture repository is allowed to process.
+"""
+
+BASELINE_STRICT = """version: 0.1.0
+kind: privacy-baseline
+source:
+  pinned_from:
+    fetched_at: 2026-08-27T09:00:00Z
+    via: [getPrivacyTaxonomy]
+data_categories:
+  allow: [user.contact]
+  deny: [user.device.ip_address]
+data_uses:
+  allow: [essential]
+data_subjects:
+  allow: [customer]
+interpretation:
+  owner: fixture.owner@example.com
+  decided_at: 2026-08-01
+  expires_at: 2027-08-01
+  rationale: Deliberately narrower than the fixture, so the gate is observed failing.
+"""
+
+BASELINE_EXPIRED = BASELINE_PERMISSIVE.replace("expires_at: 2027-08-01", "expires_at: 2020-01-01")
+
+
+def case_policy(results, tmp):
+    """The privacy gate: was this personal data ever agreed to, not merely signed for?
+
+    Drift already asks whether anybody looked. This asks whether the answer was allowed to be yes,
+    which is a different question and the one an unpermitted column gets wrong.
+    """
+    repo, _ = build_green_repo(pathlib.Path(tmp) / "policy", "privacy-datamap")
+    baseline = repo / ".noru" / "privacy-baseline.yml"
+
+    # No baseline at all: the step has no policy of its own and must not invent one — but it must
+    # never report that as a pass either.
+    code, report = ci(repo, piece="privacy-datamap")
+    policy_step = next(
+        (s for s in (report or {}).get("steps", []) if s["step"] == "policy"), None
+    )
+    results.check("policy: no baseline exits 0", code == 0, f"exit {code}")
+    results.check(
+        "policy: no baseline is skipped, never passed",
+        policy_step is not None and policy_step["status"] == "skipped",
+        policy_step,
+    )
+
+    baseline.write_text(BASELINE_PERMISSIVE, encoding="utf-8")
+    code, report = ci(repo, piece="privacy-datamap")
+    results.check("policy: a baseline that permits the map exits 0", code == 0, f"exit {code}")
+    results.check(
+        "policy: prefixes cover their subtree",
+        "unpermitted_category" not in kinds(report),
+        kinds(report),
+    )
+
+    baseline.write_text(BASELINE_STRICT, encoding="utf-8")
+    code, report = ci(repo, piece="privacy-datamap")
+    results.check("policy: an unpermitted category exits 7", code == 7, f"exit {code}")
+    results.check(
+        "policy: raises an unpermitted_category finding",
+        "unpermitted_category" in kinds(report),
+        kinds(report),
+    )
+    denied = [
+        f for f in (report or {}).get("findings", []) if f["kind"] == "unpermitted_category"
+    ]
+    # Two different code paths reach this finding and both must be exercised: an explicit `deny`
+    # entry, and a value that is simply absent from a closed `allow` list. They produce different
+    # messages because the fix is different — one was ruled out, the other was never considered.
+    by_value = {str(f.get("value")): f for f in denied}
+    results.check(
+        "policy: an explicit deny names the pattern that denied it",
+        "user.device.ip_address" in by_value
+        and "denies" in by_value["user.device.ip_address"]["message"],
+        sorted(by_value),
+    )
+    results.check(
+        "policy: a closed allow list says the value was never listed",
+        "user.authorization.password" in by_value
+        and "not in the baseline" in by_value["user.authorization.password"]["message"],
+        sorted(by_value),
+    )
+    results.check(
+        "policy: the finding cites where in the manifest it is",
+        all(f.get("path") and f.get("subject") for f in denied),
+        denied[:2],
+    )
+
+    code, report = ci(repo, "--mode=warn", piece="privacy-datamap")
+    results.check("policy: warn mode reports and exits 0", code == 0, f"exit {code}")
+    results.check(
+        "policy: warn mode finds the same thing",
+        "unpermitted_category" in kinds(report),
+        kinds(report),
+    )
+
+    # The baseline is a claim like any other, so the expiry step ages it. A policy nobody has
+    # re-owned in six years is not a policy, and the gate standing on it is not a gate.
+    baseline.write_text(BASELINE_EXPIRED, encoding="utf-8")
+    code, report = ci(repo, f"--baseline={baseline}", piece="privacy-datamap")
+    results.check(
+        "policy: an expired baseline still gates the map it permits", code == 0, f"exit {code}"
+    )
+    expiry_code, _ = run_expiry(baseline)
+    results.check(
+        "policy: check_expiry ages the baseline itself", expiry_code == 1, f"exit {expiry_code}"
+    )
+
+
+def run_expiry(path):
+    completed = run(
+        [
+            sys.executable,
+            str(CHECK_EXPIRY),
+            str(path),
+            f"--as-of={AS_OF}",
+            "--output=json",
+            "--quiet",
+        ]
+    )
+    try:
+        return completed.returncode, json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return completed.returncode, None
 
 
 def case_drift(results, tmp):
@@ -414,9 +578,8 @@ def case_every_piece(results, tmp):
         code, report = ci(repo, piece=name)
         results.check(f"every piece: {name} passes CI mode green", code == 0, f"exit {code}")
         results.check(
-            f"every piece: {name} ran all three offline steps",
-            report is not None
-            and [s["status"] for s in report["steps"]] == ["pass", "pass", "pass"],
+            f"every piece: {name} ran every offline step",
+            report is not None and step_statuses(report) == GREEN_STEPS,
             (report or {}).get("steps"),
         )
 
@@ -494,6 +657,7 @@ def case_piece_agnostic(results, tmp):
 
 CASES = (
     case_green,
+    case_policy,
     case_drift,
     case_expired,
     case_mixed,

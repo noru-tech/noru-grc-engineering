@@ -239,6 +239,52 @@ def check_reference_files_exist(problems):
                         f"references/{rel}, which does not exist"
                     )
 
+def check_special_categories(problems):
+    """The canonical Article 9 / Article 10 list must cover every key a piece treats as special.
+
+    `contract/lib/taxonomy/special_categories.json` is what `scripts/check_policy.py` reads, and
+    `plugins/privacy-datamap/references/classification.json` is what the collector reads. Two lists
+    of what the law calls special is one list too many: if they drift, the piece flags a field the
+    policy gate then says nothing about, or the other way round.
+
+    The comparison is coverage rather than equality, because the canonical file is written as
+    prefix roots — `user.biometric` standing for the whole subtree — while a piece may enumerate
+    the leaves it actually classifies. Every canonical root must also be a real Fideslang key, or
+    the roots silently cover nothing.
+    """
+    canonical_path = ROOT / "contract" / "lib" / "taxonomy" / "special_categories.json"
+    categories_path = ROOT / "contract" / "lib" / "taxonomy" / "data_categories.json"
+    if not canonical_path.is_file():
+        problems.append(
+            "contract/lib/taxonomy/special_categories.json is missing — check_policy.py cannot "
+            "report special-category data without it"
+        )
+        return
+    roots = json.loads(canonical_path.read_text(encoding="utf-8")).get("fides_keys") or []
+
+    if categories_path.is_file():
+        known = {row["fides_key"] for row in json.loads(categories_path.read_text(encoding="utf-8"))}
+        for root in sorted(set(roots) - known):
+            problems.append(
+                f"special_categories.json lists '{root}', which is not a Fideslang data category — "
+                "a root that matches nothing silently covers nothing"
+            )
+
+    def covered(key):
+        return any(key == root or key.startswith(root + ".") for root in roots)
+
+    classification = ROOT / "plugins" / "privacy-datamap" / "references" / "classification.json"
+    if not classification.is_file():
+        return
+    piece_keys = json.loads(classification.read_text(encoding="utf-8")).get("special_categories")
+    for key in sorted(k for k in (piece_keys or []) if not covered(k)):
+        problems.append(
+            f"[privacy-datamap] classification.json treats '{key}' as a special category but no "
+            "root in contract/lib/taxonomy/special_categories.json covers it — the collector would "
+            "flag it and scripts/check_policy.py would not"
+        )
+
+
 def check_vocab_sync(problems):
     for piece, key, path, mode in VOCAB_SYNC:
         vocab_path = ROOT / "plugins" / piece / "references" / "vocabulary.json"
@@ -351,6 +397,7 @@ def main(argv):
         plugin_names = check_marketplaces(problems)
         check_pieces_registered(problems, plugin_names)
         check_reference_files_exist(problems)
+        check_special_categories(problems)
         check_vocab_sync(problems)
         check_schemas_evaluable(problems)
         check_skills(problems, plugin_names)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one piece headless: scan -> validate -> expiry -> (diff -> push).
+"""Run one piece headless: scan -> validate -> expiry -> policy -> (diff -> push).
 
 Standard library only, and by default no network and no credential — that is the whole design
 constraint. A fork pull request has no secrets, so the checks that matter most on a pull request
@@ -11,6 +11,9 @@ have to be computable from the repository alone. Two of them are:
      compares against is a field in the committed file.
   2. **Expired interpretation.** A claim whose expiry has passed, or that is outside the review
      cadence declared for this path. Local computation plus a calendar. See scripts/check_expiry.py.
+  3. **Personal data nobody agreed to.** A data category, purpose or subject in the manifest that
+     the committed privacy baseline does not permit. The baseline is a floor pinned from Noru so
+     this stays offline; Noru is the truth. See scripts/check_policy.py.
 
 The `diff` and `push` half genuinely needs Noru, so it is opt-in, and when the inputs it needs are
 absent it is reported as skipped rather than failed. A gate that breaks on every fork pull request
@@ -28,9 +31,9 @@ through redact() before it can reach stdout or the report.
 
 Usage:
     python3 scripts/ci_check.py --piece=<name> [--repo=<path>] [--plugins=<dir>]
-        [--mode=gate|warn] [--steps=scan,validate,expiry,diff,push|all]
+        [--mode=gate|warn] [--steps=scan,validate,expiry,policy,diff,push|all]
         [--as-of=YYYY-MM-DD] [--warn-within-days=N] [--max-age-days=N]
-        [--fail-on=<kinds>|none] [--state=<path>]
+        [--fail-on=<kinds>|none] [--baseline=<path>] [--state=<path>]
         [--on-missing-prerequisite=skip|fail] [--report=<path.json>]
         [--output=json|text] [--quiet]
 
@@ -42,6 +45,7 @@ Exit codes — see docs/ci-mode.md for the table and the reasoning:
     4  an interpretation has expired or is outside the declared cadence
     5  the manifest failed validation
     6  a check could not run at all (missing runtime, unreadable declaration, child crash)
+    7  the manifest processes personal data the privacy baseline does not permit
 """
 import datetime
 import json
@@ -59,6 +63,13 @@ from check_expiry import (  # noqa: E402
     evaluate as evaluate_expiry,
     parse_date,
 )
+from check_policy import (  # noqa: E402
+    DEFAULT_FAIL_ON as POLICY_DEFAULT_FAIL_ON,
+    KINDS as POLICY_KINDS,
+    evaluate as evaluate_policy,
+    load_document as load_baseline,
+    load_special_categories,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -69,12 +80,15 @@ EXIT_DRIFT = 3
 EXIT_EXPIRY = 4
 EXIT_INVALID = 5
 EXIT_TOOLING = 6
+EXIT_POLICY = 7
 
-ALL_STEPS = ("scan", "validate", "expiry", "diff", "push")
-DEFAULT_STEPS = ("scan", "validate", "expiry")
+ALL_STEPS = ("scan", "validate", "expiry", "policy", "diff", "push")
+DEFAULT_STEPS = ("scan", "validate", "expiry", "policy")
 
-FINDING_KINDS = ("drift", "invalid", "dangling_ref") + EXPIRY_KINDS
-DEFAULT_FAIL_ON = ("drift", "invalid", "expired", "cadence", "unparsable")
+FINDING_KINDS = ("drift", "invalid", "dangling_ref") + EXPIRY_KINDS + POLICY_KINDS
+DEFAULT_FAIL_ON = (
+    "drift", "invalid", "expired", "cadence", "unparsable",
+) + POLICY_DEFAULT_FAIL_ON
 
 KIND_EXIT = {
     "drift": EXIT_DRIFT,
@@ -85,6 +99,7 @@ KIND_EXIT = {
     "expiring": EXIT_EXPIRY,
     "unbounded": EXIT_EXPIRY,
     "unparsable": EXIT_EXPIRY,
+    **{kind: EXIT_POLICY for kind in POLICY_KINDS},
 }
 
 # The validator runs on the interpreter this script is running on, never on whatever `python3`
@@ -100,9 +115,10 @@ IDENTITY_FIELDS = ("key", "file", "id", "name")
 
 USAGE = (
     "usage: ci_check.py --piece=<name> [--repo=<path>] [--plugins=<dir>] [--mode=gate|warn]\n"
-    "                   [--steps=scan,validate,expiry,diff,push|all] [--as-of=YYYY-MM-DD]\n"
+    "                   [--steps=scan,validate,expiry,policy,diff,push|all] [--as-of=YYYY-MM-DD]\n"
     "                   [--warn-within-days=N] [--max-age-days=N] [--fail-on=<kinds>|none]\n"
-    "                   [--state=<path>] [--on-missing-prerequisite=skip|fail]\n"
+    "                   [--baseline=<path>] [--state=<path>]\n"
+    "                   [--on-missing-prerequisite=skip|fail]\n"
     "                   [--report=<path.json>]\n"
     "                   [--output=json|text] [--quiet]\n"
 )
@@ -484,6 +500,77 @@ def step_expiry(report, repo, parsed_path, policy):
     return "finding" if failing else "ok"
 
 
+def step_policy(report, repo, parsed_path, baseline_source):
+    """Is the personal data in this manifest data the organization agreed to process?
+
+    Skips rather than fails when there is no baseline. A repository that has not agreed a taxonomy
+    yet has nothing for this step to check, and inventing a default policy would be exactly the
+    "ship an opinion" failure the contract's requirement 9 exists to prevent. What it must never do
+    is report that as a pass, so it says `skipped` and names the file it looked for.
+    """
+    if baseline_source is not None:
+        baseline_path = pathlib.Path(baseline_source)
+        if not baseline_path.is_file():
+            report.step("policy", "error", detail=f"--baseline={baseline_source} does not exist")
+            return "tooling"
+    else:
+        baseline_path = repo / ".noru" / "privacy-baseline.yml"
+        if not baseline_path.is_file():
+            report.step(
+                "policy",
+                "skipped",
+                detail=(
+                    f"no privacy baseline at {baseline_path.relative_to(repo)} — agree one and "
+                    "commit it, or pass --baseline. This step has no default policy of its own"
+                ),
+            )
+            return "skipped"
+
+    if not parsed_path.is_file():
+        report.step(
+            "policy", "blocked", detail="the manifest did not validate, so there is nothing to check"
+        )
+        return "blocked"
+
+    try:
+        document = json.loads(parsed_path.read_text(encoding="utf-8"))
+        baseline = load_baseline(baseline_path)
+    except Exception as exc:  # noqa: BLE001 - an unreadable baseline is a broken gate, not a finding
+        report.step("policy", "error", detail=f"cannot read {baseline_path} ({exc})")
+        return "tooling"
+
+    if not isinstance(baseline, dict) or baseline.get("kind") != "privacy-baseline":
+        report.step(
+            "policy",
+            "error",
+            detail=(
+                f"{baseline_path} is not a privacy baseline (kind is "
+                f"{baseline.get('kind') if isinstance(baseline, dict) else type(baseline).__name__!r})"
+            ),
+        )
+        return "tooling"
+
+    findings, counts = evaluate_policy(document, baseline, load_special_categories())
+    for finding in findings:
+        report.find(
+            finding["kind"],
+            finding["message"],
+            path=finding.get("path"),
+            field=None,
+            value=finding.get("value"),
+            owner=None,
+            subject=finding.get("subject"),
+        )
+    failing = [f for f in findings if f["kind"] in report.payload["policy"]["fail_on"]]
+    report.step(
+        "policy",
+        "fail" if failing else "pass",
+        claims=counts.get("carriers", 0),
+        detail=f"against {baseline_path}",
+    )
+    return "finding" if failing else "ok"
+
+
 def step_diff(report, piece_dir, decl, repo, state_source):
     state_path = repo / ".noru" / ".cache" / "noru-state.json"
     if state_source is not None:
@@ -667,6 +754,7 @@ def parse_args(argv):
         "warn_within_days": DEFAULT_WARN_WITHIN_DAYS,
         "max_age_days": 0,
         "fail_on": set(DEFAULT_FAIL_ON),
+        "baseline": None,
         "state": None,
         "on_missing_prerequisite": "skip",
         "report": None,
@@ -720,6 +808,8 @@ def parse_args(argv):
                         f"{list(FINDING_KINDS)} or 'none'"
                     )
                 opts["fail_on"] = kinds
+        elif arg.startswith("--baseline="):
+            opts["baseline"] = arg.split("=", 1)[1]
         elif arg.startswith("--state="):
             opts["state"] = arg.split("=", 1)[1]
         elif arg.startswith("--report="):
@@ -813,6 +903,8 @@ def main(argv):
             outcome = step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path)
         elif step == "expiry":
             outcome = step_expiry(report, repo, parsed_path, expiry_policy)
+        elif step == "policy":
+            outcome = step_policy(report, repo, parsed_path, opts["baseline"])
         elif step == "diff":
             outcome = step_diff(report, piece_dir, decl, repo, opts["state"])
             diff_outcome = outcome

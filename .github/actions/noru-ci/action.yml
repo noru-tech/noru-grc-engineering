@@ -28,15 +28,25 @@ inputs:
     default: "gate"
   steps:
     description: >
-      Comma-separated: scan, validate, expiry, diff, push — or 'all'. The default,
-      scan,validate,expiry, is the part that needs no credential.
+      Comma-separated: scan, validate, expiry, policy, diff, push — or 'all'. The default,
+      scan,validate,expiry,policy, is the part that needs no credential.
     required: false
-    default: "scan,validate,expiry"
+    default: "scan,validate,expiry,policy"
   fail-on:
     description: >
       Which finding kinds gate the build: drift, invalid, dangling_ref, expired, cadence, expiring,
-      unbounded — or 'none'. Empty uses the tool default
-      (drift, invalid, expired, cadence, unparsable).
+      unbounded, unpermitted_category, unpermitted_use, unpermitted_subject, unpermitted_pair,
+      confined_category, undeclared_system, special_category — or 'none'. Empty uses the tool
+      default, which is everything above except dangling_ref, expiring, unbounded and
+      special_category.
+    required: false
+    default: ""
+  baseline:
+    description: >
+      Path to the agreed privacy taxonomy for the policy step. Defaults to
+      .noru/privacy-baseline.yml in the checked-out repository; when that file is absent the policy
+      step reports as skipped rather than passing, because this action has no default policy of its
+      own. Setting it to a path that does not exist is a tooling failure, not a skip.
     required: false
     default: ""
   max-age-days:
@@ -108,6 +118,11 @@ outputs:
   expired:
     description: "Number of interpretations whose expiry has passed."
     value: ${{ steps.check.outputs.expired }}
+  unpermitted:
+    description: >
+      Number of findings where the manifest processes personal data the baseline does not permit —
+      the sum of every policy finding kind that gates by default.
+    value: ${{ steps.check.outputs.unpermitted }}
 
 runs:
   using: composite
@@ -163,6 +178,7 @@ runs:
         NORU_CI_MAX_AGE_DAYS: ${{ inputs.max-age-days }}
         NORU_CI_WARN_WITHIN_DAYS: ${{ inputs.warn-within-days }}
         NORU_CI_AS_OF: ${{ inputs.as-of }}
+        NORU_CI_BASELINE: ${{ inputs.baseline }}
         NORU_CI_STATE: ${{ inputs.state }}
         NORU_CI_ON_MISSING: ${{ inputs.on-missing-prerequisite }}
         NORU_CI_PLUGINS: ${{ inputs.plugins }}
@@ -194,6 +210,7 @@ runs:
         )
         [ -n "$NORU_CI_FAIL_ON" ] && args+=("--fail-on=$NORU_CI_FAIL_ON")
         [ -n "$NORU_CI_AS_OF" ] && args+=("--as-of=$NORU_CI_AS_OF")
+        [ -n "$NORU_CI_BASELINE" ] && args+=("--baseline=$NORU_CI_BASELINE")
         [ -n "$NORU_CI_STATE" ] && args+=("--state=$NORU_CI_STATE")
         args+=("--plugins=${NORU_CI_PLUGINS:-$root/plugins}")
 
@@ -214,12 +231,22 @@ runs:
 
         report = json.load(open(sys.argv[1]))
         counts = report.get("counts", {})
+        gating = set(report.get("policy", {}).get("fail_on", []))
+        # Only the policy kinds that actually gate this run. Reporting the advisory ones here would
+        # make a green build look like it had unpermitted data in it.
+        unpermitted = sum(
+            count
+            for kind, count in counts.items()
+            if kind in gating
+            and (kind.startswith("unpermitted_") or kind in ("confined_category", "undeclared_system"))
+        )
         print(f"status={report.get('status', 'error')}")
         print(f"drift={'true' if counts.get('drift', 0) else 'false'}")
         print(f"expired={counts.get('expired', 0)}")
+        print(f"unpermitted={unpermitted}")
         PY
         else
-          { echo "status=error"; echo "drift=false"; echo "expired=0"; } >> "$GITHUB_OUTPUT"
+          { echo "status=error"; echo "drift=false"; echo "expired=0"; echo "unpermitted=0"; } >> "$GITHUB_OUTPUT"
         fi
         exit "$code"
 
