@@ -146,7 +146,7 @@ The same pieces run headless, so the record stays true between audits instead of
 before one:
 
 ```yaml
-- uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.3.0
+- uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.4.0
   with:
     piece: ai-inventory
     mode: warn      # switch to gate once the report is quiet

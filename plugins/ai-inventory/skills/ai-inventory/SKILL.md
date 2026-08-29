@@ -1,6 +1,6 @@
 ---
 name: ai-inventory
-version: 0.3.0
+version: 0.4.0
 description: Inventory the AI systems a repository actually contains — model and provider SDK calls, concrete model ids, agents and prompts, retrieval sources, eval suites, human-oversight points and provider retention claims — into a reviewable .noru/ai-inventory.yml, then land it in Noru as assets, vendors and evidence. Raises EU AI Act Article 5 prohibited-practice signals and Article 50 transparency triggers, and reports whether the disclosure or content marking each trigger requires is actually present in the code. Use when the user asks for an AI system inventory, an AI register, ISO 42001 or EU AI Act readiness, whether their AI disclosures are in place, or which models and providers this codebase calls.
 requires:
   bins: ["node", "python3", "git"]

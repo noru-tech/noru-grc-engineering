@@ -6,6 +6,28 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.4.0 — 2026-08-30
+
+A ninth piece, a policy gate, and the first release in which this repository runs its own gates.
+Nothing here forces a re-scan: the hashed input to `derived_digest` is unchanged from 0.3.0, and
+every schema change is a new file rather than a new field on an existing one.
+
+### Upgrading
+
+**Move the CI examples to `noru-ci@v0.4.0`.** Unlike the 0.3.0 bump this one is safe to defer.
+Manifests written by 0.4.0 plugins still validate against v0.3.0's collectors for the eight pieces
+that existed then, so a stale pin costs you the new checks rather than giving you a permanent
+failure. `change-control` is the exception: it is new, and the old action does not know it.
+
+**One build that passed before can now fail: exit 6, on a repository whose schema `privacy-datamap`
+cannot parse.** If your records are defined only in Mongoose, ActiveRecord or another of the nine
+shapes the collector finds a marker for but cannot read, the empty map it used to produce is now a
+broken gate rather than a clean pass — and `--mode warn` does not suppress it, because a check that
+saw nothing has no finding to warn about. Annotate what it found, or exclude the path.
+
+**The policy gate is opt-in and ships no default policy.** With no `.noru/privacy-baseline.yml` the
+step reports `skipped`, never `pass`, and gates nothing until you commit one.
+
 ### Added
 
 - `evidence-push` verifies uploaded artifacts end to end. Before sending, `push.mjs` recomputes the

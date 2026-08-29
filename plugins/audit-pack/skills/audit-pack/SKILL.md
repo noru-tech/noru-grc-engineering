@@ -1,6 +1,6 @@
 ---
 name: audit-pack
-version: 0.3.0
+version: 0.4.0
 description: Assemble the evidence bundle, the sampling and the workpapers an auditor asks for, for one framework over one audit window, from Noru's own graph plus the local files an integration cannot reach — then land the tested conclusion for each control back in Noru. Use when someone is preparing for an audit, needs a handover package, needs a defensible sample from a population export, wants to know which controls have gaps before an auditor finds them, or asks what evidence exists for a framework over a period.
 requires:
   bins: ["node", "python3", "git"]
