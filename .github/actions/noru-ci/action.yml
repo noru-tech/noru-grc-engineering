@@ -64,6 +64,21 @@ inputs:
     description: "Evaluate expiry against this date (YYYY-MM-DD) instead of today. For testing."
     required: false
     default: ""
+  base-ref:
+    description: >
+      Compare the manifest against the merge base with this ref, so a policy finding says whether
+      this pull request introduced it or inherited it. Needs the base branch in the checkout, so set
+      actions/checkout's fetch-depth to 0. A ref that cannot be resolved is reported and every
+      finding gates, because a delta nobody can compute must not quietly disable the gate.
+    required: false
+    default: ""
+  gate-on-new:
+    description: >
+      Gate only on findings this branch introduced, leaving a pre-existing backlog reported but not
+      blocking. Requires base-ref; without one nothing is stamped and everything gates. This is the
+      adoption path for a repository that has a backlog on the day the gate is turned on.
+    required: false
+    default: "false"
   state:
     description: >
       Path to a Noru state snapshot for the diff step. Only a job that can read the organization can
@@ -179,6 +194,8 @@ runs:
         NORU_CI_WARN_WITHIN_DAYS: ${{ inputs.warn-within-days }}
         NORU_CI_AS_OF: ${{ inputs.as-of }}
         NORU_CI_BASELINE: ${{ inputs.baseline }}
+        NORU_CI_BASE_REF: ${{ inputs.base-ref }}
+        NORU_CI_GATE_ON_NEW: ${{ inputs.gate-on-new }}
         NORU_CI_STATE: ${{ inputs.state }}
         NORU_CI_ON_MISSING: ${{ inputs.on-missing-prerequisite }}
         NORU_CI_PLUGINS: ${{ inputs.plugins }}
@@ -211,6 +228,8 @@ runs:
         [ -n "$NORU_CI_FAIL_ON" ] && args+=("--fail-on=$NORU_CI_FAIL_ON")
         [ -n "$NORU_CI_AS_OF" ] && args+=("--as-of=$NORU_CI_AS_OF")
         [ -n "$NORU_CI_BASELINE" ] && args+=("--baseline=$NORU_CI_BASELINE")
+        [ -n "$NORU_CI_BASE_REF" ] && args+=("--base-ref=$NORU_CI_BASE_REF")
+        [ "$NORU_CI_GATE_ON_NEW" = "true" ] && args+=("--gate-on-new")
         [ -n "$NORU_CI_STATE" ] && args+=("--state=$NORU_CI_STATE")
         args+=("--plugins=${NORU_CI_PLUGINS:-$root/plugins}")
 

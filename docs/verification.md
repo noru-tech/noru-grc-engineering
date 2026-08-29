@@ -47,6 +47,13 @@ python3 scripts/test_ci_mode.py        # CI mode fails on drift, on an expired c
 | A `--baseline` that does not exist is a broken gate | exits `6`, and `--mode=warn` does not suppress it |
 | The baseline is itself aged | `check_expiry.py` run against a baseline whose `expires_at` has passed exits `1`: the policy is a claim like any other |
 | The special-category list cannot drift | `check_repo.py` asserts every key `privacy-datamap` treats as Article 9/10 is covered by a prefix root in `contract/lib/taxonomy/special_categories.json`, and that every root is a real Fideslang category. Checked in the other direction by removing a root and adding a fake one |
+| **An unreadable schema is a broken gate, not a pass** | `test_ci_mode.py` builds a repository whose only schema is Mongoose, TypeORM, ActiveRecord, GORM and OpenAPI, and asserts exit `6` with a `coverage` finding naming all five formats and citing each one. Five formats, so one stale marker cannot silently turn the case green |
+| A repository with genuinely no schema is not dragged down by it | a repository with one ordinary TypeScript file raises no coverage finding — otherwise every repository without a database fails forever |
+| A partial map is reported and not gated | a repository with SQL *and* the five unreadable formats does not exit `6`, still raises the finding, and does exit `6` under `--fail-on=coverage` |
+| Coverage cannot change an existing manifest's digest | `coverage` is excluded from `digestOf` alongside `generated_by`; the fixture repo's derived digest is byte-identical before and after the field was added |
+| **A policy finding says whether this branch introduced it** | `test_ci_mode.py` commits a data map, marks the whole backlog `pre_existing`, adds one unpermitted category, and asserts only that one is `this_pr` — against real `git`, not a stub |
+| `--gate-on-new` lets a backlog through and still blocks a new violation | the same repository exits `0` on the backlog alone and `7` once the branch adds one |
+| A delta that cannot be computed gates everything, not nothing | an unresolvable `--base-ref` exits `7` under `--gate-on-new` and the step says why — a shallow clone must not quietly disable the gate |
 | **CI mode fails on an expired interpretation** | the same manifest with every `expires_at` moved into the past must exit `4`, name the owner, and *not* report drift — the code did not change |
 | Both at once is distinguishable from either | exit `1`, with both kinds in the report |
 | An invalid manifest is its own exit code | a fixture violating a piece's own cadence rule exits `5`, carries the validator's message through, and blocks the expiry step rather than passing it |
@@ -145,6 +152,9 @@ Run `:diff` before your first `:push`, and read it.
   stepped outside the reviewed plan. That is a real residual risk, not a solved problem.
 - **Framework identifiers come back as ids, not display names.** Pieces read and store the ids, and
   never try to reconstruct a display name from them.
+- **The delta covers the policy step only.** `--base-ref` compares committed *manifests*, which is
+  what makes a policy finding attributable to a branch. Drift is still a digest with no "before" to
+  compare against, for the reason below.
 - **CI mode's drift check is a digest, not a diff against the base branch.** It answers "does the
   manifest match the repository as it is now", which is the right question, but it cannot say what a
   particular pull request changed: the previous derived facts live in `.noru/.cache/` and are not

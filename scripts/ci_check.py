@@ -33,7 +33,8 @@ Usage:
     python3 scripts/ci_check.py --piece=<name> [--repo=<path>] [--plugins=<dir>]
         [--mode=gate|warn] [--steps=scan,validate,expiry,policy,diff,push|all]
         [--as-of=YYYY-MM-DD] [--warn-within-days=N] [--max-age-days=N]
-        [--fail-on=<kinds>|none] [--baseline=<path>] [--state=<path>]
+        [--fail-on=<kinds>|none] [--baseline=<path>] [--base-ref=<ref>] [--gate-on-new]
+        [--state=<path>]
         [--on-missing-prerequisite=skip|fail] [--report=<path.json>]
         [--output=json|text] [--quiet]
 
@@ -44,7 +45,8 @@ Exit codes — see docs/ci-mode.md for the table and the reasoning:
     3  manifest drift
     4  an interpretation has expired or is outside the declared cadence
     5  the manifest failed validation
-    6  a check could not run at all (missing runtime, unreadable declaration, child crash)
+    6  a check could not run at all (missing runtime, unreadable declaration, child crash, or a
+       collector that parsed no schema in a repository that visibly has one)
     7  the manifest processes personal data the privacy baseline does not permit
 """
 import datetime
@@ -67,8 +69,10 @@ from check_policy import (  # noqa: E402
     DEFAULT_FAIL_ON as POLICY_DEFAULT_FAIL_ON,
     KINDS as POLICY_KINDS,
     evaluate as evaluate_policy,
+    finding_identity,
     load_document as load_baseline,
     load_special_categories,
+    parse_document as parse_manifest_text,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -85,7 +89,7 @@ EXIT_POLICY = 7
 ALL_STEPS = ("scan", "validate", "expiry", "policy", "diff", "push")
 DEFAULT_STEPS = ("scan", "validate", "expiry", "policy")
 
-FINDING_KINDS = ("drift", "invalid", "dangling_ref") + EXPIRY_KINDS + POLICY_KINDS
+FINDING_KINDS = ("drift", "invalid", "dangling_ref", "coverage") + EXPIRY_KINDS + POLICY_KINDS
 DEFAULT_FAIL_ON = (
     "drift", "invalid", "expired", "cadence", "unparsable",
 ) + POLICY_DEFAULT_FAIL_ON
@@ -94,6 +98,9 @@ KIND_EXIT = {
     "drift": EXIT_DRIFT,
     "invalid": EXIT_INVALID,
     "dangling_ref": EXIT_DRIFT,
+    # A partial map is reported, not gated, by default. Where it IS gated, it is a broken gate
+    # and not a compliance finding, so it shares the tooling exit rather than getting its own.
+    "coverage": EXIT_TOOLING,
     "expired": EXIT_EXPIRY,
     "cadence": EXIT_EXPIRY,
     "expiring": EXIT_EXPIRY,
@@ -117,7 +124,8 @@ USAGE = (
     "usage: ci_check.py --piece=<name> [--repo=<path>] [--plugins=<dir>] [--mode=gate|warn]\n"
     "                   [--steps=scan,validate,expiry,policy,diff,push|all] [--as-of=YYYY-MM-DD]\n"
     "                   [--warn-within-days=N] [--max-age-days=N] [--fail-on=<kinds>|none]\n"
-    "                   [--baseline=<path>] [--state=<path>]\n"
+    "                   [--baseline=<path>] [--base-ref=<ref>] [--gate-on-new]\n"
+    "                   [--state=<path>]\n"
     "                   [--on-missing-prerequisite=skip|fail]\n"
     "                   [--report=<path.json>]\n"
     "                   [--output=json|text] [--quiet]\n"
@@ -368,6 +376,63 @@ def drift_message(manifest_path, decl):
     return "the committed manifest no longer matches the repository"
 
 
+def check_coverage(report, repo, summary, decl):
+    """Did the collector actually read anything, and did it miss something it could see was there?
+
+    An empty manifest and a repository with no personal data in it are the same file, and only one
+    of them is good news. Every check downstream — drift, expiry, policy — passes cleanly on an
+    empty map, so a collector that parsed nothing is not a clean result, it is a **broken gate**.
+    That is exit `6`, which `--mode=warn` deliberately does not suppress, and it is the same rule
+    docs/ci-mode.md already states: a check that could not run is not a check that passed.
+
+    Piece-agnostic in shape, like everything else here: any piece whose derived facts carry a
+    `coverage` block gets this check, and one that does not is unaffected.
+    """
+    derived_rel = (summary or {}).get("derived_facts")
+    if not derived_rel:
+        return "ok"
+    try:
+        derived = json.loads((repo / derived_rel).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "ok"
+    coverage = derived.get("coverage")
+    if not isinstance(coverage, dict):
+        return "ok"
+
+    candidates = coverage.get("unparsed_candidates") or []
+    parsed = coverage.get("files_parsed", 0)
+    if not candidates:
+        return "ok"
+
+    formats = sorted({c.get("format") for c in candidates if isinstance(c, dict)})
+    shown = [c.get("ref") for c in candidates[:MAX_EXPLAINED_ITEMS] if isinstance(c, dict)]
+
+    if parsed == 0:
+        report.step("scan", "error", detail=f"nothing parsed; {len(candidates)} candidate(s) found")
+        report.find(
+            "coverage",
+            f"the collector parsed no schema at all, but found {len(candidates)} file(s) that "
+            f"define one in a format it cannot read ({', '.join(formats)}). An empty data map is "
+            "not the same as a repository with no personal data in it, and every check after this "
+            "one would have passed on the empty set",
+            manifest=decl["artifact"],
+            formats=formats,
+            refs=shown,
+        )
+        return "tooling"
+
+    report.find(
+        "coverage",
+        f"{len(candidates)} schema file(s) are in a format this collector cannot read "
+        f"({', '.join(formats)}), so the data map does not describe them. {parsed} file(s) were "
+        "parsed, so the map is partial rather than empty",
+        manifest=decl["artifact"],
+        formats=formats,
+        refs=shown,
+    )
+    return "ok"
+
+
 # --- the steps ----------------------------------------------------------------------------------
 def step_scan(report, piece_dir, decl, repo, manifest_path, on_missing_prereq):
     entry = piece_dir / decl["collector"]["entrypoint"]
@@ -381,6 +446,10 @@ def step_scan(report, piece_dir, decl, repo, manifest_path, on_missing_prereq):
         return "tooling"
 
     summary = parse_child_json(completed)
+    coverage_outcome = check_coverage(report, repo, summary, decl)
+    if coverage_outcome == "tooling":
+        return "tooling"
+
     if completed.returncode == 0:
         report.step("scan", "pass", derived_digest=(summary or {}).get("derived_digest"))
         return "ok"
@@ -500,7 +569,72 @@ def step_expiry(report, repo, parsed_path, policy):
     return "finding" if failing else "ok"
 
 
-def step_policy(report, repo, parsed_path, baseline_source):
+def git_read(repo, *args):
+    """Run a read-only git command in `repo`. Returns stdout, or None if git could not answer.
+
+    Every call here reads history that is already on disk: no fetch, no remote, no credential. A
+    shallow clone that does not contain the merge base is the ordinary failure and is reported as a
+    skip, because a delta nobody can compute is not a delta that failed.
+    """
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return None
+    return completed.stdout if completed.returncode == 0 else None
+
+
+def base_manifest(repo, base_ref, artifact):
+    """The committed manifest as it stood at the merge base with `base_ref`.
+
+    This is what makes a policy finding answer "did this pull request introduce it?" rather than
+    only "is it there?". Comparing manifests rather than re-running the collector at the base is
+    deliberate: the manifest is the reviewed record, it is what the policy step evaluates at HEAD,
+    and reading it costs one `git show` instead of a second checkout and a second collector run.
+
+    Returns (document, None) or (None, reason-it-could-not-be-done).
+    """
+    if git_read(repo, "rev-parse", "--git-dir") is None:
+        return None, f"{repo} is not a git repository, so there is no base to compare against"
+    if git_read(repo, "rev-parse", "--verify", "--quiet", f"{base_ref}^{{commit}}") is None:
+        return None, (
+            f"--base-ref={base_ref} does not resolve in this checkout. A CI job that clones with "
+            "depth 1 does not have it; fetch the base branch, or drop the flag"
+        )
+    merge_base = git_read(repo, "merge-base", "HEAD", base_ref)
+    if not merge_base:
+        return None, f"HEAD and {base_ref} share no history, so there is no merge base"
+    merge_base = merge_base.strip()
+
+    blob = git_read(repo, "show", f"{merge_base}:{artifact}")
+    if blob is None:
+        # A manifest that did not exist at the base is not an error: every finding in it is new,
+        # which is exactly what an empty base document expresses.
+        return {}, None
+    try:
+        return parse_manifest_text(blob), None
+    except Exception as exc:  # noqa: BLE001
+        return None, f"the manifest at {merge_base[:12]} could not be parsed ({exc})"
+
+
+def mark_first_seen(findings, base_document, baseline, special_roots):
+    """Stamp every finding with whether this branch introduced it.
+
+    The base manifest is evaluated against *today's* baseline, not the baseline as it stood then.
+    The question being answered is "which of these findings is this pull request responsible for",
+    and widening or narrowing the policy is a change to the policy, judged in its own diff.
+    """
+    if base_document is None:
+        return
+    before, _counts = evaluate_policy(base_document, baseline, special_roots)
+    seen = {finding_identity(f) for f in before}
+    for finding in findings:
+        finding["first_seen"] = "pre_existing" if finding_identity(finding) in seen else "this_pr"
+
+
+def step_policy(report, repo, parsed_path, baseline_source, delta=None):
     """Is the personal data in this manifest data the organization agreed to process?
 
     Skips rather than fails when there is no baseline. A repository that has not agreed a taxonomy
@@ -550,7 +684,23 @@ def step_policy(report, repo, parsed_path, baseline_source):
         )
         return "tooling"
 
-    findings, counts = evaluate_policy(document, baseline, load_special_categories())
+    special_roots = load_special_categories()
+    findings, counts = evaluate_policy(document, baseline, special_roots)
+
+    delta_note = None
+    if delta and delta.get("base_ref"):
+        base_document, reason = base_manifest(repo, delta["base_ref"], delta["artifact"])
+        if base_document is None:
+            # A delta that cannot be computed must not silently become "everything is new", which
+            # would gate the whole backlog, nor "everything is old", which would gate nothing.
+            delta_note = f"no base comparison: {reason}"
+        else:
+            mark_first_seen(findings, base_document, baseline, special_roots)
+            new = sum(1 for f in findings if f.get("first_seen") == "this_pr")
+            counts["first_seen_this_pr"] = new
+            counts["first_seen_pre_existing"] = len(findings) - new
+            delta_note = f"{new} of {len(findings)} finding(s) new since {delta['base_ref']}"
+
     for finding in findings:
         report.find(
             finding["kind"],
@@ -560,13 +710,21 @@ def step_policy(report, repo, parsed_path, baseline_source):
             value=finding.get("value"),
             owner=None,
             subject=finding.get("subject"),
+            first_seen=finding.get("first_seen"),
         )
-    failing = [f for f in findings if f["kind"] in report.payload["policy"]["fail_on"]]
+    failing = [
+        f for f in findings
+        if f["kind"] in report.payload["policy"]["fail_on"]
+        and not (delta and delta.get("gate_on_new") and f.get("first_seen") == "pre_existing")
+    ]
+    detail = f"against {baseline_path}"
+    if delta_note:
+        detail = f"{detail} — {delta_note}"
     report.step(
         "policy",
         "fail" if failing else "pass",
         claims=counts.get("carriers", 0),
-        detail=f"against {baseline_path}",
+        detail=detail,
     )
     return "finding" if failing else "ok"
 
@@ -655,11 +813,17 @@ def step_push(report, piece_dir, decl, repo, diff_outcome):
 
 
 # --- wiring -------------------------------------------------------------------------------------
-def decide_exit(report, mode, fail_on, tooling):
+def decide_exit(report, mode, fail_on, tooling, gate_on_new=False):
     if tooling:
         report.payload["status"] = "error"
         return EXIT_TOOLING
-    failing = [f for f in report.findings if f["kind"] in fail_on]
+    # `first_seen` is only ever set on a finding the base comparison could judge, so a drift or an
+    # expiry finding is never excluded here however this flag is set.
+    failing = [
+        f for f in report.findings
+        if f["kind"] in fail_on
+        and not (gate_on_new and f.get("first_seen") == "pre_existing")
+    ]
     if not failing:
         ran = any(step["status"] == "pass" for step in report.steps)
         # "Nothing ran" must never read as "everything passed". It exits 0 because a fork pull
@@ -695,11 +859,15 @@ def render_text(payload, quiet):
     fail_on = set(payload["policy"]["fail_on"])
     # In warn mode nothing fails, so nothing may be labelled as if it had.
     gating_label = "FAIL" if payload["mode"] == "gate" else "would-fail"
+    # ...except a broken gate, which fails in either mode. Labelling the finding that stopped the
+    # run as `warn` next to an ERROR line saying a check could not run is the kind of contradiction
+    # that teaches people to stop reading the output.
+    broken = payload["status"] == "error"
     for finding in payload["findings"]:
-        failing = finding["kind"] in fail_on
+        failing = finding["kind"] in fail_on or (broken and KIND_EXIT.get(finding["kind"]) == EXIT_TOOLING)
         if quiet and not failing:
             continue
-        label = gating_label if failing else "warn"
+        label = ("BLOCKING" if broken and finding["kind"] not in fail_on else gating_label) if failing else "warn"
         where = finding.get("path") or finding.get("manifest") or ""
         lines.append(f"  {label} [{finding['kind']}] {where}: {finding['message']}")
         explanation = finding.get("explanation")
@@ -755,6 +923,8 @@ def parse_args(argv):
         "max_age_days": 0,
         "fail_on": set(DEFAULT_FAIL_ON),
         "baseline": None,
+        "base_ref": None,
+        "gate_on_new": False,
         "state": None,
         "on_missing_prerequisite": "skip",
         "report": None,
@@ -810,6 +980,10 @@ def parse_args(argv):
                 opts["fail_on"] = kinds
         elif arg.startswith("--baseline="):
             opts["baseline"] = arg.split("=", 1)[1]
+        elif arg.startswith("--base-ref="):
+            opts["base_ref"] = arg.split("=", 1)[1]
+        elif arg == "--gate-on-new":
+            opts["gate_on_new"] = True
         elif arg.startswith("--state="):
             opts["state"] = arg.split("=", 1)[1]
         elif arg.startswith("--report="):
@@ -879,6 +1053,8 @@ def main(argv):
         "warn_within_days": opts["warn_within_days"],
         "max_age_days": opts["max_age_days"],
         "on_missing_prerequisite": opts["on_missing_prerequisite"],
+        "base_ref": opts["base_ref"],
+        "gate_on_new": opts["gate_on_new"],
     }
     report = Report(opts["piece"], repo, opts["mode"], policy)
     report.payload["artifact"] = decl["artifact"]
@@ -890,6 +1066,12 @@ def main(argv):
         "warn_within_days": opts["warn_within_days"],
         "max_age_days": opts["max_age_days"],
         "fail_on": opts["fail_on"],
+    }
+
+    delta = {
+        "base_ref": opts["base_ref"],
+        "gate_on_new": opts["gate_on_new"],
+        "artifact": decl["artifact"],
     }
 
     tooling = False
@@ -904,7 +1086,7 @@ def main(argv):
         elif step == "expiry":
             outcome = step_expiry(report, repo, parsed_path, expiry_policy)
         elif step == "policy":
-            outcome = step_policy(report, repo, parsed_path, opts["baseline"])
+            outcome = step_policy(report, repo, parsed_path, opts["baseline"], delta)
         elif step == "diff":
             outcome = step_diff(report, piece_dir, decl, repo, opts["state"])
             diff_outcome = outcome
@@ -917,7 +1099,7 @@ def main(argv):
     report.payload["counts"] = {
         kind: sum(1 for f in report.findings if f["kind"] == kind) for kind in FINDING_KINDS
     }
-    code = decide_exit(report, opts["mode"], opts["fail_on"], tooling)
+    code = decide_exit(report, opts["mode"], opts["fail_on"], tooling, opts["gate_on_new"])
     report.payload["exit_code"] = code
 
     if opts["report"]:
