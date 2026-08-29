@@ -99,10 +99,22 @@ function isAgent(user) {
   return user?.bot === true || /^(project|group)_\d+_bot/.test(user?.username ?? "");
 }
 
-export function normalizeProtection(project, protectedBranch, codeowners, environments) {
+/**
+ * `readable` for the same reason as in github.mjs: GitLab answers 404 both for a branch with no
+ * protection rule and for a token that may not ask. Saying `protected: false` where the honest
+ * answer is "nobody here could find out" states something untrue, so the fields are omitted.
+ */
+export function normalizeProtection(project, protectedBranch, readable, codeowners, environments) {
+  const base = {
+    default_branch: project?.default_branch ?? "unknown",
+    codeowners_present: codeowners,
+    deploy_environments: environments,
+  };
+  if (!readable) return base;
+
   const approvalRules = project?.approvals_before_merge;
   return {
-    default_branch: project?.default_branch ?? "unknown",
+    ...base,
     protected: Boolean(protectedBranch),
     required_approvals: typeof approvalRules === "number" ? approvalRules : 0,
     // GitLab's equivalent of "dismiss stale reviews" is reset_approvals_on_push.
@@ -113,8 +125,6 @@ export function normalizeProtection(project, protectedBranch, codeowners, enviro
     enforce_admins: false,
     allow_force_push: Boolean(protectedBranch?.allow_force_push),
     required_status_checks: project?.only_allow_merge_if_pipeline_succeeds ? ["pipeline"] : [],
-    codeowners_present: codeowners,
-    deploy_environments: environments,
   };
 }
 
@@ -194,9 +204,9 @@ async function main(argv) {
   try {
     const project = (await api(opts, token, `/projects/${id}`)).body;
     const branch = project?.default_branch ?? "main";
-    const protectedBranch = (
-      await api(opts, token, `/projects/${id}/protected_branches/${encodeURIComponent(branch)}`)
-    ).body;
+    const protectionProbe = await api(
+      opts, token, `/projects/${id}/protected_branches/${encodeURIComponent(branch)}`,
+    );
     const codeownersProbe = await api(
       opts, token,
       `/projects/${id}/repository/files/${encodeURIComponent("CODEOWNERS")}?ref=${encodeURIComponent(branch)}`,
@@ -241,7 +251,10 @@ async function main(argv) {
       repository: opts.project,
       exported_at: new Date().toISOString(),
       window: { opens_on: opts.since, closes_on: opts.until, complete: !truncated },
-      settings: normalizeProtection(project, protectedBranch, !codeownersProbe.missing, environments),
+      settings: normalizeProtection(
+        project, protectionProbe.body, !protectionProbe.missing, !codeownersProbe.missing,
+        environments,
+      ),
       changes,
     };
 
@@ -267,6 +280,10 @@ async function main(argv) {
           `wrote ${out}`,
           `${changes.length} merge request(s) into ${branch} between ${opts.since} and ${opts.until}`,
           truncated ? "WARNING: the listing was truncated; window.complete is false" : "",
+          protectionProbe.missing
+            ? "NOTE: the protected-branch rule could not be read — either the branch has none or " +
+              "this token may not ask. The settings are omitted rather than guessed."
+            : "",
           "Next: node plugins/change-control/scripts/collect.mjs --repo=.",
         ]
           .filter(Boolean)
