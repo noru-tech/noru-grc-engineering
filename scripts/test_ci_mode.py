@@ -407,6 +407,31 @@ def case_coverage(results, tmp):
         kinds(report),
     )
 
+    # Found by running this against this repository, which is what dogfooding is for: a marker
+    # matching `"$schema": ".../json-schema.org/..."` fires on every JSON Schema document, and
+    # contract/ produced ten candidates holding no personal data at all. A check that fires on
+    # every repository with a schema directory is a check somebody turns off.
+    schemas = pathlib.Path(tmp) / "coverage-schemas"
+    (schemas / "contract").mkdir(parents=True, exist_ok=True)
+    (schemas / "contract" / "thing.schema.json").write_text(
+        json.dumps({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "A manifest format, not a stored record",
+            "properties": {"version": {"type": "string"}},
+        }),
+        encoding="utf-8",
+    )
+    (schemas / "validate.ts").write_text(
+        "import { z } from 'zod'\nexport const Body = z.object({ page: z.number() })\n",
+        encoding="utf-8",
+    )
+    code, report = ci(schemas, piece="privacy-datamap")
+    results.check(
+        "coverage: a schema describing a format is not a schema describing a record",
+        "coverage" not in kinds(report) and code != 6,
+        f"exit {code}, kinds {kinds(report)}",
+    )
+
     # Supported and unsupported side by side: the map is partial, not absent. Reported, not gated,
     # because failing here would block every repository that has one Zod file next to its SQL.
     partial = pathlib.Path(tmp) / "coverage-partial"

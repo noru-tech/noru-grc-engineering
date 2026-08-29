@@ -1,0 +1,134 @@
+name: compliance
+
+# This repository running its own gates. It is also the worked example: the same shape a customer
+# copies, on a repository that really has pull requests, reviews and branch protection.
+#
+# What this repository can honestly dogfood, and what it cannot, is worth stating here rather than
+# leaving someone to wonder why a manifest is missing:
+#
+#   * `change-control` — YES. This is a real repository with real reviews. The job below exports
+#     from GitHub with the Actions token and gates on what comes back.
+#   * `privacy-datamap` — the gate runs, and finds only the schemas under tests/fixture-repo/, which
+#     exist to be scanned. There is deliberately NO committed .noru/privacy-datamap.yml: this is a
+#     plugin toolkit with no database, and a data map here would describe test fixtures as though
+#     they were a product. An empty record is the honest one, and the coverage check is what stops
+#     that being indistinguishable from a blind spot.
+#   * `ai-inventory` — NO, and the reason is written up in docs/verification.md: this repository's
+#     source *is* a detector, so the collector matches its own pattern tables and reports nine
+#     providers where none is called. A detector-shaped repository is a pathological input.
+#
+# The gates below run in `warn` while the record catches up. Turning on a gate that has never run is
+# how a gate gets reverted.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Monday morning: the change-control window is a period, not a commit, so it is checked on a
+    # calendar rather than on a push.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compliance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  privacy:
+    name: privacy gates (offline, no credential)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The policy gate compares against the merge base to say which findings this branch
+          # introduced. Without the base branch in the checkout it cannot, and reports so.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Expect a drift finding here, permanently, and read the next line before assuming it is
+      # broken: there is no committed manifest to match, on purpose. What this job is actually
+      # watching is the COVERAGE half — if a schema in a format the collector cannot read ever
+      # lands in this repository, that is exit 6 and warn mode does not suppress it. The drift
+      # finding is the price of running the rest of the gate on a repository that has nothing to
+      # map, and it is why this job is `warn` and not `gate`.
+      - name: drift, coverage, expiry and the privacy baseline
+        uses: ./.github/actions/noru-ci
+        with:
+          piece: privacy-datamap
+          mode: warn
+          base-ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          require-yaml-loader: pyyaml
+
+  change-control:
+    name: segregation of duties
+    runs-on: ubuntu-latest
+    # The exporter needs to read pull requests and reviews. It writes nothing: every call is a GET,
+    # and the token never reaches the collector that consumes its output.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: pick the window
+        id: window
+        run: |
+          set -euo pipefail
+          # A quarter back from today, on a calendar rather than on a commit.
+          echo "since=$(date -u -d '90 days ago' +%F)" >> "$GITHUB_OUTPUT"
+          echo "until=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: export the change history
+        env:
+          # The Actions token can read pull requests and reviews. It CANNOT read branch protection,
+          # which needs Administration: read — so the exporter omits those settings rather than
+          # reporting an unprotected branch it merely could not see. Grant a fine-grained PAT if you
+          # want the configuration recorded too.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node plugins/change-control/scripts/export/github.mjs \
+            --repo="${{ github.repository }}" \
+            --since="${{ steps.window.outputs.since }}" \
+            --until="${{ steps.window.outputs.until }}"
+
+      - name: gate on what came back
+        uses: ./.github/actions/noru-ci
+        with:
+          piece: change-control
+          mode: warn
+          require-yaml-loader: pyyaml
+
+      - name: keep the export out of the artifact store
+        if: always()
+        # It is a list of who reviewed what and when: personal data about colleagues, and not
+        # something to leave lying in an artifact for ninety days.
+        run: rm -f .noru/.cache/change-events.json
+
+  # The write half. Deliberately absent, and this comment is the documentation of why.
+  #
+  # `:push` needs NORU_API_KEY, and this repository has no Noru organization to push to — it is the
+  # toolkit, not a customer. A customer's version of this file adds one more job, off the pull
+  # request path and behind an environment so a human can require an approval on the write:
+  #
+  #   land-it:
+  #     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  #     environment: compliance
+  #     steps:
+  #       - uses: ./.github/actions/noru-ci
+  #         env:
+  #           NORU_API_KEY: ${{ secrets.NORU_API_KEY }}
+  #         with:
+  #           piece: change-control
+  #           steps: all
+  #           state: .noru/.cache/noru-state.json
+  #
+  # Never on pull_request_target. The full recipe is in docs/ci-mode.md.

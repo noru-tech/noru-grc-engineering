@@ -401,6 +401,31 @@ Rules this obeys, and that a reviewer should check it still obeys:
   that goes through review — which is why it belongs on a protected branch with an environment, not
   on `pull_request`
 
+## A whole pipeline, end to end
+
+[`.github/workflows/compliance.yml`](../.github/workflows/compliance.yml) in this repository is the
+worked example, running against this repository. Copy it and change three things: the piece list,
+the window, and whether the jobs are `warn` or `gate`.
+
+The shape it demonstrates:
+
+| job | credential | gates on |
+|---|---|---|
+| privacy | none | drift, coverage, expiry, and the privacy baseline. Runs on a fork pull request |
+| change-control | a **forge** token, not a Noru one | who wrote, approved, merged and deployed each change in the window |
+| land-it | `NORU_API_KEY`, behind an `environment:` | the write. Off the pull-request path, on a protected branch only |
+
+Four things in it are worth copying deliberately rather than by accident:
+
+- **`fetch-depth: 0`** on the checkout, or `--base-ref` cannot resolve the merge base and every
+  finding gates instead of only the new ones.
+- **The forge token is not the Noru token.** The exporter reads `GITHUB_TOKEN` or `GITLAB_TOKEN` at
+  the point of use; the collector that consumes its output takes no credential at all, which is what
+  keeps the offline half offline.
+- **The export is deleted at the end of the job.** It is a list of who reviewed what and when —
+  personal data about colleagues — and an artifact store keeps things for ninety days.
+- **The write job is separate, on `main`, behind an environment.** Never on `pull_request_target`.
+
 ## The generic recipe
 
 Nothing here is GitHub-specific. The action is a thin wrapper over one command:

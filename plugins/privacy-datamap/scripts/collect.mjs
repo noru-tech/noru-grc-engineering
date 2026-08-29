@@ -248,13 +248,26 @@ const UNPARSED_MARKERS = [
   { format: "typeorm", exts: [".ts", ".js"], marker: /^\s*@Entity\s*\(/m },
   { format: "mongoose", exts: [".ts", ".js"], marker: /new\s+(?:mongoose\.)?Schema\s*\(/ },
   { format: "sequelize", exts: [".ts", ".js"], marker: /DataTypes\.[A-Z]/ },
-  { format: "typescript_dto", exts: [".ts"], marker: /\bz\.object\s*\(/ },
   { format: "activerecord", exts: [".rb"], marker: /^\s*create_table\s+[:'"]/m },
   { format: "ecto", exts: [".ex"], marker: /^\s*use\s+Ecto\.Schema\b/m },
   { format: "gorm", exts: [".go"], marker: /`[^`]*\bgorm:"/ },
   { format: "openapi", exts: [".yaml", ".yml"], marker: /^(?:openapi|swagger):\s*["']?\d/m },
-  { format: "json_schema", exts: [".json"], marker: /"\$schema"\s*:\s*"[^"]*json-schema\.org/ },
 ];
+
+// Deliberately NOT markers, after running this against a real repository:
+//
+//   * JSON Schema — `"$schema": ".../json-schema.org/..."` appears in every JSON Schema document,
+//     including the ones that describe a manifest format rather than anything stored. This
+//     repository's own contract/ directory produced ten candidates, none of which holds a byte of
+//     personal data. A check that fires on every repository with a schema directory is a check
+//     somebody turns off, and then it catches nothing at all.
+//   * Zod (`z.object(`) — overwhelmingly request and response validation rather than persistence,
+//     and the marker cannot tell the two apart.
+//
+// Both are still on the "not read yet" list in the piece README, because the *parser* gap is real
+// even where the *marker* would cost more than it is worth. The rule this line draws: a marker
+// earns its place when it means "a stored record is defined here", not merely "a shape is
+// described here".
 
 function findUnparsedCandidates(repo, files, parsedFiles) {
   const out = [];

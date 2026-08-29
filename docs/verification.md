@@ -43,6 +43,8 @@ python3 scripts/test_ci_mode.py        # CI mode fails on drift, on an expired c
 | A clean change raises no violation at all | asserted in both implementations: a rule set that fires on everything is as useless as one that fires on nothing, and easier to ship by accident |
 | **A remediated exception closes its finding** | `test_idempotency.py` asserts a `remediated` or `false_positive` disposition is pushed with status `resolved`, so a re-run after the fix closes the record instead of leaving a stale open finding beside a fixed problem |
 | One evidence record per window, not one per change | asserted: a blob per change is how a register becomes unreadable |
+| A schema describing a *format* is not a schema describing a *record* | found by running the coverage check against this repository, where a `$schema` marker matched all ten files in `contract/`. The JSON Schema and Zod markers were removed and the case is now a regression test: a repository whose only candidates are a contract schema and a Zod request validator raises no coverage finding |
+| An unreadable forge setting is not a false setting | `normalizeProtection` omits the protection fields when the probe 404s, because GitHub and GitLab both answer 404 for "not protected" and for "you may not ask". Reporting `protected: false` there would state something untrue |
 | A scaffolded piece satisfies the contract | CI scaffolds one and runs the contract test against it |
 | **CI mode fails on drift** | `test_ci_mode.py` adds a model provider to a copy of the fixture repo and asserts exit `3`, that the message names the provider and the `file:line` it arrived at, and that the gate clears again when the file is removed |
 | **CI mode fails on personal data the baseline does not permit** | `test_ci_mode.py` builds a repository whose data map matches it, commits a baseline narrower than the map, and asserts exit `7` with an `unpermitted_category` finding. Both routes to that finding are exercised separately, because the fix differs: an explicit `deny` entry, and a value absent from a closed `allow` list |
@@ -105,6 +107,13 @@ at production scale. Treat a first run as something to check, not something to t
   expressed through a module input, a variable default or a generated template, and they will fire
   on a resource that a later override makes safe. Read the citation before you accept the finding —
   which is the workflow the piece is built around, but it is a real recall and precision ceiling.
+- **A detector-shaped repository is a pathological input for `ai-inventory`.** Running it against
+  this repository reports nine providers, six models and thirty-one Article 50 triggers, in a
+  toolkit that calls no model at all: 220 of the 289 citations point into `plugins/`, where the
+  collector is matching its own pattern tables. Anything that *lists* provider names — a scanner, a
+  policy engine, an allowlist, another compliance tool — will be reported as containing them. The
+  collector cannot tell a detector from the thing it detects, and nothing here fixes that; it is
+  written down so a first run against such a repository is read rather than believed.
 - **`change-control`'s exporters have never met a live forge.** The GitHub and GitLab exporters are
   the only code in this repository that talks to a third-party API, and nothing here can test that:
   the normalizing functions are unit-tested against hand-written API payloads and the argument

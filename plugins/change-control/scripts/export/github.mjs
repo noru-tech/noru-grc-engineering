@@ -110,10 +110,25 @@ function isAgent(user) {
   return user?.type === "Bot" || /\[bot\]$/.test(user?.login ?? "");
 }
 
-export function normalizeProtection(repo, protection, codeowners, environments) {
+/**
+ * `readable` is not decoration. GitHub answers 404 for a branch that is not protected AND for a
+ * token that may not ask, and the two are indistinguishable from the response. Mapping both to
+ * `protected: false` states something false — "this branch has no protection" — where the honest
+ * answer is "nobody here could find out". So an unreadable probe omits the fields entirely rather
+ * than guessing at them, and the validator treats an absent field as unknown while it warns on an
+ * explicit `false`.
+ */
+export function normalizeProtection(repo, protection, readable, codeowners, environments) {
+  const base = {
+    default_branch: repo?.default_branch ?? "unknown",
+    codeowners_present: codeowners,
+    deploy_environments: environments,
+  };
+  if (!readable) return base;
+
   const reviews = protection?.required_pull_request_reviews;
   return {
-    default_branch: repo?.default_branch ?? "unknown",
+    ...base,
     protected: Boolean(protection),
     required_approvals: reviews?.required_approving_review_count ?? 0,
     dismiss_stale_reviews: Boolean(reviews?.dismiss_stale_reviews),
@@ -121,8 +136,6 @@ export function normalizeProtection(repo, protection, codeowners, environments) 
     enforce_admins: Boolean(protection?.enforce_admins?.enabled),
     allow_force_push: Boolean(protection?.allow_force_pushes?.enabled),
     required_status_checks: protection?.required_status_checks?.contexts ?? [],
-    codeowners_present: codeowners,
-    deploy_environments: environments,
   };
 }
 
@@ -214,9 +227,9 @@ async function main(argv) {
     const repo = (await api(opts, token, `/repos/${opts.repo}`)).body;
     const branch = repo?.default_branch ?? "main";
 
-    const protection = (
-      await api(opts, token, `/repos/${opts.repo}/branches/${branch}/protection`)
-    ).body;
+    const protectionProbe = await api(
+      opts, token, `/repos/${opts.repo}/branches/${branch}/protection`,
+    );
     const codeownersProbe = await api(opts, token, `/repos/${opts.repo}/contents/.github/CODEOWNERS`);
     const environmentsBody = (await api(opts, token, `/repos/${opts.repo}/environments`)).body;
     const environments = (environmentsBody?.environments ?? []).map((environment) => {
@@ -265,7 +278,9 @@ async function main(argv) {
       repository: opts.repo,
       exported_at: new Date().toISOString(),
       window: { opens_on: opts.since, closes_on: opts.until, complete: !truncated },
-      settings: normalizeProtection(repo, protection, !codeownersProbe.missing, environments),
+      settings: normalizeProtection(
+        repo, protectionProbe.body, !protectionProbe.missing, !codeownersProbe.missing, environments,
+      ),
       changes,
     };
 
@@ -291,6 +306,11 @@ async function main(argv) {
           `wrote ${out}`,
           `${changes.length} change(s) merged into ${branch} between ${opts.since} and ${opts.until}`,
           truncated ? "WARNING: the listing was truncated; window.complete is false" : "",
+          protectionProbe.missing
+            ? "NOTE: branch protection could not be read — either the branch is unprotected or " +
+              "this token may not ask. The settings are omitted rather than guessed; grant " +
+              "Administration: read to record them."
+            : "",
           "Next: node plugins/change-control/scripts/collect.mjs --repo=.",
         ]
           .filter(Boolean)

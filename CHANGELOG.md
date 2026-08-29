@@ -53,6 +53,27 @@ separate exporter (`scripts/export/{github,gitlab}.mjs`) and the collector stays
 `review-signoff` reads its review queue. On a fork pull request there is no token, so CI mode reports
 the piece as `skipped`.
 
+### Fixed
+
+**The coverage check no longer fires on a schema that describes a format.** Running it against this
+repository matched all ten files in `contract/`, none of which holds personal data. The JSON Schema
+and Zod markers are gone: a marker earns its place when it means "a stored record is defined here",
+not merely "a shape is described here". A check that fires on every repository with a schema
+directory is one somebody turns off.
+
+**An unreadable forge setting is no longer reported as a false one.** GitHub and GitLab both answer
+404 for a branch with no protection *and* for a token that may not ask. The exporters were mapping
+both to `protected: false`, which states something untrue where the honest answer is "nobody here
+could find out"; they now omit the fields instead.
+
+### Dogfooding
+
+[`.github/workflows/compliance.yml`](./.github/workflows/compliance.yml) runs this repository's own
+gates and is the worked example a customer copies. What this repository can and cannot honestly
+dogfood is written into it, including the one that does not work: `ai-inventory` reports nine
+providers here because this repository's source *is* a detector and the collector matches its own
+pattern tables. That is in [`docs/verification.md`](./docs/verification.md) under Known gaps.
+
 ## 0.3.0 — 2026-08-28
 
 Two changes here alter behaviour users can see, and both are safe to take together.
