@@ -6,6 +6,21 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Added
+
+- `evidence-push` verifies uploaded artifacts end to end. Before sending, `push.mjs` recomputes the
+  SHA-256 of the bytes on disk and refuses the upload if the manifest's `sha256` no longer matches —
+  a file edited after `:scan` is caught rather than silently pushed. It sends that digest as
+  `expectedDigest`, which Noru rejects with `400 DIGEST_MISMATCH` if the bytes it received disagree,
+  and on success compares the digest Noru computed over what it stored against the digest sent.
+  A push now fails loudly rather than quietly storing an artifact that is not the one on disk.
+
+  No manifest change is required: `sha256` was already a required field on every upload. What is new
+  is that nothing trusts the stamp — it is recomputed on both sides of the transfer.
+
+  Servers that do not yet return an `integrity` block are treated as older deployments, not as
+  failures; only a *different* digest fails the push.
+
 ## 0.3.0 — 2026-08-28
 
 Two changes here alter behaviour users can see, and both are safe to take together.

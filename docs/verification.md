@@ -73,6 +73,16 @@ at production scale. Treat a first run as something to check, not something to t
 - `governance-records`' extractor has only met documents written to its own conventions. A real
   minute book will not be.
 - The filename-to-expectation matcher in `evidence-push` has only met fixture catalogues.
+- **The upload digest checks are not covered by an executed test.** `push.mjs` now recomputes the
+  SHA-256 of the bytes on disk before sending (refusing a file that changed after `:scan`), sends it
+  as `expectedDigest`, and compares the digest Noru returns for what it stored. Every one of those
+  paths needs a live API to reach, and no script in this repository stands one up — so by this
+  repository's own standard the gates have never been observed failing, and are not yet tests. The
+  pre-send guard is reachable offline and is the one worth wiring up first.
+- The artifact digest proves the bytes Noru stored are the bytes this repository uploaded. It says
+  nothing about whether those bytes describe the running system — the same limit already stated
+  above for Article 50 disclosure states being a *repository* fact. A signed screenshot of the wrong
+  dashboard is still the wrong dashboard, verifiably.
 - `iac-scan`'s rules are text-and-block matchers, not a parser. They will miss a misconfiguration
   expressed through a module input, a variable default or a generated template, and they will fire
   on a resource that a later override makes safe. Read the citation before you accept the finding —
@@ -85,11 +95,15 @@ Run `:diff` before your first `:push`, and read it.
 
 ## Known gaps, stated rather than discovered later
 
-- **No idempotency key is documented for evidence.** Noru's published API documentation documents
-  upsert behaviour for assets and security findings; neither `createEvidence` nor
-  `POST /v1/evidence/upload` documents a key, so both pieces fall back to a client probe. Edit an
-  evidence description in the Noru UI and the probe stops matching; a re-run uploads again. Recorded
-  in each `piece.json` with what a documented key would let the piece drop.
+- **No idempotency key is documented for evidence — but the ingredient now exists.** Noru's published
+  API documentation documents upsert behaviour for assets and security findings; neither
+  `createEvidence` nor `POST /v1/evidence/upload` documents a key, so both pieces still fall back to
+  a client probe. Edit an evidence description in the Noru UI and the probe stops matching; a re-run
+  uploads again. Recorded in each `piece.json` with what a documented key would let the piece drop.
+  What changed is that Noru now computes a canonical content digest at capture and returns it, which
+  is exactly the stable key the probe has been approximating. Closing this gap is no longer blocked
+  on Noru computing anything — only on the API documenting the digest as an upsert key and honouring
+  it on write.
 - **No piece is `mode: single_call`.** Every one fans out several individually-keyed writes because
   the published API offers no single ingest operation for these artifacts. Every one declares
   `collapses_to`. `iac-scan` is the closest: its writes are documented server-side upserts, so the
