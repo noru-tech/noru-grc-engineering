@@ -22,6 +22,7 @@
 //   1 = no plan, stale plan, missing credential, or an upload failed
 //   2 = usage error, including a missing --confirm
 
+import { createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { basename, join } from "node:path";
 
@@ -45,6 +46,23 @@ async function uploadOne(baseUrl, apiKey, repo, op) {
     return { ok: false, status: 0, error: `file not found: ${op.arguments.file}` };
   }
   const bytes = readFileSync(absolute);
+
+  // The manifest carries the digest :scan computed. Recompute it from the bytes
+  // we are about to send: if the file changed after the plan was written, the
+  // plan no longer describes what would be uploaded.
+  const localDigest = createHash("sha256").update(bytes).digest("hex");
+  if (op.arguments.sha256 && localDigest !== op.arguments.sha256) {
+    return {
+      ok: false,
+      status: 0,
+      error:
+        `file changed since :scan: ${op.arguments.file}\n` +
+        `  manifest sha256 ${op.arguments.sha256}\n` +
+        `  on disk now      ${localDigest}\n` +
+        "  re-run :scan and :diff before pushing.",
+    };
+  }
+
   const form = new FormData();
   form.append(
     "file",
@@ -56,6 +74,8 @@ async function uploadOne(baseUrl, apiKey, repo, op) {
       form.append(key, String(value));
     }
   }
+  // Let Noru reject the upload itself if the bytes it receives disagree.
+  form.append("expectedDigest", localDigest);
 
   let response;
   try {
@@ -73,13 +93,39 @@ async function uploadOne(baseUrl, apiKey, repo, op) {
     return { ok: false, status: response.status, error: redact(text).slice(0, 500) };
   }
   let evidenceId = null;
+  let storedDigest = null;
   try {
     const parsed = JSON.parse(text);
     evidenceId = parsed?.data?.id ?? parsed?.id ?? null;
+    storedDigest = parsed?.data?.integrity?.artifact?.digest ?? null;
   } catch {
     evidenceId = null;
   }
-  return { ok: true, status: response.status, evidenceId };
+
+  // Recompute rather than trust the stamp. Noru returns the digest it computed
+  // over the bytes it stored; it has to equal the one we computed here, or the
+  // artifact in Noru is not the artifact on this machine. A server that does
+  // not return an integrity block yet is not an error -- it is an older
+  // deployment -- but a server that returns a DIFFERENT digest is.
+  if (storedDigest && storedDigest !== localDigest) {
+    return {
+      ok: false,
+      status: response.status,
+      evidenceId,
+      error:
+        `digest mismatch after upload: ${op.arguments.file}\n` +
+        `  sent    ${localDigest}\n` +
+        `  stored  ${storedDigest}\n` +
+        "  the artifact in Noru is not the artifact that was uploaded.",
+    };
+  }
+
+  return {
+    ok: true,
+    status: response.status,
+    evidenceId,
+    digestVerified: Boolean(storedDigest),
+  };
 }
 
 async function main(argv) {

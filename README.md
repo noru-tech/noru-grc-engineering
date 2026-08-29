@@ -1,7 +1,10 @@
 # noru-grc-engineering
 
 > The compliance work that lives in your repo, your CI, or your laptop — done where it lives, and
-> landed in Noru with provenance, idempotency and a human review step.
+> landed in Noru with provenance, idempotency and a human review step. For file evidence, provenance
+> now means something you can check: `evidence-push` sends the SHA-256 of the bytes it uploads, and
+> compares it against the digest Noru computed over what it stored. Anyone holding the file can redo
+> that arithmetic.
 
 [![License: MIT](https://img.shields.io/badge/Code-MIT-blue.svg)](./LICENSE)
 [![Codex Plugin](https://img.shields.io/badge/Codex-plugin-111827.svg)](./docs/clients/codex.md)
