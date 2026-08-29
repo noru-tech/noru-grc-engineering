@@ -26,7 +26,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 
 export const PIECE = "change-control";
-export const VERSION = "0.1.0";
+export const VERSION = "0.4.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 const EVENTS_REL = ".noru/.cache/change-events.json";
