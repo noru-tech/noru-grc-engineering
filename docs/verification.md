@@ -47,6 +47,7 @@ python3 scripts/test_ci_mode.py        # CI mode fails on drift, on an expired c
 | **A 403 on an optional read does not kill an export** | found on the first live API call: GitHub answers `403 Resource not accessible by integration` — not 404 — when a token may not read branch protection, and a probe tolerating only 404 killed the whole export. `test_collectors.py` now drives the exporter against a stdlib HTTP server returning that exact response, asserts the export completes with the settings omitted, and asserts the other direction: a 403 on the pull requests themselves still fails, because an export missing those is not an export. Checked in the other direction by removing the tolerance |
 | A token is not echoed into an error | the same test asserts the token it passed does not appear in stderr on the failing path |
 | An unreadable forge setting is not a false setting | `normalizeProtection` omits the protection fields when the probe 404s, because GitHub and GitLab both answer 404 for "not protected" and for "you may not ask". Reporting `protected: false` there would state something untrue |
+| **No manifest uses a YAML 1.1 boolean word** | `check_repo.py` scans every `.yml`/`.yaml` under `plugins/`, `contract/` and `tests/` for `yes`/`no`/`on`/`off`/`y`/`n` as a key or an unquoted value, so a file cannot mean two different things on two machines. Checked in the other direction with a probe fixture; GitHub Actions workflows are exempt because `on:` is required there |
 | A scaffolded piece satisfies the contract | CI scaffolds one and runs the contract test against it |
 | **CI mode fails on drift** | `test_ci_mode.py` adds a model provider to a copy of the fixture repo and asserts exit `3`, that the message names the provider and the `file:line` it arrived at, and that the gate clears again when the file is removed |
 | **CI mode fails on personal data the baseline does not permit** | `test_ci_mode.py` builds a repository whose data map matches it, commits a baseline narrower than the map, and asserts exit `7` with an `unpermitted_category` finding. Both routes to that finding are exercised separately, because the fix differs: an explicit `deny` entry, and a value absent from a closed `allow` list |
@@ -168,14 +169,15 @@ Run `:diff` before your first `:push`, and read it.
   includes a digest of the rendered record, so re-filed minutes become a second record. For an
   account of a meeting that is arguably correct — an auditor should see both — but it is a
   consequence of having no documented key, not a decision anyone made.
-- **The two YAML loaders agree on block scalars, and not on everything.** The block scalar
-  divergence that used to sit here is closed: the bundled fallback reads `>` and `|` exactly as
-  PyYAML 6.0.3 does, whitespace and content alike, and both gates in the table above hold that line.
-  What is still open is the YAML 1.1 boolean spelling. PyYAML resolves `yes`, `no`, `on` and `off`
-  to booleans; the fallback leaves them as strings. No fixture is written that way, so nothing fails
-  today, but `evals.ci_gated: yes` would be accepted by `ai-inventory` on a machine with PyYAML and
-  rejected on one without — the same shape of bug as the unquoted dates fixed in v0.1.0, and not yet
-  fixed. Quote the value, or spell it `true`, until it is.
+- **The two YAML loaders still disagree about YAML 1.1 booleans, but a file can no longer walk into
+  it unnoticed.** PyYAML resolves `yes`, `no`, `on` and `off` to booleans; the bundled fallback
+  leaves them as strings. This entry used to say "no fixture is written that way, so nothing fails
+  today" — and then one was: `change-control` named an approval's date field `on`, PyYAML read the
+  *key* as `True`, and every local run passed while the CI matrix failed. `check_repo.py` now
+  rejects a YAML 1.1 boolean word used as a key or an unquoted value anywhere under `plugins/`,
+  `contract/` or `tests/`, with GitHub Actions workflows carved out because `on:` is GitHub's own
+  required syntax there. The divergence itself is unchanged and still a property of the machine; what
+  is fixed is that nothing in this repository can rely on it by accident.
 - **The MCP `push` does not perform the writes.** It emits the confirmed call list for the client to
   execute, because a script cannot speak MCP without handling a credential. The gate is enforced in
   the script; the execution is the agent's, and an agent that improvises a call outside the list has

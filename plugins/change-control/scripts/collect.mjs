@@ -199,7 +199,7 @@ export function collectFacts(repo) {
       approvals: (change.approvals ?? []).map((a) => ({
         by: a.by,
         state: a.state,
-        ...(a.on ? { on: a.on } : {}),
+        ...(a.reviewed_on ? { reviewed_on: a.reviewed_on } : {}),
       })),
       ...(change.merged_by ? { merged_by: change.merged_by } : {}),
       ...(change.merged_on ? { merged_on: change.merged_on } : {}),

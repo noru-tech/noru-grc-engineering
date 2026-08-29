@@ -157,7 +157,7 @@ export function normalizePull(pull, reviews, deployment) {
         : review.state === "CHANGES_REQUESTED" ? "changes_requested"
         : review.state === "DISMISSED" ? "dismissed"
         : "commented",
-      on: day(review.submitted_at),
+      reviewed_on: day(review.submitted_at),
     }))
     .filter((review) => review.by);
 

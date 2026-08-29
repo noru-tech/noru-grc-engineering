@@ -386,7 +386,7 @@ CHANGE_KEYS = {
     "approvals", "merged_by", "merged_on", "deployed_by", "deployed_on", "artifact_digest",
     "bypass", "exceptions", "refs", "interpretation", "needs_review",
 }
-APPROVAL_KEYS = {"by", "state", "on"}
+APPROVAL_KEYS = {"by", "state", "reviewed_on"}
 BYPASS_KEYS = {"used", "kind", "by", "reason"}
 EXCEPTION_KEYS = {"rule", "disposition", "owner", "note", "resolved_on"}
 INTERPRETATION_KEYS = {"owner", "decided_at", "expires_at", "rationale", "refs"}
@@ -901,13 +901,13 @@ def check_changes(rep, doc, vocab, window_close, counts):
                     f"{apath}.state",
                     f"unknown approval state '{state}'" + suggest(state, vocab["approval_state"]),
                 )
-            on = approval.get("on")
-            if on is not None and (not isinstance(on, str) or not DATE_RE.match(on)):
-                rep.err(f"{apath}.on", f"'{on}' is not an ISO date (YYYY-MM-DD)")
-            elif on and opened and days_between(on, opened) < 0:
+            reviewed = approval.get("reviewed_on")
+            if reviewed is not None and (not isinstance(reviewed, str) or not DATE_RE.match(reviewed)):
+                rep.err(f"{apath}.reviewed_on", f"'{reviewed}' is not an ISO date (YYYY-MM-DD)")
+            elif reviewed and opened and days_between(reviewed, opened) < 0:
                 rep.err(
-                    f"{apath}.on",
-                    f"approved on {on}, before the change was opened on {opened}",
+                    f"{apath}.reviewed_on",
+                    f"approved on {reviewed}, before the change was opened on {opened}",
                 )
 
         for field, label in (("merged_by", "merged"), ("deployed_by", "deployed")):
