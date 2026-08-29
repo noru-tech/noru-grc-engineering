@@ -1,6 +1,6 @@
 ---
 name: iac-scan
-version: 0.3.0
+version: 0.4.0
 description: Scan a repository's Terraform, CloudFormation, Kubernetes and CI configuration for compliance-relevant misconfiguration, decide with the user what each finding means in their environment, and land the result in Noru as security findings — closing the ones that no longer reproduce. Use when someone asks what is wrong with their infrastructure configuration, wants their IaC findings in their compliance register, wants to know whether a misconfiguration they accepted is still accepted, or wants a pipeline check that keeps the register true between audits.
 requires:
   bins: ["node", "python3", "git"]

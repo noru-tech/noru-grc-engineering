@@ -1,6 +1,6 @@
 ---
 name: evidence-push
-version: 0.3.0
+version: 0.4.0
 description: Work Noru's own evidence queue — ask which catalogue expectations are unmet for a control or framework, match local artifacts (pen test reports, signed reviews, certificates, screenshots) against that queue, and upload them as file evidence with control mappings. Use when the user wants to upload evidence to Noru, close an evidence gap, see what a control still needs, or prepare for an audit.
 requires:
   bins: ["node", "python3", "git"]
