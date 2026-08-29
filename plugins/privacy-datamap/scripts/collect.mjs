@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { toFideslang } from "./lib/fides.mjs";
 
 export const PIECE = "privacy-datamap";
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
