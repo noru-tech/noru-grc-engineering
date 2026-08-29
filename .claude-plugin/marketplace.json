@@ -8,25 +8,6 @@
   "description": "Last-mile GRC pieces: do the compliance work that lives in your repo, CI or laptop, and land it in Noru with provenance, idempotency and a human review step.",
   "plugins": [
     {
-      "name": "noru",
-      "source": "./plugins/noru",
-      "description": "Hub for the Noru last-mile pieces: connect, doctor, and repository context shared by every piece.",
-      "version": "0.3.0",
-      "license": "MIT",
-      "category": "compliance",
-      "keywords": [
-        "noru",
-        "compliance",
-        "grc",
-        "mcp",
-        "hub"
-      ],
-      "author": {
-        "name": "Noru",
-        "email": "support@noru.tech"
-      }
-    },
-    {
       "name": "ai-inventory",
       "source": "./plugins/ai-inventory",
       "description": "Scan a repository for the AI systems, model providers and oversight points it actually contains, review the manifest in a PR, and land it in Noru as assets, vendors and evidence.",
@@ -41,90 +22,6 @@
         "eu-ai-act",
         "inventory",
         "mcp"
-      ],
-      "author": {
-        "name": "Noru",
-        "email": "support@noru.tech"
-      }
-    },
-    {
-      "name": "governance-records",
-      "source": "./plugins/governance-records",
-      "description": "File the records of human decisions in Noru: minutes, ISMS scope, statement of applicability, internal audit plans and reports, findings and corrective action plans, each attributed and dated.",
-      "version": "0.3.0",
-      "license": "MIT",
-      "category": "compliance",
-      "keywords": [
-        "noru",
-        "compliance",
-        "governance",
-        "minutes",
-        "internal-audit",
-        "iso-27001",
-        "soc2"
-      ],
-      "author": {
-        "name": "Noru",
-        "email": "support@noru.tech"
-      }
-    },
-    {
-      "name": "review-signoff",
-      "source": "./plugins/review-signoff",
-      "description": "Turn a periodic review of machine output — access, rules, baselines, assets, physical access, vendors — into a named, dated, expiring sign-off in Noru.",
-      "version": "0.3.0",
-      "license": "MIT",
-      "category": "compliance",
-      "keywords": [
-        "noru",
-        "compliance",
-        "access-review",
-        "attestation",
-        "sign-off",
-        "iso-27001",
-        "soc2"
-      ],
-      "author": {
-        "name": "Noru",
-        "email": "support@noru.tech"
-      }
-    },
-    {
-      "name": "evidence-push",
-      "source": "./plugins/evidence-push",
-      "description": "Work Noru's own evidence queue: see which catalogue expectations are unmet, stage local artifacts against them, and upload with control mappings.",
-      "version": "0.3.0",
-      "license": "MIT",
-      "category": "compliance",
-      "keywords": [
-        "noru",
-        "compliance",
-        "evidence",
-        "audit",
-        "soc2",
-        "iso-27001",
-        "upload"
-      ],
-      "author": {
-        "name": "Noru",
-        "email": "support@noru.tech"
-      }
-    },
-    {
-      "name": "iac-scan",
-      "source": "./plugins/iac-scan",
-      "description": "Scan the Terraform, CloudFormation, Kubernetes and CI configuration a repository actually contains, decide what each finding means in this environment, and land the result in Noru as security findings — closing the ones that no longer reproduce.",
-      "version": "0.3.0",
-      "license": "MIT",
-      "category": "compliance",
-      "keywords": [
-        "noru",
-        "compliance",
-        "iac",
-        "terraform",
-        "kubernetes",
-        "cloudformation",
-        "security-findings"
       ],
       "author": {
         "name": "Noru",
@@ -153,6 +50,110 @@
       }
     },
     {
+      "name": "change-control",
+      "source": "./plugins/change-control",
+      "description": "Who wrote each change, who approved it, who merged it and who deployed it, for one window — with every separation that did not hold owned by a named person, and the forge configuration that was supposed to keep them apart.",
+      "version": "0.3.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "change-management",
+        "segregation-of-duties",
+        "separation-of-duties",
+        "soc2",
+        "iso27001",
+        "code-review"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
+    },
+    {
+      "name": "evidence-push",
+      "source": "./plugins/evidence-push",
+      "description": "Work Noru's own evidence queue: see which catalogue expectations are unmet, stage local artifacts against them, and upload with control mappings.",
+      "version": "0.3.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "evidence",
+        "audit",
+        "soc2",
+        "iso-27001",
+        "upload"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
+    },
+    {
+      "name": "governance-records",
+      "source": "./plugins/governance-records",
+      "description": "File the records of human decisions in Noru: minutes, ISMS scope, statement of applicability, internal audit plans and reports, findings and corrective action plans, each attributed and dated.",
+      "version": "0.3.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "governance",
+        "minutes",
+        "internal-audit",
+        "iso-27001",
+        "soc2"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
+    },
+    {
+      "name": "iac-scan",
+      "source": "./plugins/iac-scan",
+      "description": "Scan the Terraform, CloudFormation, Kubernetes and CI configuration a repository actually contains, decide what each finding means in this environment, and land the result in Noru as security findings — closing the ones that no longer reproduce.",
+      "version": "0.3.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "iac",
+        "terraform",
+        "kubernetes",
+        "cloudformation",
+        "security-findings"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
+    },
+    {
+      "name": "noru",
+      "source": "./plugins/noru",
+      "description": "Hub for the Noru last-mile pieces: connect, doctor, and repository context shared by every piece.",
+      "version": "0.3.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "grc",
+        "mcp",
+        "hub"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
+    },
+    {
       "name": "privacy-datamap",
       "source": "./plugins/privacy-datamap",
       "description": "Read the schemas a repository actually contains — ORM models, migrations, SQL DDL, API contracts — classify the personal data in them against the Fideslang taxonomy, review the result in a pull request, and land the data map in Noru.",
@@ -168,6 +169,27 @@
         "data-map",
         "gdpr",
         "ropa"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
+    },
+    {
+      "name": "review-signoff",
+      "source": "./plugins/review-signoff",
+      "description": "Turn a periodic review of machine output — access, rules, baselines, assets, physical access, vendors — into a named, dated, expiring sign-off in Noru.",
+      "version": "0.3.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "access-review",
+        "attestation",
+        "sign-off",
+        "iso-27001",
+        "soc2"
       ],
       "author": {
         "name": "Noru",

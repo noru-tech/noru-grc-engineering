@@ -39,6 +39,10 @@ python3 scripts/test_ci_mode.py        # CI mode fails on drift, on an expired c
 | **A plan does not depend on which YAML loader parsed the manifest** | `test_idempotency.py` parses the same manifest bytes with PyYAML and with the bundled fallback — both in one interpreter, the fallback forced by hiding PyYAML behind a stub that raises on import — and asserts for all six pieces that the plan (markers, arguments, effects and reasons) is identical, both writing into an empty organization and writing into one the same plan has already been pushed into. Needs PyYAML to have two loaders to compare, so it reports itself skipped where there is none and the CI matrix runs a leg with it |
 | No catalogue is vendored | every plugin file is scanned for catalogue-shaped evidence-item and control ids; fixtures may only use the reserved `E-ZZ-*` / `zz-*` namespaces |
 | No credential leaks into the repository | the tree is scanned for credential-shaped strings |
+| **The segregation rules mean the same thing in both languages** | the rules are implemented twice — `collect.mjs` to propose them, `validate_manifest.py` to refuse an unowned one — and `test_collectors.py` runs both over seven cases chosen where they could plausibly diverge: a name differing only in case or whitespace, a comment that is not an approval, an agent whose only reviewer is its operator. Checked in the other direction by removing the lowercasing from one side |
+| A clean change raises no violation at all | asserted in both implementations: a rule set that fires on everything is as useless as one that fires on nothing, and easier to ship by accident |
+| **A remediated exception closes its finding** | `test_idempotency.py` asserts a `remediated` or `false_positive` disposition is pushed with status `resolved`, so a re-run after the fix closes the record instead of leaving a stale open finding beside a fixed problem |
+| One evidence record per window, not one per change | asserted: a blob per change is how a register becomes unreadable |
 | A scaffolded piece satisfies the contract | CI scaffolds one and runs the contract test against it |
 | **CI mode fails on drift** | `test_ci_mode.py` adds a model provider to a copy of the fixture repo and asserts exit `3`, that the message names the provider and the `file:line` it arrived at, and that the gate clears again when the file is removed |
 | **CI mode fails on personal data the baseline does not permit** | `test_ci_mode.py` builds a repository whose data map matches it, commits a baseline narrower than the map, and asserts exit `7` with an `unpermitted_category` finding. Both routes to that finding are exercised separately, because the fix differs: an explicit `deny` entry, and a value absent from a closed `allow` list |
@@ -101,6 +105,21 @@ at production scale. Treat a first run as something to check, not something to t
   expressed through a module input, a variable default or a generated template, and they will fire
   on a resource that a later override makes safe. Read the citation before you accept the finding —
   which is the workflow the piece is built around, but it is a real recall and precision ceiling.
+- **`change-control`'s exporters have never met a live forge.** The GitHub and GitLab exporters are
+  the only code in this repository that talks to a third-party API, and nothing here can test that:
+  the normalizing functions are unit-tested against hand-written API payloads and the argument
+  handling is exercised, but no call has ever been made. Field names, pagination behaviour and the
+  shape of a protection response are read from published documentation, not observed. Treat the
+  first export as something to read line by line.
+- **`change-control` infers an admin merge from its shape.** A merge with no approving review is
+  what the API shows; *why* it happened is not in the API. The exporter records the shape, says so
+  in the reason text it writes, and the command tells you to replace it. Nothing automates the
+  distinction between an administrator overriding protection and a repository that never required a
+  review in the first place.
+- **Nothing can discover who ran an agent.** `author_kind: agent` is derived from the forge's own bot
+  flag, but no API knows which person started the run. `agent_operator` is therefore left empty and
+  the validator refuses the manifest until a human fills it in. That is a deliberate refusal to
+  guess, and it means the rule is only as good as the person answering.
 - `audit-pack` has only ever assembled a scope of two controls. A real framework is a hundred or
   more, and neither the pack's readability at that size nor the push's call count at that size has
   been seen.

@@ -1,0 +1,213 @@
+{
+  "$schema": "../../contract/piece.schema.json",
+  "piece": "change-control",
+  "contract_version": "0.1.0",
+  "artifact": ".noru/change-control.yml",
+  "manifest_schema": "contract/change-control.schema.json",
+  "commands": {
+    "scan": "commands/scan.md",
+    "diff": "commands/diff.md",
+    "push": "commands/push.md"
+  },
+  "skill": "skills/change-control/SKILL.md",
+  "collector": {
+    "entrypoint": "scripts/collect.mjs",
+    "deterministic": true,
+    "network": false,
+    "inputs": [
+      ".noru/.cache/change-events.json"
+    ]
+  },
+  "validator": {
+    "entrypoint": "scripts/validate_manifest.py",
+    "runtime": "python3-stdlib",
+    "vocabulary": [
+      "references/vocabulary.json"
+    ],
+    "suggestions": true,
+    "exit_codes": {
+      "0": "manifest is valid; warnings may be present",
+      "1": "manifest has validation errors, including a separation that did not hold and that nobody owns",
+      "2": "usage error, unreadable file, or unparseable YAML"
+    },
+    "fixtures": {
+      "valid": [
+        "fixtures/valid.change-control.yml"
+      ],
+      "invalid": [
+        {
+          "path": "fixtures/invalid-missing-interpretation.change-control.yml",
+          "expect_message": "missing required `interpretation`"
+        },
+        {
+          "path": "fixtures/invalid-unowned-violation.change-control.yml",
+          "expect_message": "nothing in this record owns it"
+        },
+        {
+          "path": "fixtures/invalid-agent-without-operator.change-control.yml",
+          "expect_message": "must name the person who ran it"
+        },
+        {
+          "path": "fixtures/invalid-blanket-exception.change-control.yml",
+          "expect_message": "nothing in this change triggers it"
+        },
+        {
+          "path": "fixtures/invalid-bypass-without-reason.change-control.yml",
+          "expect_message": "a bypass nobody wrote down is indistinguishable from a control that held"
+        },
+        {
+          "path": "fixtures/invalid-deployed-before-merged.change-control.yml",
+          "expect_message": "before it was merged on"
+        },
+        {
+          "path": "fixtures/invalid-change-outside-window.change-control.yml",
+          "expect_message": "falls outside the window"
+        },
+        {
+          "path": "fixtures/invalid-no-expiry.change-control.yml",
+          "expect_message": "an account of a period that never lapses"
+        },
+        {
+          "path": "fixtures/invalid-expiry-beyond-horizon.change-control.yml",
+          "expect_message": "past the 400-day horizon"
+        },
+        {
+          "path": "fixtures/invalid-deferred-long-horizon.change-control.yml",
+          "expect_message": "past the 120-day horizon"
+        },
+        {
+          "path": "fixtures/invalid-decided-before-window-closed.change-control.yml",
+          "expect_message": "cannot be drawn while the period is still running"
+        },
+        {
+          "path": "fixtures/invalid-remediated-without-date.change-control.yml",
+          "expect_message": "a deferred one wearing a better word"
+        },
+        {
+          "path": "fixtures/invalid-unknown-disposition.change-control.yml",
+          "expect_message": "unknown disposition"
+        },
+        {
+          "path": "fixtures/invalid-unknown-kind.change-control.yml",
+          "expect_message": "unknown change kind"
+        },
+        {
+          "path": "fixtures/invalid-needs-review.change-control.yml",
+          "expect_message": "still true"
+        },
+        {
+          "path": "fixtures/invalid-off-queue-control.change-control.yml",
+          "expect_message": "is not in the queue snapshot"
+        }
+      ]
+    }
+  },
+  "push": {
+    "entrypoint": "scripts/push.mjs",
+    "mode": "keyed_upsert",
+    "collapses_to": {
+      "tool": "a single idempotency-keyed ingest that takes a change-control attestation for a window — the population, the separations that did not hold, and an owner with a validity period — and files the exceptions and the period record together, instead of one security-finding call per exception plus an evidence create the client has to thread",
+      "tracked_at": "https://github.com/noru-tech/noru-grc-engineering/issues"
+    },
+    "operations": [
+      {
+        "name": "createSecurityFinding",
+        "transport": "mcp",
+        "scope": "write:risks",
+        "idempotency": {
+          "kind": "server_upsert",
+          "key": [
+            "source",
+            "externalId"
+          ],
+          "verified_at": "The \"Idempotency/Upsert Behavior\" section of https://api.noru.tech/llms.txt documents POST /v1/security-findings as an upsert on (source, externalId): an existing finding with the same pair is updated in place rather than duplicated. The createSecurityFinding tool description published by https://api.noru.tech/v1/mcp is the MCP surface over the same operation."
+        }
+      },
+      {
+        "name": "createEvidence",
+        "transport": "mcp",
+        "scope": "write:evidence",
+        "idempotency": {
+          "kind": "client_probe",
+          "key": [
+            "description contains marker"
+          ],
+          "verified_at": "The createEvidence tool description published by https://api.noru.tech/v1/mcp documents creating text/note/link evidence with optional control mappings and documents no idempotency key. The \"Idempotency/Upsert Behavior\" section of https://api.noru.tech/llms.txt covers assets and security findings only.",
+          "gap": "No idempotency key is documented for evidence, so this piece embeds a marker built from the window and a digest of the rendered attestation in the evidence description, and probes getOrganizationEvidence before creating. A documented key would let the probe go away."
+        }
+      },
+      {
+        "name": "linkEvidenceToControl",
+        "transport": "mcp",
+        "scope": "write:evidence",
+        "idempotency": {
+          "kind": "client_probe",
+          "key": [
+            "evidenceId",
+            "controlId"
+          ],
+          "verified_at": "The linkEvidenceToControl tool description published by https://api.noru.tech/v1/mcp documents attaching an existing evidence record to a control. Nothing published says whether linking the same pair twice is a no-op, so this piece does not assume it is.",
+          "gap": "The evidence id is learned from the create in the same plan, so the call carries depends_on and the executing client substitutes it. A documented key on evidence would remove both this probe and the one above."
+        }
+      }
+    ],
+    "provenance": {
+      "slug": true,
+      "commit_sha": true,
+      "branch": true
+    },
+    "diff_required": true,
+    "requires_confirmation": true
+  },
+  "scopes": {
+    "read": [
+      "read:organization",
+      "read:controls",
+      "read:evidence",
+      "read:risks"
+    ],
+    "write": [
+      "write:evidence",
+      "write:risks"
+    ]
+  },
+  "queue": {
+    "source": [
+      {
+        "kind": "mcp_tool",
+        "tool": "getOrganizationControls",
+        "note": "The organization's controls and their status. Ids come from Noru; this plugin ships none."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getControlContext",
+        "note": "What the framework expects of a control, what is already linked, and the procedure an auditor follows. Which change-management separations this organization must hold to is Noru's answer, never this plugin's."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getEvidenceForControl",
+        "note": "Every evidence record linked to a control with its status and expiry. A change-control record that expired is a window that is due again."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getSecurityFindings",
+        "note": "Findings already open for this source, so an exception that has since been remediated is closed by the same upsert that filed it rather than duplicated."
+      }
+    ],
+    "hardcoded_expectations": false
+  },
+  "interpretation": {
+    "required": true,
+    "level": "per_claim",
+    "unattributed": "error"
+  },
+  "ci": {
+    "output_json": true,
+    "quiet": true,
+    "exit_codes": {
+      "0": "success",
+      "1": "drift, validation failure, missing prerequisite input, or a stale plan",
+      "2": "usage error, including a push without --confirm"
+    }
+  }
+}

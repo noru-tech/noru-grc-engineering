@@ -1226,6 +1226,124 @@ def test_digest_ignores_the_collectors_own_version(results, tmp):
 
 
 
+def test_change_control_rules_agree_across_languages(results, tmp):
+    """The segregation rules are implemented twice, and two implementations of one rule drift.
+
+    collect.mjs computes the violations so the skeleton can propose them; validate_manifest.py
+    recomputes them so a manifest with an unowned one is refused. Neither can trust the other's
+    output — the validator must work on a manifest whose derived facts are long gone — so both
+    exist, and this is the check that stops them disagreeing.
+
+    The cases below are the ones where the two could plausibly diverge: a name that differs only in
+    case or whitespace, an approval that is not an approval, an agent whose only reviewer is its
+    operator, and the clean change that must produce nothing at all.
+    """
+    cases = [
+        (
+            "clean: independent approver and deployer",
+            {
+                "authored_by": "a@example.com", "author_kind": "human",
+                "approvals": [{"by": "b@example.com", "state": "approved"}],
+                "merged_by": "b@example.com", "deployed_by": "b@example.com",
+                "bypass": {"used": False},
+            },
+        ),
+        (
+            "self-approved, self-merged, self-deployed",
+            {
+                "authored_by": "a@example.com", "author_kind": "human",
+                "approvals": [{"by": "a@example.com", "state": "approved"}],
+                "merged_by": "a@example.com", "deployed_by": "a@example.com",
+                "bypass": {"used": False},
+            },
+        ),
+        (
+            "the same person spelled differently",
+            {
+                "authored_by": "A@Example.com", "author_kind": "human",
+                "approvals": [{"by": " a@example.com ", "state": "approved"}],
+                "bypass": {"used": False},
+            },
+        ),
+        (
+            "a comment is not an approval",
+            {
+                "authored_by": "a@example.com", "author_kind": "human",
+                "approvals": [{"by": "b@example.com", "state": "commented"}],
+                "bypass": {"used": False},
+            },
+        ),
+        (
+            "agent reviewed only by its operator",
+            {
+                "authored_by": "bot@example.com", "author_kind": "agent",
+                "agent_operator": "a@example.com",
+                "approvals": [{"by": "a@example.com", "state": "approved"}],
+                "bypass": {"used": False},
+            },
+        ),
+        (
+            "agent reviewed by an independent human",
+            {
+                "authored_by": "bot@example.com", "author_kind": "agent",
+                "agent_operator": "a@example.com",
+                "approvals": [{"by": "b@example.com", "state": "approved"}],
+                "bypass": {"used": False},
+            },
+        ),
+        (
+            "a bypass with an otherwise clean change",
+            {
+                "authored_by": "a@example.com", "author_kind": "human",
+                "approvals": [{"by": "b@example.com", "state": "approved"}],
+                "bypass": {"used": True, "kind": "force_push"},
+            },
+        ),
+    ]
+
+    piece = PLUGINS / "change-control"
+    script = (
+        "import { violationsOf } from "
+        f"{json.dumps(str(piece / 'scripts' / 'collect.mjs'))};\n"
+        # With `node -e`, argv[0] is the executable and the first extra argument is argv[1].
+        "const cases = JSON.parse(process.argv[1]);\n"
+        "console.log(JSON.stringify(cases.map((c) => violationsOf(c).map((v) => v.rule))));\n"
+    )
+    payload = json.dumps([change for _, change in cases])
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script, "--", payload],
+        capture_output=True, text=True, check=False,
+    )
+    if not results.check(
+        "[change-control] the JS rules run", completed.returncode == 0, completed.stderr[:300]
+    ):
+        return
+    js_rules = json.loads(completed.stdout)
+
+    sys.path.insert(0, str(piece / "scripts"))
+    spec = importlib.util.spec_from_file_location(
+        "cc_validator", piece / "scripts" / "validate_manifest.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    for (label, change), js in zip(cases, js_rules):
+        py = [rule for rule, _ in module.violations_of(change)]
+        results.check(
+            f"[change-control] JS and Python agree — {label}",
+            py == js,
+            f"node says {js}, python says {py}",
+        )
+
+    # And the one that matters most: a clean change produces nothing at all. A rule set that fires
+    # on everything is as useless as one that fires on nothing, and easier to ship by accident.
+    results.check(
+        "[change-control] a clean change raises no violation at all",
+        js_rules[0] == [] and not module.violations_of(cases[0][1]),
+        json.dumps(js_rules[0]),
+    )
+
+
 def main(argv):
     output_json = False
     quiet = False
@@ -1265,6 +1383,7 @@ def main(argv):
             test_datamap_digest_agrees_across_languages(results, tmp)
             test_datamap_render_is_gated_and_matches_the_push(results, tmp)
             test_digest_ignores_the_collectors_own_version(results, tmp)
+            test_change_control_rules_agree_across_languages(results, tmp)
             test_iac_never_copies_the_line(results, tmp)
             test_iac_identity_survives_a_move(results, tmp)
             test_iac_absence_is_detectable(results, tmp)

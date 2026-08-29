@@ -5,70 +5,10 @@
   },
   "plugins": [
     {
-      "name": "noru",
-      "source": {
-        "source": "local",
-        "path": "./plugins/noru"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Productivity"
-    },
-    {
       "name": "ai-inventory",
       "source": {
         "source": "local",
         "path": "./plugins/ai-inventory"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Productivity"
-    },
-    {
-      "name": "governance-records",
-      "source": {
-        "source": "local",
-        "path": "./plugins/governance-records"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Productivity"
-    },
-    {
-      "name": "review-signoff",
-      "source": {
-        "source": "local",
-        "path": "./plugins/review-signoff"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Productivity"
-    },
-    {
-      "name": "evidence-push",
-      "source": {
-        "source": "local",
-        "path": "./plugins/evidence-push"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Productivity"
-    },
-    {
-      "name": "iac-scan",
-      "source": {
-        "source": "local",
-        "path": "./plugins/iac-scan"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -89,10 +29,82 @@
       "category": "Productivity"
     },
     {
+      "name": "change-control",
+      "source": {
+        "source": "local",
+        "path": "./plugins/change-control"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "evidence-push",
+      "source": {
+        "source": "local",
+        "path": "./plugins/evidence-push"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "governance-records",
+      "source": {
+        "source": "local",
+        "path": "./plugins/governance-records"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "iac-scan",
+      "source": {
+        "source": "local",
+        "path": "./plugins/iac-scan"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "noru",
+      "source": {
+        "source": "local",
+        "path": "./plugins/noru"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
       "name": "privacy-datamap",
       "source": {
         "source": "local",
         "path": "./plugins/privacy-datamap"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "review-signoff",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review-signoff"
       },
       "policy": {
         "installation": "AVAILABLE",
