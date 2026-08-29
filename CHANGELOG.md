@@ -66,6 +66,13 @@ directory is one somebody turns off.
 both to `protected: false`, which states something untrue where the honest answer is "nobody here
 could find out"; they now omit the fields instead.
 
+**A 403 on an optional read no longer kills an export.** Found on the first live API call this
+repository made: GitHub answers `403 Resource not accessible by integration` — not 404 — when a
+token may not read branch protection, which is exactly what the Actions token gets. The optional
+probes now tolerate it and say which of the two happened; a 403 on the pull requests themselves
+still fails, because an export missing those is not an export. The exporters' HTTP layer is now
+covered by a test against a stdlib server, which is how this would have been caught.
+
 ### Dogfooding
 
 [`.github/workflows/compliance.yml`](./.github/workflows/compliance.yml) runs this repository's own

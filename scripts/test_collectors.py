@@ -31,6 +31,7 @@ Exit codes: 0 = all tests pass, 1 = a test failed, 2 = usage / setup error.
 import hashlib
 import importlib.util
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -1344,6 +1345,145 @@ def test_change_control_rules_agree_across_languages(results, tmp):
     )
 
 
+# Canned GitHub responses. Enough shape for the exporter to work through, and a 403 on branch
+# protection — which is what the Actions token really gets, and what killed a whole export before
+# `tolerate` existed.
+GITHUB_ROUTES = {
+    "/repos/o/r": (200, {"default_branch": "main"}),
+    "/repos/o/r/branches/main/protection": (403, {"message": "Resource not accessible by integration"}),
+    "/repos/o/r/contents/.github/CODEOWNERS": (200, {"name": "CODEOWNERS"}),
+    "/repos/o/r/environments": (200, {"environments": []}),
+    "/repos/o/r/deployments": (200, []),
+    "/repos/o/r/pulls": (200, [{
+        "number": 7,
+        "title": "Add a thing",
+        "user": {"login": "alice", "type": "User"},
+        "created_at": "2026-07-02T09:00:00Z",
+        "merged_at": "2026-07-03T09:00:00Z",
+        "merged_by": {"login": "alice", "type": "User"},
+        "merge_commit_sha": "deadbeefcafe",
+        "html_url": "https://example/pull/7",
+    }]),
+    "/repos/o/r/pulls/7/reviews": (200, [
+        {"user": {"login": "alice"}, "state": "APPROVED", "submitted_at": "2026-07-03T08:00:00Z"},
+    ]),
+}
+
+
+def _serve(routes):
+    """A stdlib HTTP server returning canned JSON. Returns (base_url, shutdown)."""
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            path = self.path.split("?")[0]
+            status, body = routes.get(path, (404, {"message": "Not Found"}))
+            payload = json.dumps(body).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return f"http://127.0.0.1:{server.server_port}", server.shutdown
+
+
+def test_change_control_export_survives_a_forbidden_setting(results, tmp):
+    """The exporters' HTTP layer, against a server that answers the way GitHub really does.
+
+    docs/verification.md said these had never met a live forge, and the first run against one failed
+    exactly where that gap predicted: branch protection answers **403** for a token that may not ask
+    it, not 404, and a probe tolerating only 404 killed the whole export. The exporters take
+    `--api=`, so the layer is testable without a forge, and this is that test.
+
+    What it asserts is the honest-reporting rule the piece is built on: an unreadable setting is
+    omitted, never reported as a false one. `protected: false` where the answer is "nobody could
+    find out" is a wrong compliance claim, and worse than a missing one.
+    """
+    base, shutdown = _serve(GITHUB_ROUTES)
+    out = pathlib.Path(tmp) / "export" / "change-events.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        completed = subprocess.run(
+            [
+                "node",
+                str(PLUGINS / "change-control" / "scripts" / "export" / "github.mjs"),
+                "--repo=o/r", "--since=2026-07-01", "--until=2026-07-31",
+                f"--out={out}", f"--api={base}", "--output=json", "--quiet",
+            ],
+            capture_output=True, text=True, check=False,
+            env={**os.environ, "GITHUB_TOKEN": "not-a-real-token"},
+        )
+    finally:
+        shutdown()
+
+    if not results.check(
+        "[change-control] a 403 on branch protection does not kill the export",
+        completed.returncode == 0,
+        completed.stderr[:400],
+    ):
+        return
+
+    document = json.loads(out.read_text(encoding="utf-8"))
+    settings = document["settings"]
+    results.check(
+        "[change-control] an unreadable setting is omitted, not reported false",
+        "protected" not in settings and "enforce_admins" not in settings,
+        json.dumps(settings),
+    )
+    results.check(
+        "[change-control] what it could read is still recorded",
+        settings["default_branch"] == "main" and settings["codeowners_present"] is True,
+        json.dumps(settings),
+    )
+    change = document["changes"][0]
+    results.check(
+        "[change-control] the change itself came through",
+        change["key"] == "pr-7" and change["authored_by"].startswith("alice@"),
+        json.dumps(change)[:200],
+    )
+    results.check(
+        "[change-control] a self-approval survives the round trip as data",
+        change["approvals"][0]["by"] == change["authored_by"],
+        json.dumps(change["approvals"]),
+    )
+
+    # And the other direction: a 403 on something the export cannot do without must still fail.
+    broken = dict(GITHUB_ROUTES)
+    broken["/repos/o/r/pulls"] = (403, {"message": "Resource not accessible by integration"})
+    base, shutdown = _serve(broken)
+    try:
+        completed = subprocess.run(
+            [
+                "node",
+                str(PLUGINS / "change-control" / "scripts" / "export" / "github.mjs"),
+                "--repo=o/r", "--since=2026-07-01", "--until=2026-07-31",
+                f"--out={out}", f"--api={base}", "--quiet",
+            ],
+            capture_output=True, text=True, check=False,
+            env={**os.environ, "GITHUB_TOKEN": "not-a-real-token"},
+        )
+    finally:
+        shutdown()
+    results.check(
+        "[change-control] a 403 on the pull requests themselves still fails",
+        completed.returncode == 1,
+        f"exit {completed.returncode}",
+    )
+    results.check(
+        "[change-control] and the token is not echoed into the error",
+        "not-a-real-token" not in completed.stderr,
+        completed.stderr[:200],
+    )
+
+
 def main(argv):
     output_json = False
     quiet = False
@@ -1384,6 +1524,7 @@ def main(argv):
             test_datamap_render_is_gated_and_matches_the_push(results, tmp)
             test_digest_ignores_the_collectors_own_version(results, tmp)
             test_change_control_rules_agree_across_languages(results, tmp)
+            test_change_control_export_survives_a_forbidden_setting(results, tmp)
             test_iac_never_copies_the_line(results, tmp)
             test_iac_identity_survives_a_move(results, tmp)
             test_iac_absence_is_detectable(results, tmp)

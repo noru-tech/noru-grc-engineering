@@ -56,7 +56,7 @@ function redact(text) {
     .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}/g, "<redacted>");
 }
 
-async function api(opts, token, path) {
+async function api(opts, token, path, tolerate = []) {
   const url = path.startsWith("http") ? path : `${opts.api}${path}`;
   const response = await fetch(url, {
     headers: {
@@ -66,13 +66,21 @@ async function api(opts, token, path) {
       "User-Agent": "noru-grc-engineering/change-control",
     },
   });
-  if (response.status === 404) return { missing: true, body: null, link: null };
+  // 404 is "there is nothing here"; 403 is "you may not ask". Both are answers rather than
+  // failures for an OPTIONAL read, and a caller says which it can live without by passing them in
+  // `tolerate`. A mandatory read still throws on either, because an export missing the pull
+  // requests is not an export.
+  if (response.status === 404 || tolerate.includes(response.status)) {
+    return { missing: true, forbidden: response.status === 403, status: response.status, body: null, link: null };
+  }
   if (!response.ok) {
     const body = await response.text().catch(() => "");
     throw new Error(`GET ${redact(url)} -> ${response.status} ${redact(body.slice(0, 300))}`);
   }
   return {
     missing: false,
+    forbidden: false,
+    status: response.status,
     body: await response.json(),
     link: response.headers.get("link"),
   };
@@ -227,11 +235,16 @@ async function main(argv) {
     const repo = (await api(opts, token, `/repos/${opts.repo}`)).body;
     const branch = repo?.default_branch ?? "main";
 
+    // The Actions token cannot read branch protection — that needs Administration: read — and
+    // GitHub answers 403 rather than 404 for it. Tolerating both is what stops a missing optional
+    // permission killing an export that is otherwise complete.
     const protectionProbe = await api(
-      opts, token, `/repos/${opts.repo}/branches/${branch}/protection`,
+      opts, token, `/repos/${opts.repo}/branches/${branch}/protection`, [403],
     );
-    const codeownersProbe = await api(opts, token, `/repos/${opts.repo}/contents/.github/CODEOWNERS`);
-    const environmentsBody = (await api(opts, token, `/repos/${opts.repo}/environments`)).body;
+    const codeownersProbe = await api(
+      opts, token, `/repos/${opts.repo}/contents/.github/CODEOWNERS`, [403],
+    );
+    const environmentsBody = (await api(opts, token, `/repos/${opts.repo}/environments`, [403])).body;
     const environments = (environmentsBody?.environments ?? []).map((environment) => {
       const reviewers = (environment.protection_rules ?? []).find((r) => r.type === "required_reviewers");
       return {
@@ -306,11 +319,13 @@ async function main(argv) {
           `wrote ${out}`,
           `${changes.length} change(s) merged into ${branch} between ${opts.since} and ${opts.until}`,
           truncated ? "WARNING: the listing was truncated; window.complete is false" : "",
-          protectionProbe.missing
-            ? "NOTE: branch protection could not be read — either the branch is unprotected or " +
-              "this token may not ask. The settings are omitted rather than guessed; grant " +
-              "Administration: read to record them."
-            : "",
+          protectionProbe.forbidden
+            ? "NOTE: this token may not read branch protection (403). The settings are omitted " +
+              "rather than guessed; grant Administration: read to record them."
+            : protectionProbe.missing
+              ? "NOTE: no branch protection found on " + branch + " — either it has none or the " +
+                "branch does not exist. The settings are omitted rather than guessed."
+              : "",
           "Next: node plugins/change-control/scripts/collect.mjs --repo=.",
         ]
           .filter(Boolean)
