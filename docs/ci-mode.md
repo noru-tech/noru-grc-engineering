@@ -174,6 +174,36 @@ nobody maintains. `user.contact` covers `user.contact.email`. `user.biometric` i
 Where an `allow` and a `deny` both match, the longer pattern wins. That is what makes "no financial
 data, except the card number in payments" two lines instead of a list.
 
+### Which of these did *this* pull request introduce?
+
+A team turning this on for the first time has a backlog, and a gate that blocks on the backlog on
+day one is a gate that is reverted on day two. `--base-ref` is what makes adoption possible:
+
+```bash
+python3 scripts/ci_check.py --piece=privacy-datamap --base-ref=origin/main --gate-on-new
+```
+
+It reads the committed manifest as it stood at the **merge base** — one `git show`, no second
+checkout, no collector re-run — evaluates it against today's baseline, and stamps every finding
+`first_seen: this_pr` or `pre_existing`. `--gate-on-new` then gates only on the first kind. The
+backlog is still reported in full; it just stops blocking while it is burned down.
+
+The base manifest is judged against **today's** baseline, not the baseline as it stood then. The
+question is "which of these is this branch responsible for", and widening the policy is a change to
+the policy, judged in its own diff.
+
+Two failure modes, and the direction each falls in:
+
+- **The base cannot be resolved** — a `depth: 1` clone does not contain it. The step says so, no
+  finding is stamped, and **everything gates**. A delta nobody can compute must not quietly disable
+  the gate. Fetch the base branch (`fetch-depth: 0`) or drop the flag.
+- **No manifest existed at the base** — every finding is `this_pr`, which is exactly right for a
+  branch that adds the data map.
+
+This also closes half of what "Where this is weaker than it looks" says about drift below: the
+policy step now *can* say what a pull request changed. Drift still cannot, because the collector's
+previous derived facts are not committed.
+
 ### No baseline is a skip, never a pass
 
 A repository that has not agreed a taxonomy yet has nothing for this step to check, and this tool
@@ -283,6 +313,8 @@ This action is not part of `v0.1.0`; use the tag of the first release that carri
 | `steps` | `scan,validate,expiry,policy` | add `diff` and `push`, or use `all` |
 | `fail-on` | *(tool default)* | which finding kinds gate the build, or `none` |
 | `baseline` | `.noru/privacy-baseline.yml` | the agreed taxonomy for the policy step. Absent → skipped; a path that does not exist → a tooling failure |
+| `base-ref` | *(none)* | compare against the merge base with this ref, so findings say whether this pull request introduced them. Needs `fetch-depth: 0` |
+| `gate-on-new` | `false` | gate only on findings this branch introduced. Requires `base-ref`; without it nothing is stamped and everything gates |
 | `max-age-days` | `0` | the review cadence this pipeline declares. `0` declares none |
 | `warn-within-days` | `30` | how far ahead to report an expiry that has not passed yet |
 | `as-of` | *(today)* | evaluate expiry against a fixed date. For testing |
@@ -467,10 +499,13 @@ Written down here rather than discovered later.
   *holds*. Personal data that is never stored but is sent to a third party, written to a log, or put
   in a prompt does not appear in a schema and so does not appear here. `ai-inventory` covers the
   model-call half; nothing yet covers third-party egress.
-- **An empty data map passes every check in this file.** `privacy-datamap` reads five schema formats;
-  a repository whose schema lives only in TypeORM, Mongoose, ActiveRecord, Ecto or a Zod DTO produces
-  an empty map, and an empty map has no unpermitted category in it. Read the piece README's "What it
-  reads" table before concluding a green policy step means anything about such a repository.
+- **An empty data map is now caught, but a *partial* one is only reported.** The collector looks
+  for the schema shapes it knows it cannot parse — TypeORM, Mongoose, Sequelize, ActiveRecord, Ecto,
+  GORM, OpenAPI, JSON Schema, Zod — and a repository where it parsed *nothing* and found one of
+  those is exit `6`, not a pass. Where it parsed something and still missed something, that is a
+  `coverage` finding which is advisory by default: failing there would block every repository with
+  one Zod file beside its SQL. Gate on it with `--fail-on=coverage` when the map is meant to be
+  complete. What none of this catches is a schema in a shape nobody wrote a marker for.
 - **Expiry is only as good as the dates people write.** Nothing offline can tell whether an
   `expires_at` was chosen thoughtfully or set to two years out to stop the build complaining.
   `--max-age-days` is the blunt instrument that puts a ceiling on that. The sharp one is the anchor

@@ -79,14 +79,12 @@ USAGE = (
 )
 
 
-def load_document(path):
-    """Return a manifest or baseline as a Python object, or raise ValueError with something readable.
-
-    Identical to check_expiry.py's loader on purpose: the two checks must never disagree about what
-    a file says because they parsed it differently.
+def parse_document(text, is_json=False):
+    """Parse manifest or baseline text. Separate from the path so a caller holding bytes — the
+    orchestrator reading a manifest out of `git show`, for one — parses them the same way a file is
+    parsed, rather than round-tripping through a temporary file to get the same answer.
     """
-    text = path.read_text(encoding="utf-8")
-    if path.suffix == ".json":
+    if is_json:
         return json.loads(text)
     sys.path.insert(0, str(ROOT / "contract" / "lib"))
     try:
@@ -95,6 +93,35 @@ def load_document(path):
         raise ValueError(f"cannot load contract/lib/yaml_mini.py ({exc})") from exc
     document, _loader = load_yaml(text)
     return document
+
+
+def load_document(path):
+    """Return a manifest or baseline as a Python object, or raise ValueError with something readable.
+
+    Identical to check_expiry.py's loader on purpose: the two checks must never disagree about what
+    a file says because they parsed it differently.
+    """
+    return parse_document(path.read_text(encoding="utf-8"), is_json=path.suffix == ".json")
+
+
+def finding_identity(finding):
+    """A finding's identity across two evaluations of two different commits.
+
+    Deliberately not the path: `dataset[0].collections[2].fields[5]` moves when anything above it
+    is added or removed, so half a pull request's untouched findings would read as new. The file a
+    citation points at is stable under a line move and changes when the data really does move, and
+    the line number is dropped for the same reason the path is.
+    """
+    ref = finding.get("ref")
+    ref_file = ref.rsplit(":", 1)[0] if isinstance(ref, str) and ":" in ref else None
+    return (
+        finding["kind"],
+        finding.get("value"),
+        finding.get("dataset"),
+        finding.get("system"),
+        finding.get("subject"),
+        ref_file,
+    )
 
 
 def load_special_categories():

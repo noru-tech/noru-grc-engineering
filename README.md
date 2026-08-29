@@ -151,7 +151,13 @@ committed file** — no network, no credential, so this works on a pull request 
 - **an expired interpretation** — nobody has stood behind this claim since it went stale (exit `4`)
 - **personal data nobody agreed to** — the data map processes a category, purpose or subject the
   committed privacy baseline does not permit (exit `7`). Drift asks whether someone *looked*; this
-  asks whether the answer was allowed to be yes
+  asks whether the answer was allowed to be yes. `--base-ref` says which findings *this* pull
+  request introduced, so a team with a backlog can gate on what it is adding while it burns the
+  rest down
+
+A fourth thing fails a build and is not a compliance finding at all: a collector that parsed **no**
+schema in a repository that visibly has one (exit `6`). An empty data map and a repository with no
+personal data in it are the same file, and only one of them is good news.
 
 `:diff` and `:push` need a key, so they are an opt-in job that runs only where secrets exist, and
 report as skipped rather than failing when there is none. Exit codes, warn-only adoption, and the

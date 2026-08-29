@@ -22,11 +22,23 @@
 | Protobuf | `*.proto` | `message` → collection, each numbered field |
 | GraphQL SDL | `*.graphql`, `*.gql`, `*.graphqls` | `type` and `input` → collection, each field |
 
-**Not read yet**, and worth saying so plainly rather than letting an empty result imply a clean
-repository: OpenAPI and JSON Schema, TypeORM and Sequelize entities, Mongoose schemas, ActiveRecord,
-Ecto, GORM structs, and TypeScript or Zod DTOs. A repository whose schema lives only in one of those
-will produce an empty data map, which is not the same as having no personal data in it. If the piece
-finds nothing, check this table before concluding anything.
+**Not read yet**: OpenAPI and JSON Schema, TypeORM and Sequelize entities, Mongoose schemas,
+ActiveRecord, Ecto, GORM structs, and TypeScript or Zod DTOs. A repository whose schema lives only in
+one of those produces an empty data map, which is not the same as having no personal data in it.
+
+That used to be a sentence in this README that you had to remember to read. It is now a check. The
+collector looks for the marker that says "a schema is defined here" in each of those formats and
+records what it found under `coverage` in its derived facts:
+
+- **parsed nothing, found one of these** → CI mode exits `6`, a broken gate rather than a pass, and
+  `--mode=warn` does not suppress it. An empty map cannot be reported as a clean one.
+- **parsed something, still found one of these** → a `coverage` finding, advisory by default because
+  failing there would block every repository with one Zod file beside its SQL. Gate it with
+  `--fail-on=coverage` where the map is meant to be complete.
+
+The marker is a deterministic text match, never an attempt to read the schema — the honest output is
+"there is one here and I cannot see inside it". A shape nobody has written a marker for is still
+invisible, so this table is still the thing to read before trusting a small result.
 
 ## Structure is derived, meaning is judged
 

@@ -233,6 +233,58 @@ const PARSERS = [
 ];
 
 // --------------------------------------------------------------------------------------------- //
+// Coverage: what this collector could NOT read.
+//
+// An empty data map and a repository with no personal data in it produce the same manifest, and
+// only one of them is good news. Five formats are parsed above; a repository whose schema lives in
+// Mongoose or ActiveRecord produces nothing at all, and every check downstream then passes on an
+// empty set. That is the most dangerous failure mode this piece has, because it is silent.
+//
+// So the collector looks for the shapes it knows it cannot parse and reports them. This is a
+// deterministic text match on a marker that means "a schema is defined here" — never an attempt to
+// read the schema, which is the whole point: the honest output is "there is one here and I cannot
+// see inside it", and a human decides what that means.
+const UNPARSED_MARKERS = [
+  { format: "typeorm", exts: [".ts", ".js"], marker: /^\s*@Entity\s*\(/m },
+  { format: "mongoose", exts: [".ts", ".js"], marker: /new\s+(?:mongoose\.)?Schema\s*\(/ },
+  { format: "sequelize", exts: [".ts", ".js"], marker: /DataTypes\.[A-Z]/ },
+  { format: "typescript_dto", exts: [".ts"], marker: /\bz\.object\s*\(/ },
+  { format: "activerecord", exts: [".rb"], marker: /^\s*create_table\s+[:'"]/m },
+  { format: "ecto", exts: [".ex"], marker: /^\s*use\s+Ecto\.Schema\b/m },
+  { format: "gorm", exts: [".go"], marker: /`[^`]*\bgorm:"/ },
+  { format: "openapi", exts: [".yaml", ".yml"], marker: /^(?:openapi|swagger):\s*["']?\d/m },
+  { format: "json_schema", exts: [".json"], marker: /"\$schema"\s*:\s*"[^"]*json-schema\.org/ },
+];
+
+function findUnparsedCandidates(repo, files, parsedFiles) {
+  const out = [];
+  for (const rel of files) {
+    if (parsedFiles.has(rel)) continue;
+    const applicable = UNPARSED_MARKERS.filter((m) => m.exts.some((e) => rel.endsWith(e)));
+    if (applicable.length === 0) continue;
+    let text;
+    try {
+      const raw = readFileSync(join(repo, rel));
+      if (raw.length > MAX_BYTES) continue;
+      text = raw.toString("utf8");
+    } catch {
+      continue;
+    }
+    for (const { format, marker } of applicable) {
+      const match = marker.exec(text);
+      if (!match) continue;
+      // The line the marker sits on, so the report cites a place and not just a filename.
+      const line = text.slice(0, match.index).split("\n").length;
+      out.push({ format, ref: `${rel}:${line}` });
+    }
+  }
+  // Sorted for the same reason walk() is: the derived facts must not depend on traversal order.
+  return out.sort((a, b) =>
+    a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : a.format < b.format ? -1 : a.format > b.format ? 1 : 0,
+  );
+}
+
+// --------------------------------------------------------------------------------------------- //
 // Classification. The only judgement the collector makes is "this name means the same thing in
 // every schema it appears in", and it makes it by lookup, not inference. Everything else is raised.
 
@@ -294,6 +346,8 @@ export function discoverServices(files) {
 export function collectFacts(repo) {
   const files = walk(repo);
   const datasets = [];
+  const parsedFiles = new Set();
+  const parsedByKind = {};
   let fieldCount = 0;
   let classified = 0;
   let needsReview = 0;
@@ -312,6 +366,8 @@ export function collectFacts(repo) {
     }
     const parsed = parser.parse(text);
     if (parsed.length === 0) continue;
+    parsedFiles.add(rel);
+    parsedByKind[parser.kind] = (parsedByKind[parser.kind] ?? 0) + 1;
 
     const collections = parsed.map((collection) => ({
       name: collection.name,
@@ -361,6 +417,14 @@ export function collectFacts(repo) {
     // Article 9 and Article 10 data, listed separately because it carries the most risk and is the
     // thing a reviewer must not have to go looking for.
     special_category_refs: specialRefs.sort(),
+    // What this scan could and could not read. Consumed by scripts/ci_check.py, which fails a
+    // build where nothing was parsed and something was found that should have been — an empty map
+    // must never be reportable as a clean one.
+    coverage: {
+      files_parsed: parsedFiles.size,
+      parsed_by_kind: Object.fromEntries(Object.entries(parsedByKind).sort()),
+      unparsed_candidates: findUnparsedCandidates(repo, files, parsedFiles),
+    },
   };
 }
 
@@ -397,8 +461,13 @@ export function digestOf(derived) {
   // Hashing it made a plugin upgrade indistinguishable from a schema change: every committed
   // manifest reported drift on the next run and CI mode failed with exit 3, for repositories where
   // nothing had moved. It stays in the derived file, and in the manifest, as provenance.
-  const { generated_by, ...facts } = derived;
+  //
+  // `coverage` is excluded for the same reason and a sharper one: the manifest does not record it,
+  // so a newly-appeared Mongoose file would produce a drift that re-running :scan could never
+  // clear. Coverage is reported to CI from the derived facts directly, where it can be acted on.
+  const { generated_by, coverage, ...facts } = derived;
   void generated_by;
+  void coverage;
   return createHash("sha256").update(JSON.stringify(facts, null, 0)).digest("hex");
 }
 

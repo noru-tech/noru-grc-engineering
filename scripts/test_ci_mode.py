@@ -342,6 +342,186 @@ def run_expiry(path):
         return completed.returncode, None
 
 
+# A repository whose only schema is in a format the collector cannot read. Five formats, so a single
+# regex going stale cannot silently turn this case green.
+BLINDSPOT_FILES = {
+    "src/user.model.ts": (
+        "import mongoose from \"mongoose\"\n"
+        "const UserSchema = new mongoose.Schema({ email: String })\n"
+    ),
+    "src/patient.entity.ts": "@Entity()\nexport class Patient { diagnosis: string }\n",
+    "db/schema.rb": (
+        "ActiveRecord::Schema.define(version: 1) do\n"
+        "  create_table \"members\" do |t|\n    t.string \"ni_number\"\n  end\nend\n"
+    ),
+    "src/models.go": "type Account struct {\n\tEmail string `gorm:\"column:email\"`\n}\n",
+    "api/openapi.yaml": "openapi: 3.0.0\ninfo: { title: x, version: \"1\" }\n",
+}
+
+
+def case_coverage(results, tmp):
+    """An empty data map must never be reportable as a clean one.
+
+    This is the most dangerous failure this piece has, because it is silent: drift, expiry and
+    policy all pass on an empty set, so a repository whose schema the collector cannot read gets a
+    green build that means nothing at all.
+    """
+    repo = pathlib.Path(tmp) / "coverage"
+    repo.mkdir(parents=True, exist_ok=True)
+    for rel, body in BLINDSPOT_FILES.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+    code, report = ci(repo, piece="privacy-datamap")
+    results.check("coverage: an unreadable schema is a broken gate, not a pass", code == 6, f"exit {code}")
+    results.check(
+        "coverage: raises a coverage finding", "coverage" in kinds(report), kinds(report)
+    )
+    finding = next((f for f in (report or {}).get("findings", []) if f["kind"] == "coverage"), None)
+    results.check(
+        "coverage: the finding names every format it saw",
+        finding is not None
+        and {"mongoose", "typeorm", "activerecord", "gorm", "openapi"} <= set(finding.get("formats") or []),
+        (finding or {}).get("formats"),
+    )
+    results.check(
+        "coverage: the finding cites where each one is",
+        finding is not None and all(":" in ref for ref in (finding.get("refs") or [])),
+        (finding or {}).get("refs"),
+    )
+
+    # A broken gate is loud in warn mode too. This is the promise docs/ci-mode.md makes about 6.
+    code, _ = ci(repo, "--mode=warn", piece="privacy-datamap")
+    results.check("coverage: warn mode does not suppress a broken gate", code == 6, f"exit {code}")
+
+    # A repository with nothing to parse and nothing it missed is genuinely clean, and must not be
+    # dragged down by this check — otherwise every repository without a database fails forever.
+    empty = pathlib.Path(tmp) / "coverage-empty"
+    (empty / "src").mkdir(parents=True, exist_ok=True)
+    (empty / "src" / "util.ts").write_text("export const add = (a: number) => a + 1\n", encoding="utf-8")
+    code, report = ci(empty, piece="privacy-datamap")
+    results.check(
+        "coverage: a repository with no schema at all is not a coverage failure",
+        "coverage" not in kinds(report),
+        kinds(report),
+    )
+
+    # Supported and unsupported side by side: the map is partial, not absent. Reported, not gated,
+    # because failing here would block every repository that has one Zod file next to its SQL.
+    partial = pathlib.Path(tmp) / "coverage-partial"
+    (partial / "db").mkdir(parents=True, exist_ok=True)
+    for rel, body in BLINDSPOT_FILES.items():
+        path = partial / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    (partial / "db" / "schema.sql").write_text(
+        "CREATE TABLE accounts (\n  id INTEGER PRIMARY KEY,\n  email TEXT\n);\n", encoding="utf-8"
+    )
+    code, report = ci(partial, piece="privacy-datamap")
+    results.check("coverage: a partial map is reported, not a tooling failure", code != 6, f"exit {code}")
+    results.check(
+        "coverage: a partial map still raises the finding", "coverage" in kinds(report), kinds(report)
+    )
+    code, _ = ci(partial, "--fail-on=coverage", piece="privacy-datamap")
+    results.check("coverage: --fail-on=coverage makes a partial map gate", code == 6, f"exit {code}")
+
+
+def git_init(repo, message):
+    """A real commit, so the base comparison is exercised against real git rather than a stub."""
+    for args in (
+        ["init", "-q"],
+        ["add", "-A"],
+        ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", message],
+    ):
+        run(["git", "-C", str(repo), *args])
+
+
+def case_base_ref(results, tmp):
+    """Which of these findings is this branch responsible for?
+
+    A team adopting the gate on an existing repository has a backlog, and a gate that blocks on the
+    backlog on day one is a gate that gets reverted on day two. The delta is what lets them gate on
+    what they are adding while they burn the rest down.
+    """
+    repo, _ = build_green_repo(pathlib.Path(tmp) / "base-ref", "privacy-datamap")
+    git_init(repo, "the map as it stood before this branch")
+    baseline = repo / ".noru" / "privacy-baseline.yml"
+    baseline.write_text(BASELINE_STRICT, encoding="utf-8")
+
+    # Nothing has changed since the base, so every finding is somebody else's problem.
+    code, report = ci(repo, "--base-ref=HEAD", piece="privacy-datamap")
+    seen = {f.get("first_seen") for f in (report or {}).get("findings", [])}
+    results.check("base-ref: the backlog is marked pre_existing", seen == {"pre_existing"}, seen)
+    results.check("base-ref: and still gates by default", code == 7, f"exit {code}")
+
+    code, _ = ci(repo, "--base-ref=HEAD", "--gate-on-new", piece="privacy-datamap")
+    results.check("base-ref: --gate-on-new lets the backlog through", code == 0, f"exit {code}")
+
+    # Now this branch introduces one. The structure digest has to be re-stamped because adding a
+    # field is exactly what that digest exists to notice — which is itself worth asserting.
+    manifest = repo / ".noru" / "privacy-datamap.yml"
+    before = manifest.read_text(encoding="utf-8")
+    manifest.write_text(
+        before.replace(
+            "          - name: password_hash",
+            "          - name: passport_number\n"
+            "            data_categories: [user.government_id.passport_number]\n"
+            f"            refs: [\"{REF_TARGET}:9\"]\n"
+            "          - name: password_hash",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    code, _ = ci(repo, "--base-ref=HEAD", "--gate-on-new", piece="privacy-datamap")
+    results.check(
+        "base-ref: adding a field without re-signing is caught by the structure digest",
+        code == 5,
+        f"exit {code}",
+    )
+
+    restamp_structure_digest(manifest)
+    code, report = ci(repo, "--base-ref=HEAD", "--gate-on-new", piece="privacy-datamap")
+    new = [f for f in (report or {}).get("findings", []) if f.get("first_seen") == "this_pr"]
+    results.check("base-ref: a new violation gates even with --gate-on-new", code == 7, f"exit {code}")
+    results.check(
+        "base-ref: and only the new one is attributed to this branch",
+        [f["value"] for f in new] == ["user.government_id.passport_number"],
+        [(f.get("first_seen"), f.get("value")) for f in (report or {}).get("findings", [])],
+    )
+
+    # A delta nobody can compute must gate everything rather than nothing. The safe direction is
+    # the one that does not quietly disable the gate on every shallow clone in the world.
+    code, report = ci(repo, "--base-ref=refs/heads/nope", "--gate-on-new", piece="privacy-datamap")
+    step = next((s for s in (report or {}).get("steps", []) if s["step"] == "policy"), None)
+    results.check(
+        "base-ref: an unresolvable base gates everything, not nothing", code == 7, f"exit {code}"
+    )
+    results.check(
+        "base-ref: and says why it could not compare",
+        step is not None and "does not resolve" in (step.get("detail") or ""),
+        (step or {}).get("detail"),
+    )
+
+
+def restamp_structure_digest(manifest):
+    """Re-sign the first collection for its current fields, the way :scan would."""
+    import hashlib
+
+    document = ci_check.parse_manifest_text(manifest.read_text(encoding="utf-8"))
+    fields = sorted(f["name"] for f in document["dataset"][0]["collections"][0]["fields"])
+    digest = hashlib.sha256("\n".join(fields).encode("utf-8")).hexdigest()
+    manifest.write_text(
+        re.sub(
+            r"structure_digest: [0-9a-f]{64}",
+            f"structure_digest: {digest}",
+            manifest.read_text(encoding="utf-8"),
+            count=1,
+        ),
+        encoding="utf-8",
+    )
+
+
 def case_drift(results, tmp):
     repo, _ = build_green_repo(pathlib.Path(tmp) / "drift")
     add_new_provider(repo)
@@ -658,6 +838,8 @@ def case_piece_agnostic(results, tmp):
 CASES = (
     case_green,
     case_policy,
+    case_coverage,
+    case_base_ref,
     case_drift,
     case_expired,
     case_mixed,
