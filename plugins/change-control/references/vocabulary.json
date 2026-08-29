@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "Bundled vocabulary for the change-control validator (contract requirement 3).",
+    "Kept in sync with contract/change-control.schema.json by scripts/check_repo.py.",
+    "",
+    "These are the words a claim may use, never a statement of what anyone must do. No framework",
+    "control text, no guidance, no evidence-item list — see contract/README.md, requirement 9.",
+    "",
+    "`sod_rule` is the one worth reading twice. It names the separations a reviewer can be asked",
+    "about; it does not assert that any framework requires them. Which of these a given",
+    "organization must hold to is Noru's queue to answer, not this file's."
+  ],
+  "forge": ["github", "gitlab", "other"],
+  "change_kind": [
+    "pull_request",
+    "merge_request",
+    "direct_push",
+    "emergency_change",
+    "revert"
+  ],
+  "author_kind": ["human", "agent"],
+  "approval_state": ["approved", "changes_requested", "commented", "dismissed"],
+  "bypass_kind": [
+    "admin_merge",
+    "force_push",
+    "branch_protection_disabled",
+    "required_checks_skipped",
+    "environment_approval_skipped"
+  ],
+  "sod_rule": [
+    "approver_is_author",
+    "merged_without_independent_approval",
+    "deployer_is_author",
+    "agent_change_without_independent_human",
+    "bypass_used"
+  ],
+  "disposition": ["remediated", "accepted_risk", "false_positive", "deferred"]
+}

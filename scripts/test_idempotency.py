@@ -979,6 +979,110 @@ def _org_after(operations):
     }
 
 
+def state_after_change_control(operations):
+    """The org snapshot that would exist if every planned write had landed."""
+    evidence, findings = [], []
+    for op in operations:
+        if op["effect"] == "skip":
+            continue
+        args = op["arguments"]
+        if op["operation"] == "createSecurityFinding":
+            findings.append(
+                {"id": f"F-{len(findings)}", "externalId": args["externalId"], "status": args["status"]}
+            )
+        elif op["operation"] == "createEvidence":
+            evidence.append({"id": "EV-1", "description": args["description"]})
+    return {"fetched_at": "2026-10-05T09:00:00Z", "evidence": evidence, "security_findings": findings}
+
+
+def test_change_control(results, tmp):
+    """A fan-out over exceptions, where the interesting half is that a finding CLOSES.
+
+    Every other keyed_upsert piece here proves that a second run finds its own records and skips.
+    This one has to prove something extra: an exception dispositioned `remediated` is pushed as
+    `resolved`, so re-running after a fix closes the finding rather than leaving a stale open one
+    beside a fixed problem. A register that only ever opens findings is a register nobody trusts.
+    """
+    repo, piece, decl, manifest = prepare(tmp, "change-control")
+    label = "change-control"
+
+    validate_and_parse(piece, manifest, repo, results, label)
+    write_state(repo, {"fetched_at": "2026-10-05T09:00:00Z", "evidence": [], "security_findings": []})
+
+    first = diff(piece, repo)
+    if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
+        return
+    plan = json.loads(first.stdout)
+    operations = plan["operations"]
+
+    findings = [o for o in operations if o["operation"] == "createSecurityFinding"]
+    results.check(
+        f"[{label}] one finding per owned exception",
+        len(findings) == 7,
+        f"{len(findings)} finding operation(s)",
+    )
+    results.check(
+        f"[{label}] exactly one evidence record for the window, not one per change",
+        len([o for o in operations if o["operation"] == "createEvidence"]) == 1,
+        json.dumps(plan["summary"]),
+    )
+
+    # The close half. `remediated` and `false_positive` are not open problems.
+    statuses = {o["arguments"]["externalId"].rsplit(":", 1)[1]: o["arguments"]["status"]
+                for o in findings}
+    results.check(
+        f"[{label}] a remediated exception is pushed as resolved, not open",
+        statuses.get("approver_is_author") == "resolved",
+        json.dumps(statuses),
+    )
+    results.check(
+        f"[{label}] an accepted or deferred one stays open",
+        statuses.get("deployer_is_author") == "open"
+        and statuses.get("agent_change_without_independent_human") == "open",
+        json.dumps(statuses),
+    )
+
+    # The declaration and the plan are written independently and have disagreed before.
+    declared = {op["name"]: op["idempotency"] for op in decl["push"]["operations"]}
+    mismatched = [
+        o["operation"]
+        for o in operations
+        if o["idempotency"]["kind"] != declared[o["operation"]]["kind"]
+    ]
+    results.check(
+        f"[{label}] every plan operation's idempotency matches piece.json",
+        not mismatched,
+        f"disagree: {mismatched}",
+    )
+    results.check(
+        f"[{label}] the finding upsert is keyed on (source, externalId)",
+        all(o["idempotency"]["key"] == ["source", "externalId"] for o in findings),
+        json.dumps([o["idempotency"].get("key") for o in findings]),
+    )
+    results.check(
+        f"[{label}] the link to a control depends on the evidence it has not created yet",
+        all(
+            "depends_on" in o
+            for o in operations
+            if o["operation"] == "linkEvidenceToControl"
+        ),
+        json.dumps([o.get("depends_on") for o in operations if o["operation"] == "linkEvidenceToControl"]),
+    )
+
+    # THE property: a second run makes no calls.
+    write_state(repo, state_after_change_control(operations))
+    second = diff(piece, repo)
+    if not results.check(f"[{label}] second diff succeeds", second.returncode == 0, second.stderr):
+        return
+    replan = json.loads(second.stdout)
+    effects = {o["effect"] for o in replan["operations"]}
+    results.check(
+        f"[{label}] a second push is a no-op",
+        effects == {"skip"},
+        json.dumps(replan["summary"]),
+    )
+
+
 def test_loader_independence(results, tmp):
     """The plan must not change because a different YAML loader parsed the same manifest.
 
@@ -1315,6 +1419,7 @@ IDEMPOTENCY_TESTS = {
     "iac-scan": test_iac_scan,
     "audit-pack": test_audit_pack,
     "privacy-datamap": test_privacy_datamap,
+    "change-control": test_change_control,
 }
 
 

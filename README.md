@@ -35,6 +35,7 @@ directory, no flat-file risk register, no second source of truth to reconcile be
 | [`audit-pack`](./plugins/audit-pack/) | the local artifacts, the sampling and the workpapers for one framework over one audit window | the tested conclusion for each control, as evidence |
 | [`privacy-datamap`](./plugins/privacy-datamap/) | the schemas a repository holds — ORM models, migrations, SQL DDL, protobuf, GraphQL — and the personal data in them | a Fides privacy data map (`read/write:datamaps`) |
 | [`iac-scan`](./plugins/iac-scan/) | compliance-relevant misconfiguration in Terraform, CloudFormation, Kubernetes and pipeline configuration | security findings, keyed and closed by the same call |
+| [`change-control`](./plugins/change-control/) | who wrote, approved, merged and deployed each change over one window, and the branch protection that was supposed to keep those apart | a finding per separation that did not hold, plus the window as evidence |
 | [`noru`](./plugins/noru/) | — | the hub: `connect`, `doctor`, `context` |
 
 Every piece is the same three moves, and exactly three commands:
@@ -76,6 +77,12 @@ one of them mostly assembles rather than discovers.
   [`noru-tech/privacy-taxonomy`](https://github.com/noru-tech/privacy-taxonomy), and it is the only
   piece whose push is literally one call: `ingestDatamap` takes the whole map for a source, so a
   repository with four hundred fields is a single write.
+- `change-control` targets **segregation of duties**: "you cannot author, review and deploy your own
+  code" is a claim about a forge's history and settings, and nothing in a repository proves it. It is
+  the piece whose manifest most clearly *records* rather than asserts — a self-approved change is a
+  fact, and what the validator refuses is an **unowned** one, not the truth. It also names the thing
+  a conventional change-management control cannot see: an agent wrote the change and the only person
+  who approved it is the person who ran the agent.
 - `iac-scan` targets **infrastructure and pipeline configuration**: the module that has not been
   applied yet, the workflow that runs with the repository's own token, the literal somebody left in
   a variable block. It is the only piece whose every write is a documented server-side upsert, so
@@ -95,6 +102,7 @@ one of them mostly assembles rather than discovers.
 /plugin install audit-pack@noru-grc-engineering
 /plugin install iac-scan@noru-grc-engineering
 /plugin install privacy-datamap@noru-grc-engineering
+/plugin install change-control@noru-grc-engineering
 ```
 
 Then configure the Noru MCP connection: [Claude guide](./docs/clients/claude-code.md).
@@ -111,6 +119,7 @@ codex plugin add review-signoff@noru-grc-engineering
 codex plugin add audit-pack@noru-grc-engineering
 codex plugin add iac-scan@noru-grc-engineering
 codex plugin add privacy-datamap@noru-grc-engineering
+codex plugin add change-control@noru-grc-engineering
 ```
 
 Then configure Noru MCP: [Codex guide](./docs/clients/codex.md).
@@ -197,6 +206,8 @@ Use least-privilege scopes:
 | `iac-scan:push` | adds `write:risks` |
 | `privacy-datamap:scan` and `:diff` | `read:datamaps` — and nothing else |
 | `privacy-datamap:push` | adds `write:datamaps` |
+| `change-control:scan` and `:diff` | `read:organization`, `read:controls`, `read:evidence`, `read:risks` |
+| `change-control:push` | adds `write:evidence`, `write:risks` |
 
 ## The contract
 
@@ -246,7 +257,8 @@ noru-grc-engineering/
 │   ├── review-signoff/                 # :scan :diff :push  (MCP)
 │   ├── audit-pack/                     # :scan :diff :push  (MCP)
 │   ├── iac-scan/                       # :scan :diff :push  (MCP)
-│   └── privacy-datamap/                # :scan :diff :push  (MCP)
+│   ├── privacy-datamap/                # :scan :diff :push  (MCP)
+│   └── change-control/                 # :scan :diff :push  (MCP) + credentialed forge exporters
 ├── .github/actions/noru-ci/            # the CI-mode action: scan, validate, expiry, diff, push
 ├── scripts/                            # scaffolder, contract test, checks — stdlib/built-ins only
 ├── tests/fixture-repo/                 # the repository the collectors are tested against

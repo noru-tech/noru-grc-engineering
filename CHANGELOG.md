@@ -21,6 +21,38 @@ one version number; the release workflow fails if they disagree.
   Servers that do not yet return an `integrity` block are treated as older deployments, not as
   failures; only a *different* digest fails the push.
 
+**A privacy policy gate.** The drift gate asks whether anybody looked at a schema change; it never
+asked whether the answer was allowed to be yes. `.noru/privacy-baseline.yml` is the agreed taxonomy
+— permitted categories, purposes and subjects, combinations forbidden only in combination, and
+categories confined to one store — and `scripts/check_policy.py` evaluates a manifest against it as
+a fourth offline CI step, exiting **7**. Noru holds the truth; the committed file is a floor pinned
+from it so the gate runs with no credential on a fork pull request. No baseline is reported as
+`skipped`, never `pass`: this ships no default policy.
+
+**`--base-ref` and `--gate-on-new`.** A policy finding now says whether *this* branch introduced it,
+by comparing the committed manifest against the one at the merge base. A team with a backlog can
+gate on what it is adding while it burns the rest down. A delta that cannot be computed — a
+`depth: 1` clone — is reported and gates everything, because failing open would quietly disable the
+gate on most CI configurations.
+
+**A coverage assertion.** `privacy-datamap` reads five schema formats, and a repository whose schema
+lives only in Mongoose or ActiveRecord produced an empty map that every check passed cleanly. The
+collector now looks for the marker that says "a schema is defined here" in the nine shapes it cannot
+parse. Parsed nothing while finding one is exit **6** — a broken gate, which warn mode does not
+suppress. Parsed something and still missed something is advisory.
+
+**`change-control`, the ninth piece.** Who wrote each change, who approved it, who merged it, who
+deployed it, for one window — with the branch protection that was supposed to keep those apart. Its
+manifest **records** what happened rather than asserting it was correct: a self-approved change is a
+fact, and what the validator refuses is an *unowned* one. It also names what a conventional
+change-management control cannot see — an agent wrote the change and the only approver was the person
+who ran the agent.
+
+Because who approved a pull request is a forge setting rather than a file, the credentialed half is a
+separate exporter (`scripts/export/{github,gitlab}.mjs`) and the collector stays offline, exactly as
+`review-signoff` reads its review queue. On a fork pull request there is no token, so CI mode reports
+the piece as `skipped`.
+
 ## 0.3.0 — 2026-08-28
 
 Two changes here alter behaviour users can see, and both are safe to take together.

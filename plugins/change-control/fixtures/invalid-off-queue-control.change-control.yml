@@ -1,0 +1,240 @@
+# Fixture: a control id the queue snapshot never offered. Requirement 9: a piece works Noru's
+# queue and does not invent one.
+# The validator must exit 1 on this file.
+version: 0.1.0
+piece: change-control
+source:
+  slug: example-org/example-app
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: change-control@0.1.0
+  forge: github
+window:
+  opens_on: 2026-07-01
+  closes_on: 2026-09-30
+  complete: true
+queue_snapshot:
+  fetched_at: 2026-10-05T09:00:00Z
+  via:
+    - getOrganizationControls
+    - getControlContext
+    - getEvidenceForControl
+    - getSecurityFindings
+  controls:
+    - control_id: zz-07
+      display_id: ZZ-07
+      name: Example change management control
+      unmet_evidence_items:
+        - id: E-ZZ-31
+          title: Example Change Management Record
+          type: record
+control_mappings:
+  - control_id: zz-99
+    evidence_item_ids:
+      - E-ZZ-31
+controls:
+  default_branch: main
+  observed_on: 2026-09-30
+  protected: true
+  required_approvals: 1
+  dismiss_stale_reviews: true
+  require_code_owner_review: true
+  enforce_admins: false
+  allow_force_push: false
+  required_status_checks:
+    - ci
+  codeowners_present: true
+  deploy_environments:
+    - name: production
+      required_reviewers: 1
+      prevent_self_review: true
+  refs:
+    - .noru/.cache/change-events.json:1
+  interpretation:
+    owner: dana.whitfield@example.com
+    decided_at: 2026-10-05
+    expires_at: 2027-09-30
+    rationale: >
+      Read from the forge's branch-protection and environment settings on the day the window
+      closed, by the exporter running with a read-only token. Administrators are exempt from
+      branch protection, which is why pr-1043's admin merge was possible at all.
+changes:
+  - key: pr-1041
+    kind: pull_request
+    title: Add retention job for expired sessions
+    authored_by: priya.nair@example.com
+    author_kind: human
+    opened_on: 2026-07-08
+    approvals:
+      - by: sam.okafor@example.com
+        state: approved
+        on: 2026-07-09
+    merged_by: sam.okafor@example.com
+    merged_on: 2026-07-09
+    deployed_by: sam.okafor@example.com
+    deployed_on: 2026-07-10
+    artifact_digest: sha256:1f0c9d4b2a7e6835bd41cf20e9a7c3d5b6f8021e4a9c7d3b5e1f0a2c4d6b8e07
+    bypass:
+      used: false
+    refs:
+      - .noru/.cache/change-events.json:27
+    interpretation:
+      owner: dana.whitfield@example.com
+      decided_at: 2026-10-05
+      expires_at: 2027-09-30
+      rationale: >
+        Written by one person, approved and merged by another, and the deployed artifact digest
+        ties what shipped to the commit that was reviewed. Every separation held.
+  - key: pr-1042
+    kind: pull_request
+    title: Bump the analytics client
+    authored_by: priya.nair@example.com
+    author_kind: human
+    opened_on: 2026-07-22
+    approvals:
+      - by: priya.nair@example.com
+        state: approved
+        on: 2026-07-22
+    merged_by: priya.nair@example.com
+    merged_on: 2026-07-22
+    deployed_by: priya.nair@example.com
+    deployed_on: 2026-07-22
+    bypass:
+      used: false
+    exceptions:
+      - rule: approver_is_author
+        disposition: remediated
+        owner: dana.whitfield@example.com
+        note: >
+          Self-approved during a week when the second reviewer was on leave. The rota now names a
+          standing deputy, and branch protection was changed to dismiss an author's own review.
+        resolved_on: 2026-08-03
+      - rule: merged_without_independent_approval
+        disposition: remediated
+        owner: dana.whitfield@example.com
+        note: >
+          Same change, same cause. The dependency bump was re-reviewed after the fact by
+          sam.okafor@example.com, who confirmed the diff was the lockfile only.
+        resolved_on: 2026-08-03
+      - rule: deployer_is_author
+        disposition: accepted_risk
+        owner: dana.whitfield@example.com
+        note: >
+          Deploys are self-service and the team is three people, so author-deploys will continue
+          until the rota supports otherwise. The compensating control is that the deployed artifact
+          is built by CI from the merged commit and cannot be built locally.
+    refs:
+      - .noru/.cache/change-events.json:44
+    interpretation:
+      owner: dana.whitfield@example.com
+      decided_at: 2026-10-05
+      expires_at: 2027-09-30
+      rationale: >
+        One person wrote, approved, merged and deployed this change. Two of the three separations
+        have been put right; the third is accepted with a compensating control named.
+  - key: pr-1043
+    kind: emergency_change
+    title: Restore checkout after the payment provider outage
+    authored_by: sam.okafor@example.com
+    author_kind: human
+    opened_on: 2026-08-14
+    merged_by: sam.okafor@example.com
+    merged_on: 2026-08-14
+    deployed_by: sam.okafor@example.com
+    deployed_on: 2026-08-14
+    bypass:
+      used: true
+      kind: admin_merge
+      by: sam.okafor@example.com
+      reason: >
+        Checkout was returning 500s for every customer. The fix was merged under the incident
+        process, which permits an administrator to merge without review and requires review after
+        the fact within one working day.
+    exceptions:
+      - rule: merged_without_independent_approval
+        disposition: remediated
+        owner: dana.whitfield@example.com
+        note: >
+          Reviewed after the fact by priya.nair@example.com on the next working day, as the
+          incident process requires. The post-incident review is filed against INC-2026-08-14.
+        resolved_on: 2026-08-17
+      - rule: deployer_is_author
+        disposition: accepted_risk
+        owner: dana.whitfield@example.com
+        note: >
+          During an incident the person holding the pager deploys the fix. Requiring a second
+          person here would lengthen an outage, which is the larger risk of the two.
+      - rule: bypass_used
+        disposition: accepted_risk
+        owner: dana.whitfield@example.com
+        note: >
+          The incident process permits an admin merge and this use of it was within that process.
+          Administrators remain exempt from branch protection, which is recorded under controls.
+    refs:
+      - .noru/.cache/change-events.json:60
+    interpretation:
+      owner: dana.whitfield@example.com
+      decided_at: 2026-10-05
+      expires_at: 2027-09-30
+      rationale: >
+        An emergency change merged by its author under the incident process, reviewed after the
+        fact within the window that process allows.
+  - key: pr-1044
+    kind: pull_request
+    title: Regenerate the API client from the new schema
+    authored_by: agent@example.com
+    author_kind: agent
+    agent_operator: priya.nair@example.com
+    opened_on: 2026-09-02
+    approvals:
+      - by: priya.nair@example.com
+        state: approved
+        on: 2026-09-02
+    merged_by: priya.nair@example.com
+    merged_on: 2026-09-02
+    bypass:
+      used: false
+    exceptions:
+      - rule: agent_change_without_independent_human
+        disposition: deferred
+        owner: dana.whitfield@example.com
+        note: >
+          Written by an agent and approved only by the person who ran it, which is one human
+          wearing two hats. Generated-client changes are now routed to a CODEOWNERS group that
+          excludes the operator, but that rule landed after this change merged.
+    refs:
+      - .noru/.cache/change-events.json:79
+    interpretation:
+      owner: dana.whitfield@example.com
+      decided_at: 2026-10-05
+      expires_at: 2027-01-15
+      rationale: >
+        The only unresolved exception in this window, so this record gets the short horizon: a
+        separation nobody has fixed yet is not something to sign off for a year.
+  - key: pr-1045
+    kind: pull_request
+    title: Tighten the session cookie flags
+    authored_by: agent@example.com
+    author_kind: agent
+    agent_operator: priya.nair@example.com
+    opened_on: 2026-09-18
+    approvals:
+      - by: sam.okafor@example.com
+        state: approved
+        on: 2026-09-19
+    merged_by: sam.okafor@example.com
+    merged_on: 2026-09-19
+    deployed_by: sam.okafor@example.com
+    deployed_on: 2026-09-20
+    artifact_digest: sha256:9b3e7a1c5d0f28461ae93bc47d2f60a8c1e5039b7d4a6c2e8f0b1d3a5c7e9f21
+    bypass:
+      used: false
+    refs:
+      - .noru/.cache/change-events.json:94
+    interpretation:
+      owner: dana.whitfield@example.com
+      decided_at: 2026-10-05
+      expires_at: 2027-09-30
+      rationale: >
+        Agent-authored and reviewed by a human who did not run the agent, which is what the
+        separation asks for. Agent authorship on its own is not a finding.

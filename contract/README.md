@@ -25,6 +25,11 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
   artifact
 - [`audit-pack.schema.json`](./audit-pack.schema.json) — the `.noru/audit-pack.yml` artifact
 - [`iac-scan.schema.json`](./iac-scan.schema.json) — the `.noru/iac-scan.yml` artifact
+- [`change-control.schema.json`](./change-control.schema.json) — the `.noru/change-control.yml`
+  artifact
+- [`privacy-baseline.schema.json`](./privacy-baseline.schema.json) — `.noru/privacy-baseline.yml`,
+  the agreed privacy taxonomy the CI policy gate is judged against. Not a piece artifact: a floor
+  pinned from Noru so the gate can run with no credential
 
 ## The nine requirements
 

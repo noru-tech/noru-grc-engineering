@@ -1,0 +1,535 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/change-control.schema.json",
+  "title": "Noru Change Control manifest (.noru/change-control.yml)",
+  "description": "Who wrote a change, who approved it, who merged it and who put it in production, for one window — plus the forge configuration that was supposed to keep those apart. This manifest records what happened; it does not assert that what happened was correct. A self-approved change is a fact, and the validator's job is to refuse an *unowned* one, not to refuse the truth. That is the review-signoff precedent (every exception needs a disposition and a named owner) rather than the audit-pack one, because a workpaper is authored and a change history is observed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "piece",
+    "source",
+    "window",
+    "queue_snapshot",
+    "changes"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "piece": {
+      "const": "change-control"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "window": {
+      "$ref": "#/$defs/window"
+    },
+    "queue_snapshot": {
+      "description": "What Noru said was due when :scan ran. Which change-management separations this organization must hold to is Noru's answer, never this plugin's — requirement 9. Written from MCP output by the client; never invented here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fetched_at",
+        "via",
+        "controls"
+      ],
+      "properties": {
+        "fetched_at": {
+          "type": "string",
+          "minLength": 10
+        },
+        "via": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "getOrganizationControls",
+              "getPendingControls",
+              "getControlContext",
+              "getEvidenceItems",
+              "getEvidenceForControl",
+              "getSecurityFindings"
+            ]
+          }
+        },
+        "controls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/queueControl"
+          }
+        }
+      }
+    },
+    "controls": {
+      "$ref": "#/$defs/controls"
+    },
+    "control_mappings": {
+      "description": "Which controls this window's attestation is evidence for. Every id must appear in the queue snapshot: a piece works Noru's queue and does not invent one.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/controlMapping"
+      }
+    },
+    "changes": {
+      "description": "One entry per change that reached the protected branch in the window.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/change"
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "commit_sha",
+        "branch",
+        "generated_by"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit_sha": {
+          "type": "string",
+          "minLength": 7
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generated_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "forge": {
+          "enum": [
+            "github",
+            "gitlab",
+            "other"
+          ]
+        },
+        "derived_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "window": {
+      "description": "The period this manifest accounts for. Every expiry is measured from its end, following audit-pack: a conclusion about a period, signed late, does not cover more of the period.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "opens_on",
+        "closes_on"
+      ],
+      "properties": {
+        "opens_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "closes_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "complete": {
+          "description": "Whether every change that reached the branch in this window is present. False says the export was partial — a sample, or a truncated page — which an auditor must be told rather than left to infer from a suspiciously round number.",
+          "type": "boolean"
+        }
+      }
+    },
+    "controls": {
+      "description": "The forge configuration that is supposed to make segregation of duties hold. These are repository *settings*, not files, so no offline collector can read them: they arrive in the settings snapshot a credentialed exporter writes, and the claim here is that they were observed, by someone, on a date.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default_branch",
+        "observed_on",
+        "refs"
+      ],
+      "properties": {
+        "default_branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "protected": {
+          "type": "boolean"
+        },
+        "required_approvals": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dismiss_stale_reviews": {
+          "type": "boolean"
+        },
+        "require_code_owner_review": {
+          "type": "boolean"
+        },
+        "enforce_admins": {
+          "type": "boolean"
+        },
+        "allow_force_push": {
+          "type": "boolean"
+        },
+        "required_status_checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "codeowners_present": {
+          "type": "boolean"
+        },
+        "deploy_environments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/environment"
+          }
+        },
+        "refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        },
+        "needs_review": {
+          "type": "boolean"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required_reviewers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prevent_self_review": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[^:\\s][^:]*:[0-9]+$"
+    },
+    "person": {
+      "description": "A person, not a team alias and not a bot. An alias cannot be asked what it was thinking, and a bot cannot hold a duty that exists to be held apart from another one.",
+      "type": "string",
+      "minLength": 3
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "kind",
+        "title",
+        "authored_by",
+        "author_kind",
+        "opened_on",
+        "refs"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "pull_request",
+            "merge_request",
+            "direct_push",
+            "emergency_change",
+            "revert"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authored_by": {
+          "$ref": "#/$defs/person"
+        },
+        "author_kind": {
+          "description": "`agent` is not a smaller `human`. A change an autonomous agent wrote and one human waved through is one person wearing two hats, and an auditor will ask. Naming it is what lets the rule below exist at all.",
+          "enum": [
+            "human",
+            "agent"
+          ]
+        },
+        "agent_operator": {
+          "description": "The person who ran the agent. Required when author_kind is `agent`: somebody pressed go, and they are not an independent reviewer of what came back.",
+          "$ref": "#/$defs/person"
+        },
+        "opened_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "approvals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/approval"
+          }
+        },
+        "merged_by": {
+          "$ref": "#/$defs/person"
+        },
+        "merged_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "deployed_by": {
+          "$ref": "#/$defs/person"
+        },
+        "deployed_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "artifact_digest": {
+          "description": "The digest of what was actually deployed. Without it, `reviewed` and `deployed` are two unlinked facts and nothing says the bytes that shipped are the bytes somebody read.",
+          "type": "string",
+          "minLength": 7
+        },
+        "bypass": {
+          "$ref": "#/$defs/bypass"
+        },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/exception"
+          }
+        },
+        "refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        },
+        "needs_review": {
+          "type": "boolean"
+        }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "by",
+        "state"
+      ],
+      "properties": {
+        "by": {
+          "$ref": "#/$defs/person"
+        },
+        "state": {
+          "enum": [
+            "approved",
+            "changes_requested",
+            "commented",
+            "dismissed"
+          ]
+        },
+        "on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      }
+    },
+    "bypass": {
+      "description": "A control that was stepped around. Recording it is the point: a bypass nobody wrote down is indistinguishable from a control that held.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "used"
+      ],
+      "properties": {
+        "used": {
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "admin_merge",
+            "force_push",
+            "branch_protection_disabled",
+            "required_checks_skipped",
+            "environment_approval_skipped"
+          ]
+        },
+        "by": {
+          "$ref": "#/$defs/person"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 10
+        }
+      }
+    },
+    "exception": {
+      "description": "A separation that did not hold, and what was decided about it. This is what keeps the manifest truthful: the violation is recorded, and the validator asks only that somebody owns it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule",
+        "disposition",
+        "owner",
+        "note"
+      ],
+      "properties": {
+        "rule": {
+          "enum": [
+            "approver_is_author",
+            "merged_without_independent_approval",
+            "deployer_is_author",
+            "agent_change_without_independent_human",
+            "bypass_used"
+          ]
+        },
+        "disposition": {
+          "enum": [
+            "remediated",
+            "accepted_risk",
+            "false_positive",
+            "deferred"
+          ]
+        },
+        "owner": {
+          "$ref": "#/$defs/person"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 10
+        },
+        "resolved_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      }
+    },
+    "interpretation": {
+      "description": "Contract requirement 8. Who decided this, when, until when, and why.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "decided_at",
+        "expires_at",
+        "rationale"
+      ],
+      "properties": {
+        "owner": {
+          "$ref": "#/$defs/person"
+        },
+        "decided_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "expires_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 10
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        }
+      }
+    },
+    "queueControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "control_id"
+      ],
+      "properties": {
+        "control_id": {
+          "description": "The lowercase canonical id Noru returns, not the uppercase display id.",
+          "type": "string",
+          "minLength": 1
+        },
+        "display_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "unmet_evidence_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidenceItem"
+          }
+        }
+      }
+    },
+    "evidenceItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      }
+    },
+    "controlMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "control_id"
+      ],
+      "properties": {
+        "control_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_item_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}
