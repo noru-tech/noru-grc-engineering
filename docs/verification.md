@@ -44,6 +44,8 @@ python3 scripts/test_ci_mode.py        # CI mode fails on drift, on an expired c
 | **A remediated exception closes its finding** | `test_idempotency.py` asserts a `remediated` or `false_positive` disposition is pushed with status `resolved`, so a re-run after the fix closes the record instead of leaving a stale open finding beside a fixed problem |
 | One evidence record per window, not one per change | asserted: a blob per change is how a register becomes unreadable |
 | A schema describing a *format* is not a schema describing a *record* | found by running the coverage check against this repository, where a `$schema` marker matched all ten files in `contract/`. The JSON Schema and Zod markers were removed and the case is now a regression test: a repository whose only candidates are a contract schema and a Zod request validator raises no coverage finding |
+| **A 403 on an optional read does not kill an export** | found on the first live API call: GitHub answers `403 Resource not accessible by integration` — not 404 — when a token may not read branch protection, and a probe tolerating only 404 killed the whole export. `test_collectors.py` now drives the exporter against a stdlib HTTP server returning that exact response, asserts the export completes with the settings omitted, and asserts the other direction: a 403 on the pull requests themselves still fails, because an export missing those is not an export. Checked in the other direction by removing the tolerance |
+| A token is not echoed into an error | the same test asserts the token it passed does not appear in stderr on the failing path |
 | An unreadable forge setting is not a false setting | `normalizeProtection` omits the protection fields when the probe 404s, because GitHub and GitLab both answer 404 for "not protected" and for "you may not ask". Reporting `protected: false` there would state something untrue |
 | A scaffolded piece satisfies the contract | CI scaffolds one and runs the contract test against it |
 | **CI mode fails on drift** | `test_ci_mode.py` adds a model provider to a copy of the fixture repo and asserts exit `3`, that the message names the provider and the `file:line` it arrived at, and that the gate clears again when the file is removed |
@@ -114,12 +116,12 @@ at production scale. Treat a first run as something to check, not something to t
   policy engine, an allowlist, another compliance tool — will be reported as containing them. The
   collector cannot tell a detector from the thing it detects, and nothing here fixes that; it is
   written down so a first run against such a repository is read rather than believed.
-- **`change-control`'s exporters have never met a live forge.** The GitHub and GitLab exporters are
-  the only code in this repository that talks to a third-party API, and nothing here can test that:
-  the normalizing functions are unit-tested against hand-written API payloads and the argument
-  handling is exercised, but no call has ever been made. Field names, pagination behaviour and the
-  shape of a protection response are read from published documentation, not observed. Treat the
-  first export as something to read line by line.
+- **`change-control`'s exporters are tested against a canned server, not a live forge.** The HTTP
+  layer is now exercised — the exporters accept `--api=`, so `test_collectors.py` stands up a
+  stdlib server and drives a real export through it, including the 403 case. What is still unproven
+  is the *shape* of what a real forge returns: field names, pagination behaviour and the response
+  bodies are read from published documentation, not observed. The first live run found one bug this
+  way (see below); treat the next one as something to read line by line too.
 - **`change-control` infers an admin merge from its shape.** A merge with no approving review is
   what the API shows; *why* it happened is not in the API. The exporter records the shape, says so
   in the reason text it writes, and the command tells you to replace it. Nothing automates the

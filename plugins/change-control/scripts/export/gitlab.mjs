@@ -49,7 +49,7 @@ function redact(text) {
     .replace(/\bglpat-[A-Za-z0-9_-]{16,}/g, "<redacted>");
 }
 
-async function api(opts, token, path) {
+async function api(opts, token, path, tolerate = []) {
   const url = path.startsWith("http") ? path : `${opts.api}${path}`;
   const response = await fetch(url, {
     headers: {
@@ -58,13 +58,19 @@ async function api(opts, token, path) {
       "User-Agent": "noru-grc-engineering/change-control",
     },
   });
-  if (response.status === 404) return { missing: true, body: null, next: null };
+  // 404 is "there is nothing here"; 403 is "you may not ask". Both are answers rather than
+  // failures for an OPTIONAL read — see the same note in github.mjs, where a token without
+  // Administration: read killed a whole export before this existed.
+  if (response.status === 404 || tolerate.includes(response.status)) {
+    return { missing: true, forbidden: response.status === 403, body: null, next: null };
+  }
   if (!response.ok) {
     const body = await response.text().catch(() => "");
     throw new Error(`GET ${redact(url)} -> ${response.status} ${redact(body.slice(0, 300))}`);
   }
   return {
     missing: false,
+    forbidden: false,
     body: await response.json(),
     next: response.headers.get("x-next-page") || null,
   };
@@ -205,11 +211,12 @@ async function main(argv) {
     const project = (await api(opts, token, `/projects/${id}`)).body;
     const branch = project?.default_branch ?? "main";
     const protectionProbe = await api(
-      opts, token, `/projects/${id}/protected_branches/${encodeURIComponent(branch)}`,
+      opts, token, `/projects/${id}/protected_branches/${encodeURIComponent(branch)}`, [403],
     );
     const codeownersProbe = await api(
       opts, token,
       `/projects/${id}/repository/files/${encodeURIComponent("CODEOWNERS")}?ref=${encodeURIComponent(branch)}`,
+      [403],
     );
     const environments = (await paged(opts, token, `/projects/${id}/environments`, 5)).rows.map(
       (environment) => ({ name: environment.name }),
@@ -280,10 +287,13 @@ async function main(argv) {
           `wrote ${out}`,
           `${changes.length} merge request(s) into ${branch} between ${opts.since} and ${opts.until}`,
           truncated ? "WARNING: the listing was truncated; window.complete is false" : "",
-          protectionProbe.missing
-            ? "NOTE: the protected-branch rule could not be read — either the branch has none or " +
-              "this token may not ask. The settings are omitted rather than guessed."
-            : "",
+          protectionProbe.forbidden
+            ? "NOTE: this token may not read the protected-branch rule (403). The settings are " +
+              "omitted rather than guessed; grant read_api."
+            : protectionProbe.missing
+              ? "NOTE: no protection rule found on " + branch + ". The settings are omitted " +
+                "rather than guessed."
+              : "",
           "Next: node plugins/change-control/scripts/collect.mjs --repo=.",
         ]
           .filter(Boolean)
