@@ -137,7 +137,7 @@ export function normalizeProtection(project, protectedBranch, readable, codeowne
 export function normalizeMergeRequest(mr, approvals, deployment) {
   const author = mr.author;
   const approvedBy = (approvals?.approved_by ?? [])
-    .map((entry) => ({ by: actorOf(entry.user), state: "approved", on: day(mr.merged_at) }))
+    .map((entry) => ({ by: actorOf(entry.user), state: "approved", reviewed_on: day(mr.merged_at) }))
     .filter((entry) => entry.by);
 
   const bypass =

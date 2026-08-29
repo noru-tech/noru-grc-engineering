@@ -66,6 +66,14 @@ directory is one somebody turns off.
 both to `protected: false`, which states something untrue where the honest answer is "nobody here
 could find out"; they now omit the fields instead.
 
+**`check_repo.py` rejects YAML 1.1 boolean words in a manifest.** `verification.md` had carried the
+loader divergence as an open gap with the note "no fixture is written that way" — and then one was:
+`change-control` named an approval's date field `on`, which PyYAML reads as the boolean key `True`
+and the bundled loader reads as the string `"on"`. Every local run passed; the CI matrix caught it.
+The field is now `reviewed_on`, and a bare `yes`/`no`/`on`/`off`/`y`/`n` used as a key or an
+unquoted value is a build failure anywhere the two loaders both read. GitHub Actions workflows are
+exempt, because `on:` is GitHub's own required syntax.
+
 **A 403 on an optional read no longer kills an export.** Found on the first live API call this
 repository made: GitHub answers `403 Resource not accessible by integration` — not 404 — when a
 token may not read branch protection, which is exactly what the Actions token gets. The optional

@@ -239,6 +239,56 @@ def check_reference_files_exist(problems):
                         f"references/{rel}, which does not exist"
                     )
 
+def check_yaml_11_booleans(problems):
+    """No manifest may use a bare YAML 1.1 boolean word as a key or an unquoted value.
+
+    PyYAML resolves `yes`, `no`, `on`, `off`, `y` and `n` to booleans; the bundled fallback leaves
+    them as strings. Both loaders are in production — which one runs is a property of the machine —
+    so a file using one of these words validates here and fails there, for reasons no message
+    explains.
+
+    docs/verification.md carried this as an open Known gap with the note "no fixture is written that
+    way, so nothing fails today". One then was: `change-control` named an approval's date field
+    `on`, PyYAML read the key as the boolean True, and the CI matrix caught it where every local run
+    had passed. This check is that gap closed — the divergence is still real, but a file can no
+    longer walk into it unnoticed.
+    """
+    words = {"yes", "no", "on", "off", "y", "n"}
+    roots = [ROOT / "plugins", ROOT / "contract", ROOT / "tests"]
+    key_re = re.compile(r"^\s*(?:-\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*:(?:\s|$)")
+    value_re = re.compile(r"^\s*(?:-\s+)?[A-Za-z_][A-Za-z0-9_]*\s*:\s*([A-Za-z]+)\s*(?:#.*)?$")
+
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*.yml")) + sorted(root.rglob("*.yaml")):
+            # A GitHub Actions workflow MUST use `on:` — GitHub defines the key and nothing here
+            # parses these for meaning. The rule is about manifests this repository's own two
+            # loaders read, where the divergence actually bites.
+            if ".github/workflows/" in path.as_posix():
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeDecodeError):
+                continue
+            for number, line in enumerate(lines, start=1):
+                if line.lstrip().startswith("#"):
+                    continue
+                key = key_re.match(line)
+                if key and key.group(1).lower() in words:
+                    problems.append(
+                        f"{path.relative_to(ROOT)}:{number}: the key `{key.group(1)}` is a YAML 1.1 "
+                        "boolean — PyYAML reads it as true/false and the bundled loader reads it as "
+                        "a string, so this file means two different things on two machines. Rename it"
+                    )
+                value = value_re.match(line)
+                if value and value.group(1).lower() in words:
+                    problems.append(
+                        f"{path.relative_to(ROOT)}:{number}: the unquoted value `{value.group(1)}` is "
+                        "a YAML 1.1 boolean — quote it, or spell it true/false"
+                    )
+
+
 def check_special_categories(problems):
     """The canonical Article 9 / Article 10 list must cover every key a piece treats as special.
 
@@ -397,6 +447,7 @@ def main(argv):
         plugin_names = check_marketplaces(problems)
         check_pieces_registered(problems, plugin_names)
         check_reference_files_exist(problems)
+        check_yaml_11_booleans(problems)
         check_special_categories(problems)
         check_vocab_sync(problems)
         check_schemas_evaluable(problems)

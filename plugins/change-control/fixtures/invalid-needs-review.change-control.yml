@@ -67,7 +67,7 @@ changes:
     approvals:
       - by: sam.okafor@example.com
         state: approved
-        on: 2026-07-09
+        reviewed_on: 2026-07-09
     merged_by: sam.okafor@example.com
     merged_on: 2026-07-09
     deployed_by: sam.okafor@example.com
@@ -94,7 +94,7 @@ changes:
     approvals:
       - by: priya.nair@example.com
         state: approved
-        on: 2026-07-22
+        reviewed_on: 2026-07-22
     merged_by: priya.nair@example.com
     merged_on: 2026-07-22
     deployed_by: priya.nair@example.com
@@ -189,7 +189,7 @@ changes:
     approvals:
       - by: priya.nair@example.com
         state: approved
-        on: 2026-09-02
+        reviewed_on: 2026-09-02
     merged_by: priya.nair@example.com
     merged_on: 2026-09-02
     bypass:
@@ -221,7 +221,7 @@ changes:
     approvals:
       - by: sam.okafor@example.com
         state: approved
-        on: 2026-09-19
+        reviewed_on: 2026-09-19
     merged_by: sam.okafor@example.com
     merged_on: 2026-09-19
     deployed_by: sam.okafor@example.com
