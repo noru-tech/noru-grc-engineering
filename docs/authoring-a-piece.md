@@ -29,6 +29,20 @@ The three ways people break determinism, in order of how often:
 - an unsorted directory listing (`readdirSync` order is not stable across machines)
 - iterating a `Set` or `Map` built in encounter order
 
+**Do not write your own file enumeration.** The template gives you `listFiles(repo)`; use it, and
+filter what it returns. It asks `git ls-files` — the set `actions/checkout` gives CI, honouring
+`.gitignore` and friends — and falls back to a directory walk only where there is no git to ask,
+which is a legitimate case (an exported tarball) rather than a failure. Walking the working tree
+instead is a defect that looks like it works: a developer's tree holds worktrees, scratch checkouts
+and unpacked archives that CI never sees, so the scans disagree permanently and the committed
+manifest can match one environment or the other and never both — while every extra fact it records
+is cited to a path that is not in the repository. Three pieces shipped that bug because each wrote
+its own walk.
+
+Which of the two happened is a fact about the scan, so report it: the template puts it in
+`coverage.enumerated_by` and excludes `coverage` from `digestOf`. Keep it there. The same files
+enumerated two ways are the same repository, and must not read as drift.
+
 Split what you write into two halves and keep them apart:
 
 - **derived facts** — what the collector can stand behind, each with `file:line`. These go to
@@ -122,3 +136,7 @@ documentation:
   the display form in a manifest is how ids drift.
 - **`expires_at` is required for technical claims.** A configuration-dependent claim that never goes
   stale is a claim nobody re-checks.
+- **The digest answers one question: has the repository changed?** Anything in the derived facts
+  that is not about the repository has to be kept out of it — `generated_by` (the version of the
+  tool that read it) and `coverage` (how the file list was arrived at). Hash either and every
+  committed manifest reports drift that re-running `:scan` can never clear.

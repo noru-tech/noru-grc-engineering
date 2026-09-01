@@ -76,6 +76,34 @@ Two of the Terraform rules are **absence** checks — they fire on a resource bl
 encryption at all. Absence is the interesting half of an infrastructure review and a line scanner
 cannot see it, so the collector tracks block extents.
 
+## What it scans
+
+The table above is what each rule *reads*. Which files reach a rule at all is a separate question,
+and the answer is **the tracked files, wherever there is a git to ask** — `git ls-files`, the same
+set `actions/checkout` gives CI, honouring `.gitignore`, `.git/info/exclude` and your global
+excludes file without this collector reimplementing any of them.
+
+That matters more here than for a piece that only counts things. A finding is keyed on the check
+and the **file** it fired against, so a gitignored copy of the repository — a worktree, a scratch
+checkout, an unpacked archive — does not merely double a number. It opens a *distinct* finding
+against a resource at a path that exists on one machine, which this piece then pushes to Noru and
+which nobody can close by editing anything. CI scans a checkout and a developer scans a working
+tree, so the two disagree permanently.
+
+Three consequences worth knowing. A **tracked** file that an ignore rule also matches is still in
+scope — it is in the checkout, so it is configuration this repository ships. An index entry that is
+not on disk (a sparse checkout, a pending deletion) is not, because a file the collector cannot open
+is not one it can cite. And a `.tf` file you have written but not yet `git add`ed is not scanned
+either: it is not in the checkout, so a finding against it would put the same disagreement back in a
+smaller form. Stage it and scan again. `vendor/`, `.terraform/` and the rest of the built-in list
+stay excluded even when committed — those hold modules someone else wrote.
+
+Scanning something that is **not** a work tree — an exported tarball, a directory with no `.git` —
+is a legitimate thing to do, and there the collector reads what is on disk instead. That is a
+different question, so it says which one it answered: `coverage.enumerated_by` in the derived facts
+is `git` or `walk`, and the scan summary says so in words. Same files either way means the same
+`derived_digest`, so an export and a checkout of one commit do not read as drift.
+
 ## Expiry, anchored on when the configuration was seen
 
 `interpretation.expires_at` is required, and the horizon is measured from `observed_on` — the commit
