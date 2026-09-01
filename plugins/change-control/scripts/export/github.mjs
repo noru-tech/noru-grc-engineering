@@ -19,8 +19,9 @@
 //                   [--out=<path>] [--api=<url>] [--output=json|text] [--quiet]
 // Exit codes: 0 written, 1 the API refused or returned something unusable, 2 usage error.
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const USAGE =
   "usage: github.mjs --repo=<owner/name> --since=<YYYY-MM-DD> --until=<YYYY-MM-DD>\n" +
@@ -339,6 +340,19 @@ async function main(argv) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Reduce both sides to one form before comparing: `import.meta.url` is the realpath and is
+// percent-encoded, while `process.argv[1]` is the path as it was typed — and /tmp and /var are
+// symlinks on macOS, so the two differ routinely. A raw comparison is then false and the script
+// exits 0 having done nothing. realpathSync throws when argv[1] is not a path at all (`node -e`,
+// or an import), which is not a direct invocation either.
+function invokedAsScript() {
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+}
+
+if (invokedAsScript()) {
   process.exit(await main(process.argv.slice(2)));
 }

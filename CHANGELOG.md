@@ -8,6 +8,27 @@ one version number; the release workflow fails if they disagree.
 
 ### Fixed
 
+**Every collector was one symlink away from passing without scanning anything.** Each script
+decides whether to run `main()` by comparing `import.meta.url` against `process.argv[1]`, and the
+two were compared raw. Node resolves `import.meta.url` to the realpath and percent-encodes it,
+while `process.argv[1]` keeps the path as it was typed — so on macOS, where `/tmp` and `/var` are
+symlinks to `/private/tmp` and `/private/var`, running a collector from a temporary directory made
+the comparison false. `main()` then never ran: the script fell off the end and exited `0` having
+printed nothing, written no derived facts and written no manifest. A CI job that scanned from such
+a path passed. That is the one failure a compliance scanner must not have, because nothing in the
+exit code or the log distinguishes it from a clean scan — the drift gate cannot fail on a manifest
+that was never compared, and the absence of evidence reads as evidence of absence. A repository
+path containing a space or a non-ASCII character broke the same comparison for a second,
+independent reason: one side was encoded and the other was not.
+
+Both sides are now reduced to one form before being compared. A `process.argv[1]` that is not a
+path at all — `node -e`, or the module being imported by another script — is treated as "not
+invoked directly" rather than as an error. This lands in all 31 entry points, not only the
+collectors: every piece's `collect.mjs`, `diff.mjs` and `push.mjs`, the two `change-control`
+exporters, `noru`'s `doctor.mjs` and `context.mjs`, and the three templates under
+`scripts/templates/` that a scaffolded piece inherits — fixing the collectors alone would have left
+the same silent pass in every `:push` and every scaffolded piece.
+
 **`privacy-datamap` scans the files git tracks, not the files on disk.** The collector walked the
 working tree behind a fixed list of directory names, so anything a project ignores for its own
 reasons — worktrees, scratch checkouts, unpacked archives, generated fixtures — was mapped as
@@ -64,6 +85,12 @@ has moved. `generated_by` and `coverage` are both excluded now, and
 `test_digest_ignores_the_collectors_own_version` covers every plugin but cannot reach a template.
 
 ### Upgrading
+
+**If a scan of yours has ever produced no output, re-run it.** A collector invoked through a
+symlinked path — most easily a `/tmp` or `/var` working directory on macOS — reported success
+without writing anything, so any green build whose scan step printed nothing was not a passing
+scan. Nothing needs re-pinning and no manifest changes because of this fix; the scans that were
+already running are unaffected.
 
 **Re-run `:scan` on any repository whose working tree holds ignored copies of its own schema.** The
 file list changed, so `derived_digest` changes with it and the committed manifest reports drift
