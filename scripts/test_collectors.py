@@ -34,6 +34,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1547,11 +1548,7 @@ def test_scaffold_template_scans_what_ci_checks_out(results, tmp):
     A template is not importable, so the only honest way to assert what a scaffolded piece does is
     to stamp one the way scaffold-piece.mjs does and run it.
     """
-    # .resolve(): every collector here guards main() on `import.meta.url === file://argv[1]`, and
-    # the platform temporary directory is a symlink on macOS. An unresolved path makes the guard
-    # false, main() never runs, and the collector exits 0 having done nothing — which would read as
-    # a passing scan rather than as the setup mistake it is.
-    collector = pathlib.Path(tmp).resolve() / "stamped-collect.mjs"
+    collector = pathlib.Path(tmp) / "stamped-collect.mjs"
     collector.write_text(
         TEMPLATE_COLLECTOR.read_text(encoding="utf-8").replace("__PIECE__", "stamped"),
         encoding="utf-8",
@@ -1886,6 +1883,135 @@ def test_change_control_export_survives_a_forbidden_setting(results, tmp):
     )
 
 
+# --- entry points -------------------------------------------------------------------------------
+#
+# Every runnable script here ends with a guard that compares its own module URL against
+# `process.argv[1]` and calls main() only if they match. Both sides have to be reduced to the same
+# form first: `import.meta.url` is always the realpath, URL-encoded, while `process.argv[1]` is the
+# path as it was typed. A guard that compares them raw is false whenever the two differ, and a
+# collector whose guard is false exits 0 having scanned nothing — which is indistinguishable, to a
+# CI job and to the person reading its log, from a clean scan.
+
+ENTRY_POINT_GUARD = (
+    "return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;"
+)
+
+
+def entry_points():
+    """Every script that decides whether to run main() by comparing its URL against argv[1]."""
+    for root in (PLUGINS, ROOT / "scripts" / "templates"):
+        for path in sorted(root.rglob("*")):
+            if path.suffix not in (".mjs", ".tmpl") or not path.is_file():
+                continue
+            if "import.meta.url ===" in path.read_text(encoding="utf-8"):
+                yield path
+
+
+def test_entry_point_runs_from_a_symlinked_path(results, tmp):
+    """A collector reached through a symlink must still collect.
+
+    `/tmp` and `/var` are symlinks on macOS, so a CI job or a developer running a collector from a
+    temporary directory reaches it through one by default. Node resolves `import.meta.url` to the
+    realpath while `process.argv[1]` keeps the symlinked spelling, so an unresolved guard compares
+    `file:///private/tmp/...` against `file:///tmp/...`, never matches, and main() does not run.
+
+    The exit code cannot detect this: the script falls off the end and exits 0. So this asserts on
+    what a scan is *for* — the derived facts — rather than on the status.
+    """
+    # The whole plugin is linked, not just the script: the collector loads its own siblings
+    # (references/, lib/) relative to itself, and linking deeper would test a different thing.
+    link = pathlib.Path(tmp) / "linked-plugin"
+    os.symlink(PRIVACY_DATAMAP, link)
+    repo = write_files(pathlib.Path(tmp) / "symlinked-entry-point", {"db/schema.sql": SQL_FIXTURE})
+
+    collector = link / "scripts" / "collect.mjs"
+    result = run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+    derived = repo / ".noru" / ".cache" / "privacy-datamap.derived.json"
+    results.check(
+        "[entry points] a collector run through a symlinked path writes its derived facts",
+        derived.is_file(),
+        f"exit {result.returncode}, stdout {result.stdout[:120]!r}, stderr {result.stderr[:200]!r}",
+    )
+    results.check(
+        "[entry points] and reports the scan on stdout rather than exiting 0 in silence",
+        result.returncode == 0 and result.stdout.strip() != "",
+        f"exit {result.returncode}, stdout {result.stdout[:200]!r}",
+    )
+
+
+def test_entry_point_runs_from_a_path_needing_encoding(results, tmp):
+    """A repository checked out under a path with a space in it must still scan.
+
+    Same guard, second reason to fail: `import.meta.url` percent-encodes, `process.argv[1]` does
+    not, so `.../dir with space/collect.mjs` compares as `dir%20with%20space` against `dir with
+    space`. Independent of the symlink case — resolving the path is not enough on its own, and a
+    fix that only realpaths would still leave this one broken.
+    """
+    holder = pathlib.Path(tmp) / "a directory with spaces"
+    holder.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(PRIVACY_DATAMAP, holder / "privacy-datamap", dirs_exist_ok=True)
+    repo = write_files(pathlib.Path(tmp) / "encoded-entry-point", {"db/schema.sql": SQL_FIXTURE})
+
+    collector = holder / "privacy-datamap" / "scripts" / "collect.mjs"
+    result = run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+    derived = repo / ".noru" / ".cache" / "privacy-datamap.derived.json"
+    results.check(
+        "[entry points] a collector run from a path containing a space writes its derived facts",
+        derived.is_file(),
+        f"exit {result.returncode}, stdout {result.stdout[:120]!r}, stderr {result.stderr[:200]!r}",
+    )
+
+
+def test_entry_point_guard_tolerates_a_non_path_argv(results):
+    """Resolving argv[1] must not turn "not invoked as a script" into a crash.
+
+    `node -e` and `node --input-type=module` leave `process.argv[1]` as whatever followed `--`,
+    which is usually not a path at all — and test_change_control_rules_agree_across_languages
+    imports the rules that way to compare them against the Python implementation. Resolving a
+    string that is not a file throws, so the guard has to treat that as "no" rather than exit 1.
+    """
+    collector = PRIVACY_DATAMAP / "scripts" / "collect.mjs"
+    script = (
+        f"const m = await import({str(collector)!r});\n"
+        "console.log(JSON.stringify({ piece: m.PIECE }));\n"
+    )
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script, "--", '{"not":"a path"}'],
+        capture_output=True, text=True, timeout=180, check=False,
+    )
+    results.check(
+        "[entry points] importing a collector with a non-path argv[1] neither throws nor runs main",
+        completed.returncode == 0 and json.loads(completed.stdout)["piece"] == "privacy-datamap",
+        f"exit {completed.returncode}: {completed.stderr[:300]}",
+    )
+
+
+def test_every_entry_point_resolves_before_it_compares(results):
+    """One collector proving the point is not enough — the guard is copied into every script.
+
+    It is also copied out of `scripts/templates/`, so a piece scaffolded tomorrow inherits whatever
+    is written there. Checking the text of every guard is what stops this from being fixed once and
+    reintroduced by the next `scaffold-piece.mjs` run.
+    """
+    scripts = list(entry_points())
+    unresolved = sorted(
+        str(p.relative_to(ROOT)) for p in scripts
+        if ENTRY_POINT_GUARD not in p.read_text(encoding="utf-8")
+    )
+    results.check(
+        "[entry points] every script resolves and encodes its path before comparing it to argv[1]",
+        unresolved == [],
+        f"raw comparison in {unresolved}",
+    )
+    # A guard that stops matching the string above is a guard this test no longer reads. If the
+    # form changes deliberately, this count is the reminder to change it here too.
+    results.check(
+        "[entry points] and the templates a new piece is scaffolded from are among them",
+        len(scripts) >= 31 and any(p.suffix == ".tmpl" for p in scripts),
+        f"{len(scripts)} entry point(s) found",
+    )
+
+
 def main(argv):
     output_json = False
     quiet = False
@@ -1942,9 +2068,13 @@ def main(argv):
             test_audit_pack_gap_analysis(results, tmp)
             test_audit_pack_assembles_upstream_manifests(results, tmp)
             test_audit_pack_renders_only_a_validated_pack(results, tmp)
+            test_entry_point_runs_from_a_symlinked_path(results, tmp)
+            test_entry_point_runs_from_a_path_needing_encoding(results, tmp)
         test_missing_disclosure_fixture_alerts(results)
         test_iac_every_status_has_an_expiry_horizon(results)
         test_audit_pack_every_conclusion_has_an_assurance_horizon(results)
+        test_entry_point_guard_tolerates_a_non_path_argv(results)
+        test_every_entry_point_resolves_before_it_compares(results)
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"error: {exc}\n")
         return 2

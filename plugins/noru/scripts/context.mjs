@@ -9,8 +9,9 @@
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { basename, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const USAGE = "usage: context.mjs [--repo=<path>] [--output=json|text] [--quiet]\n";
 
@@ -112,6 +113,19 @@ function main(argv) {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Reduce both sides to one form before comparing: `import.meta.url` is the realpath and is
+// percent-encoded, while `process.argv[1]` is the path as it was typed — and /tmp and /var are
+// symlinks on macOS, so the two differ routinely. A raw comparison is then false and the script
+// exits 0 having done nothing. realpathSync throws when argv[1] is not a path at all (`node -e`,
+// or an import), which is not a direct invocation either.
+function invokedAsScript() {
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+}
+
+if (invokedAsScript()) {
   process.exit(main(process.argv.slice(2)));
 }
