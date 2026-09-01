@@ -342,9 +342,13 @@ def run_expiry(path):
         return completed.returncode, None
 
 
-# A repository whose only schema is in a format the collector cannot read. Five formats, so a single
+# A repository whose only schema is in a format the collector cannot read. Six formats, so a single
 # regex going stale cannot silently turn this case green.
 BLINDSPOT_FILES = {
+    "src/schema.ts": (
+        'import { pgTable, text } from "drizzle-orm/pg-core"\n'
+        'export const members = pgTable("members", { email: text("email") })\n'
+    ),
     "src/user.model.ts": (
         "import mongoose from \"mongoose\"\n"
         "const UserSchema = new mongoose.Schema({ email: String })\n"
@@ -382,7 +386,8 @@ def case_coverage(results, tmp):
     results.check(
         "coverage: the finding names every format it saw",
         finding is not None
-        and {"mongoose", "typeorm", "activerecord", "gorm", "openapi"} <= set(finding.get("formats") or []),
+        and {"mongoose", "typeorm", "activerecord", "gorm", "openapi", "drizzle"}
+        <= set(finding.get("formats") or []),
         (finding or {}).get("formats"),
     )
     results.check(

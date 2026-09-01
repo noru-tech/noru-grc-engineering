@@ -861,12 +861,16 @@ def test_audit_pack_every_conclusion_has_an_assurance_horizon(results):
 # the gap gets reviewed and the wrong answer gets signed.
 
 
-def datamap_repo(tmp, name, files):
-    repo = pathlib.Path(tmp) / name
+def write_files(repo, files):
     for rel, body in files.items():
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
+    return repo
+
+
+def datamap_scan(repo):
+    """Run the collector over a directory that already exists. Returns (summary, derived facts)."""
     collector = PRIVACY_DATAMAP / "scripts" / "collect.mjs"
     result = run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
     if result.returncode != 0:
@@ -874,7 +878,12 @@ def datamap_repo(tmp, name, files):
     derived = json.loads(
         (repo / ".noru" / ".cache" / "privacy-datamap.derived.json").read_text(encoding="utf-8")
     )
-    return derived, repo
+    return json.loads(result.stdout), derived
+
+
+def datamap_repo(tmp, name, files):
+    repo = write_files(pathlib.Path(tmp) / name, files)
+    return datamap_scan(repo)[1], repo
 
 
 def fields_of(derived, collection_name):
@@ -928,6 +937,121 @@ def test_datamap_reads_every_declared_format(results, tmp):
         "CONSTRAINT" not in fields_of(derived, "accounts")
         and "accounts_email_lower" not in fields_of(derived, "accounts"),
         sorted(fields_of(derived, "accounts")),
+    )
+
+
+DRIZZLE_FIXTURE = """import { pgTable, text, uuid } from "drizzle-orm/pg-core"
+
+export const members = pgTable("members", {
+  id: uuid("id").primaryKey(),
+  email: text("email").notNull(),
+})
+"""
+
+
+def test_datamap_scans_what_ci_checks_out(results, tmp):
+    """A scan on a working tree and a scan in CI have to describe the same repository.
+
+    CI scans an `actions/checkout`: tracked files, and nothing else. A developer scans a working
+    tree, which may also hold worktrees, scratch checkouts and unpacked archives — each one a full
+    copy of the repository as far as a directory walk can tell. Walking those turns every copy into
+    its own dataset, keyed off a path that is not in the repository at all, and the drift between
+    the two scans is then unresolvable: the committed manifest can match one environment or the
+    other and never both.
+    """
+    # `.gitignore` is tracked, so it belongs in both repositories — the digest counts files, and a
+    # file present on one side only would make this test pass or fail for the wrong reason.
+    tracked = {".gitignore": "worktrees/\n", "db/schema.sql": SQL_FIXTURE}
+    repo = write_files(
+        pathlib.Path(tmp) / "worktree",
+        {**tracked, "worktrees/agent-1/db/schema.sql": SQL_FIXTURE},
+    )
+    # No commit: `git ls-files` reads the index, so staging is enough and this needs no identity.
+    run(["git", "-C", str(repo), "init", "-q"])
+    run(["git", "-C", str(repo), "add", "-A"])
+    # Written after the add, so it is untracked and not ignored — the one case where excluding a
+    # file the developer can see is the right answer, because CI cannot see it either.
+    write_files(repo, {"db/unstaged.sql": SQL_FIXTURE})
+    summary, derived = datamap_scan(repo)
+
+    names = [d["name"] for d in derived["datasets"]]
+    results.check(
+        "[privacy-datamap] a gitignored copy of a schema is not a second dataset",
+        names == ["db/schema.sql"],
+        names,
+    )
+    results.check(
+        "[privacy-datamap] and a schema that has not been staged yet is not one either",
+        "db/unstaged.sql" not in names,
+        names,
+    )
+    results.check(
+        "[privacy-datamap] the derived facts record that the file list came from git",
+        derived["coverage"].get("enumerated_by") == "git",
+        derived["coverage"].get("enumerated_by"),
+    )
+
+    # The same commit as CI sees it: tracked files, no .git directory. Identical digest, or the
+    # drift gate is comparing two different repositories and reporting the difference as a schema
+    # change that nobody can make go away.
+    checkout = write_files(pathlib.Path(tmp) / "ci-checkout", tracked)
+    ci_summary, ci_derived = datamap_scan(checkout)
+    results.check(
+        "[privacy-datamap] a working tree and a checkout of the same files agree on the digest",
+        ci_summary["derived_digest"] == summary["derived_digest"],
+        f"{summary['derived_digest'][:12]} vs {ci_summary['derived_digest'][:12]}",
+    )
+    # With no git to ask, reading the disk is the honest fallback — an exported tarball is a
+    # legitimate thing to scan. It is a different question though, so it is reported, not assumed.
+    results.check(
+        "[privacy-datamap] a directory that is not a work tree falls back to reading the disk",
+        ci_derived["coverage"].get("enumerated_by") == "walk" and len(ci_derived["datasets"]) == 1,
+        ci_derived["coverage"].get("enumerated_by"),
+    )
+
+
+def test_datamap_reports_the_schema_it_cannot_read(results, tmp):
+    """A format with no parser must still be reported, or the gap is indistinguishable from a pass.
+
+    This is the failure the coverage block exists for. A repository whose records are defined in an
+    unparsed ORM produces an empty data map, and an empty data map and a repository with no personal
+    data in it are the same file — every check downstream passes on the empty set.
+    """
+    derived, repo = datamap_repo(tmp, "drizzle", {"src/schema.ts": DRIZZLE_FIXTURE})
+    candidates = derived["coverage"]["unparsed_candidates"]
+    results.check(
+        "[privacy-datamap] a schema in an unparsed ORM is reported rather than passed over",
+        [c["format"] for c in candidates] == ["drizzle"],
+        candidates,
+    )
+    # files_parsed == 0 beside a candidate is what ci_check.py turns into exit 6, a broken gate that
+    # --mode=warn does not suppress. Nothing else in the manifest can tell that story.
+    results.check(
+        "[privacy-datamap] and the scan reports having parsed nothing, so CI can call it broken",
+        derived["coverage"]["files_parsed"] == 0 and derived["counts"]["datasets"] == 0,
+        derived["coverage"],
+    )
+    if candidates:
+        path, _, line = candidates[0]["ref"].rpartition(":")
+        source = (repo / path).read_text(encoding="utf-8").split("\n")[int(line) - 1]
+        results.check(
+            "[privacy-datamap] the coverage citation points at the table declaration",
+            "pgTable(" in source,
+            f"{candidates[0]['ref']} reads {source.strip()!r}",
+        )
+
+    # The precision half of the rule this list is written to: a marker means "a stored record is
+    # defined here", not "this word appears in the file". An import is not a schema, and a check
+    # that fires on one is a check somebody turns off.
+    imported, _ = datamap_repo(
+        tmp,
+        "drizzle-import",
+        {"src/helpers.ts": 'import { pgTable } from "drizzle-orm/pg-core"\nexport { pgTable }\n'},
+    )
+    results.check(
+        "[privacy-datamap] importing the symbol without declaring a table is not a candidate",
+        imported["coverage"]["unparsed_candidates"] == [],
+        imported["coverage"]["unparsed_candidates"],
     )
 
 
@@ -1515,6 +1639,8 @@ def main(argv):
             test_art5_screen(results, tmp)
             test_skeleton_never_asserts(results, tmp)
             test_datamap_reads_every_declared_format(results, tmp)
+            test_datamap_scans_what_ci_checks_out(results, tmp)
+            test_datamap_reports_the_schema_it_cannot_read(results, tmp)
             test_datamap_classifies_only_what_it_knows(results, tmp)
             test_datamap_normalises_naming_styles(results, tmp)
             test_datamap_citations_point_at_the_real_line(results, tmp)
