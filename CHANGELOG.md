@@ -35,6 +35,34 @@ whose records are defined in `pgTable(...)` produced an empty data map, and an e
 repository with no personal data in it are the same file. `pgTable(`, `mysqlTable(` and
 `sqliteTable(` now raise a coverage candidate, which is exit `6` where nothing else parsed.
 
+**`ai-inventory` and `iac-scan` scan the files git tracks, not the files on disk.** The same defect
+as above, in the two other collectors that walked the working tree, and in
+`scripts/templates/collect.mjs.tmpl` — which is where all three got it. Each filtered its traversal
+through its own fixed list of directory names, so any directory a project ignores for its own
+reasons was read as though it were source, and a scan on a working tree and a scan on an
+`actions/checkout` disagreed permanently. Both now enumerate with `git ls-files`, lstat-filtered to
+regular files so sparse-checkout entries, symlinks and submodule gitlinks drop out, with the
+built-in directory list still applied on top; a directory with no git still reads the disk, and the
+scan reports which of the two it did as `coverage.enumerated_by` and in the summary, outside
+`derived_digest` in both pieces.
+
+What each was getting wrong is worth stating separately, because the consequence differs. In
+`ai-inventory`, every ignored copy of the tree contributed its own provider refs, model ids and
+Article 50 trigger sites, so the inventory cited call sites that are on one machine only — and a
+disclosure gap attributed to a path nobody else has is a finding no one can act on. In `iac-scan` it
+is sharper still: a finding is keyed on the check and the **file** it fired against, so an ignored
+copy did not double a count, it opened a *distinct* finding against a resource at a path that is not
+in the repository, which the piece then pushed to Noru and which nobody could close by editing
+anything.
+
+**A piece scaffolded from the template hashed its own version into `derived_digest`.** The template
+kept `digestOf` as a hash of the whole derived object, while every shipped collector excludes
+`generated_by` from it. A new piece therefore started with the bug that was fixed everywhere else:
+bump the plugin version and every committed manifest reports drift, in repositories where nothing
+has moved. `generated_by` and `coverage` are both excluded now, and
+`test_scaffold_template_scans_what_ci_checks_out` stamps the template and asserts it — the existing
+`test_digest_ignores_the_collectors_own_version` covers every plugin but cannot reach a template.
+
 ### Upgrading
 
 **Re-run `:scan` on any repository whose working tree holds ignored copies of its own schema.** The
@@ -42,6 +70,13 @@ file list changed, so `derived_digest` changes with it and the committed manifes
 once. What comes back is smaller and describes the repository rather than the machine it was
 scanned on. **A build that passed before can now fail with exit `6`** on a repository whose only
 schema is Drizzle: that map was empty before and is now reported as the blind spot it always was.
+
+**Re-run `:scan` for `ai-inventory` and `iac-scan` on any repository whose working tree holds
+ignored copies of itself.** The file list changed, so `derived_digest` changes with it and the
+committed manifest reports drift once; re-scan, review what is left, and commit. For `iac-scan`,
+findings that were only ever raised against an ignored copy will stop reproducing and
+`:diff` will plan to close them — that is the correct outcome, and the reason it is worth reading
+the close list rather than approving it blind.
 
 ## 0.4.0 — 2026-08-30
 
@@ -573,7 +608,6 @@ rather than a policy, and it is tracked in #17.
   database by providers of Annex III high-risk systems, and by deployers only where they are public
   authorities or EU bodies; a private-sector deployer has no registration duty. The piece README now
   states what the Regulation does ask for and why an inventory is still worth keeping.
-
 
 ## 0.1.0
 

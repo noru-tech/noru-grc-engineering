@@ -44,6 +44,7 @@ COLLECTOR = AI_INVENTORY / "scripts" / "collect.mjs"
 VALIDATOR = AI_INVENTORY / "scripts" / "validate_manifest.py"
 PRIVACY_DATAMAP = ROOT / "plugins" / "privacy-datamap"
 PLUGINS = ROOT / "plugins"
+TEMPLATE_COLLECTOR = ROOT / "scripts" / "templates" / "collect.mjs.tmpl"
 
 
 class Results:
@@ -63,13 +64,34 @@ def run(cmd):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=180, check=False)
 
 
-def scan(tmp, name, files):
-    """Write a throwaway repository, run the real collector over it, return its derived facts."""
-    repo = pathlib.Path(tmp) / name
+def write_files(repo, files):
     for rel, body in files.items():
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
+    return repo
+
+
+def git_repo(repo, files, then=None):
+    """A repository as CI would check it out, plus whatever else the developer keeps in the tree.
+
+    `files` is staged; `then` is written afterwards, so it is untracked without being ignored. No
+    commit is made — `git ls-files` reads the index, so staging is enough and this needs no
+    committer identity, which a CI runner may not have configured.
+    """
+    write_files(repo, files)
+    run(["git", "-C", str(repo), "init", "-q"])
+    run(["git", "-C", str(repo), "add", "-A"])
+    if then:
+        write_files(repo, then)
+    return repo
+
+
+def ai_scan(repo):
+    """Run the ai-inventory collector over a directory that already exists.
+
+    Returns (summary, derived facts, manifest text).
+    """
     result = run(["node", str(COLLECTOR), f"--repo={repo}", "--output=json", "--quiet"])
     if result.returncode != 0:
         raise RuntimeError(f"collector exited {result.returncode}: {result.stderr[:300]}")
@@ -77,7 +99,17 @@ def scan(tmp, name, files):
         (repo / ".noru" / ".cache" / "ai-inventory.derived.json").read_text(encoding="utf-8")
     )
     manifest = repo / ".noru" / "ai-inventory.yml"
-    return derived, (manifest.read_text(encoding="utf-8") if manifest.is_file() else "")
+    return (
+        json.loads(result.stdout),
+        derived,
+        manifest.read_text(encoding="utf-8") if manifest.is_file() else "",
+    )
+
+
+def scan(tmp, name, files):
+    """Write a throwaway repository, run the real collector over it, return its derived facts."""
+    _, derived, manifest = ai_scan(write_files(pathlib.Path(tmp) / name, files))
+    return derived, manifest
 
 
 CHAT_CALL = """\
@@ -86,6 +118,15 @@ const client = new OpenAI()
 export async function chatRoute(question: string) {
   return client.responses.create({ model: "gpt-5-mini", input: question })
 }
+"""
+
+# A second provider, so that a file being left out of the scan shows up as a provider that is not
+# in the inventory rather than as a count nobody can read.
+DRAFT_CALL = """\
+import Anthropic from "@anthropic-ai/sdk"
+const client = new Anthropic()
+export const reply = (question: string) =>
+  client.messages.create({ model: "claude-opus-5", max_tokens: 256, input: question })
 """
 
 
@@ -394,13 +435,12 @@ resource "aws_db_instance" "primary" {{
 """
 
 
-def iac_scan_repo(tmp, name, files, queue=None):
-    """Write a throwaway repository, run the real collector over it, return its derived facts."""
-    repo = pathlib.Path(tmp) / f"iac-{name}"
-    for rel, body in files.items():
-        path = repo / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body, encoding="utf-8")
+def iac_scan(repo, queue=None):
+    """Run the iac-scan collector over a directory that already exists.
+
+    Returns (summary, derived facts, manifest text). The queue lands under `.noru/`, which is in
+    SKIP_DIRS, so writing it never changes what the scan enumerates.
+    """
     cache = repo / ".noru" / ".cache"
     cache.mkdir(parents=True, exist_ok=True)
     (cache / "iac-queue.json").write_text(
@@ -409,11 +449,20 @@ def iac_scan_repo(tmp, name, files, queue=None):
     result = run(["node", str(IAC_COLLECTOR), f"--repo={repo}", "--output=json", "--quiet"])
     if result.returncode != 0:
         raise RuntimeError(f"iac-scan collector exited {result.returncode}: {result.stderr[:300]}")
-    derived = json.loads(
-        (cache / "iac-scan.derived.json").read_text(encoding="utf-8")
-    )
+    derived = json.loads((cache / "iac-scan.derived.json").read_text(encoding="utf-8"))
     manifest = repo / ".noru" / "iac-scan.yml"
-    return derived, (manifest.read_text(encoding="utf-8") if manifest.is_file() else "")
+    return (
+        json.loads(result.stdout),
+        derived,
+        manifest.read_text(encoding="utf-8") if manifest.is_file() else "",
+    )
+
+
+def iac_scan_repo(tmp, name, files, queue=None):
+    """Write a throwaway repository, run the real collector over it, return its derived facts."""
+    repo = write_files(pathlib.Path(tmp) / f"iac-{name}", files)
+    _, derived, manifest = iac_scan(repo, queue)
+    return derived, manifest
 
 
 def iac_checks(derived, check_id):
@@ -571,6 +620,73 @@ def test_iac_skeleton_never_decides(results, tmp):
         "[iac-scan] the skeleton never invents an owner",
         "owner: TODO@example.com" in manifest,
         manifest[:200],
+    )
+
+
+def test_iac_scans_what_ci_checks_out(results, tmp):
+    """A scan on a working tree and a scan in CI have to describe the same configuration.
+
+    A finding is keyed on the check and the file it fired against, so a gitignored copy of the
+    repository — a worktree, a scratch checkout, an unpacked archive — does not merely double a
+    count. It opens a *distinct* finding against a resource at a path that is not in the
+    repository, which this piece then pushes to Noru, and which nobody can fix by editing anything:
+    the file it cites is on one machine only. CI scans an `actions/checkout`, so the two scans
+    disagree permanently and the committed manifest can match one of them or the other.
+    """
+    tracked = {".gitignore": "worktrees/\n", "infra/db.tf": TF_WITH_LITERAL}
+    repo = git_repo(
+        pathlib.Path(tmp) / "iac-worktree",
+        {**tracked, "worktrees/agent-1/infra/db.tf": TF_WITH_LITERAL},
+        # Untracked and not ignored: CI cannot see it either, so scanning it would put the same
+        # disagreement back in a smaller form. Stage it and it is scanned.
+        then={"infra/draft.tf": TF_WITH_LITERAL},
+    )
+    summary, derived, _ = iac_scan(repo)
+
+    refs = sorted(f["ref"] for f in derived["findings"])
+    results.check(
+        "[iac-scan] a gitignored copy of the configuration opens no second finding",
+        refs == ["infra/db.tf:4"],
+        refs,
+    )
+    results.check(
+        "[iac-scan] and configuration that has not been staged yet is not scanned",
+        sorted(f["file"] for f in derived["configuration_files"]) == ["infra/db.tf"],
+        [f["file"] for f in derived["configuration_files"]],
+    )
+    results.check(
+        "[iac-scan] the derived facts record that the file list came from git",
+        derived["coverage"].get("enumerated_by") == "git",
+        derived["coverage"].get("enumerated_by"),
+    )
+    results.check(
+        "[iac-scan] and the scan summary reports it too, where a reader will meet it",
+        summary.get("enumerated_by") == "git",
+        summary.get("enumerated_by"),
+    )
+
+    # The same commit as CI sees it: tracked files, no .git directory. Identical digest, or the
+    # drift gate is comparing two different repositories and reporting the difference as a
+    # configuration change that nobody can make go away.
+    checkout = write_files(pathlib.Path(tmp) / "iac-ci-checkout", tracked)
+    ci_summary, ci_derived, _ = iac_scan(checkout)
+    results.check(
+        "[iac-scan] a working tree and a checkout of the same files agree on the digest",
+        ci_summary["derived_digest"] == summary["derived_digest"],
+        f"{summary['derived_digest'][:12]} vs {ci_summary['derived_digest'][:12]}",
+    )
+    # With no git to ask, reading the disk is the honest fallback — an exported tarball is a
+    # legitimate thing to scan. It is a different question though, so it is reported, not assumed.
+    results.check(
+        "[iac-scan] a directory that is not a work tree falls back to reading the disk",
+        ci_derived["coverage"].get("enumerated_by") == "walk"
+        and [f["ref"] for f in ci_derived["findings"]] == ["infra/db.tf:4"],
+        ci_derived["coverage"].get("enumerated_by"),
+    )
+    results.check(
+        "[iac-scan] enumerated_by is outside the digest, so it can never read as drift",
+        derived["coverage"]["enumerated_by"] != ci_derived["coverage"]["enumerated_by"],
+        "the two scans enumerated the same way, so this test asserted nothing",
     )
 
 
@@ -861,14 +977,6 @@ def test_audit_pack_every_conclusion_has_an_assurance_horizon(results):
 # the gap gets reviewed and the wrong answer gets signed.
 
 
-def write_files(repo, files):
-    for rel, body in files.items():
-        path = repo / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body, encoding="utf-8")
-    return repo
-
-
 def datamap_scan(repo):
     """Run the collector over a directory that already exists. Returns (summary, derived facts)."""
     collector = PRIVACY_DATAMAP / "scripts" / "collect.mjs"
@@ -903,6 +1011,83 @@ SQL_FIXTURE = """CREATE TABLE accounts (
     CONSTRAINT accounts_email_lower CHECK (email = lower(email))
 );
 """
+
+
+def test_ai_inventory_scans_what_ci_checks_out(results, tmp):
+    """A scan on a working tree and a scan in CI have to describe the same repository.
+
+    The same defect privacy-datamap had, and it lands harder here. CI scans an `actions/checkout` —
+    tracked files, and nothing else. A developer scans a working tree, which may also hold
+    worktrees, scratch checkouts and unpacked archives, each a full copy of the repository as far as
+    a directory walk can tell. Every such copy contributes a provider ref, a model id and an
+    Article 50 trigger site cited to a path that is not in the repository, so the inventory names
+    call sites nobody can open — and the drift between the two scans is then unresolvable, because
+    the committed manifest can match one environment or the other and never both.
+    """
+    # `.gitignore` is tracked, so it belongs in both repositories — a file present on one side only
+    # would make the digest comparison below pass or fail for the wrong reason.
+    tracked = {".gitignore": "worktrees/\n", "src/chat.ts": CHAT_CALL}
+    repo = git_repo(
+        pathlib.Path(tmp) / "ai-worktree",
+        {**tracked, "worktrees/agent-1/src/chat.ts": CHAT_CALL},
+        # Untracked and not ignored: the one case where leaving out a file the developer can see is
+        # the right answer, because CI cannot see it either. Stage it and it is in the inventory.
+        then={"src/draft.ts": DRAFT_CALL},
+    )
+    summary, derived, _ = ai_scan(repo)
+
+    refs = sorted(
+        ref
+        for group in ("providers", "frameworks", "models", "vector_stores")
+        for row in derived[group]
+        for ref in row["refs"]
+    )
+    results.check(
+        "[ai-inventory] a gitignored copy of the repository contributes no call site",
+        not any(ref.startswith("worktrees/") for ref in refs),
+        refs,
+    )
+    results.check(
+        "[ai-inventory] and a model call that has not been staged yet is not inventoried",
+        [p["key"] for p in derived["providers"]] == ["openai"],
+        [p["key"] for p in derived["providers"]],
+    )
+    results.check(
+        "[ai-inventory] the derived facts record that the file list came from git",
+        derived["coverage"].get("enumerated_by") == "git",
+        derived["coverage"].get("enumerated_by"),
+    )
+    results.check(
+        "[ai-inventory] and the scan summary reports it too, where a reader will meet it",
+        summary.get("enumerated_by") == "git",
+        summary.get("enumerated_by"),
+    )
+
+    # The same commit as CI sees it: tracked files, no .git directory. Identical digest, or the
+    # drift gate is comparing two different repositories and reporting the difference as a change
+    # to the AI estate that nobody can make go away.
+    checkout = write_files(pathlib.Path(tmp) / "ai-ci-checkout", tracked)
+    ci_summary, ci_derived, _ = ai_scan(checkout)
+    results.check(
+        "[ai-inventory] a working tree and a checkout of the same files agree on the digest",
+        ci_summary["derived_digest"] == summary["derived_digest"],
+        f"{summary['derived_digest'][:12]} vs {ci_summary['derived_digest'][:12]}",
+    )
+    # With no git to ask, reading the disk is the honest fallback — an exported tarball is a
+    # legitimate thing to scan. It is a different question though, so it is reported, not assumed.
+    results.check(
+        "[ai-inventory] a directory that is not a work tree falls back to reading the disk",
+        ci_derived["coverage"].get("enumerated_by") == "walk"
+        and [p["key"] for p in ci_derived["providers"]] == ["openai"],
+        ci_derived["coverage"].get("enumerated_by"),
+    )
+    # The point of putting it under `coverage`: how the files were found is not a fact about the
+    # repository, so the two answers above must not be a difference the drift gate can see.
+    results.check(
+        "[ai-inventory] enumerated_by is outside the digest, so it can never read as drift",
+        derived["coverage"]["enumerated_by"] != ci_derived["coverage"]["enumerated_by"],
+        "the two scans enumerated the same way, so this test asserted nothing",
+    )
 
 
 def test_datamap_reads_every_declared_format(results, tmp):
@@ -1351,6 +1536,99 @@ def test_digest_ignores_the_collectors_own_version(results, tmp):
 
 
 
+def test_scaffold_template_scans_what_ci_checks_out(results, tmp):
+    """The collector every new piece is stamped from must not hand it this defect again.
+
+    Three pieces walked the working tree behind a fixed denylist, and all three got it from
+    `scripts/templates/collect.mjs.tmpl`. Fixing the three without fixing the template fixes
+    nothing: the fourth piece scaffolded from it starts with the same disagreement between a
+    developer's scan and CI's, and nothing in the contract test would notice.
+
+    A template is not importable, so the only honest way to assert what a scaffolded piece does is
+    to stamp one the way scaffold-piece.mjs does and run it.
+    """
+    # .resolve(): every collector here guards main() on `import.meta.url === file://argv[1]`, and
+    # the platform temporary directory is a symlink on macOS. An unresolved path makes the guard
+    # false, main() never runs, and the collector exits 0 having done nothing — which would read as
+    # a passing scan rather than as the setup mistake it is.
+    collector = pathlib.Path(tmp).resolve() / "stamped-collect.mjs"
+    collector.write_text(
+        TEMPLATE_COLLECTOR.read_text(encoding="utf-8").replace("__PIECE__", "stamped"),
+        encoding="utf-8",
+    )
+
+    def stamped_scan(repo):
+        result = run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"stamped collector exited {result.returncode}: {result.stderr[:300]}"
+            )
+        derived = json.loads(
+            (repo / ".noru" / ".cache" / "stamped.derived.json").read_text(encoding="utf-8")
+        )
+        return json.loads(result.stdout), derived
+
+    tracked = {".gitignore": "worktrees/\n", "src/app.ts": "export const x = 1\n"}
+    repo = git_repo(
+        pathlib.Path(tmp) / "stamped-worktree",
+        {**tracked, "worktrees/agent-1/src/app.ts": "export const x = 1\n"},
+        then={"src/draft.ts": "export const y = 2\n"},
+    )
+    summary, derived = stamped_scan(repo)
+    results.check(
+        "[scaffold template] a scaffolded collector counts the tracked files, not the working tree",
+        derived["files_scanned"] == len(tracked)
+        and derived["coverage"].get("enumerated_by") == "git",
+        f"{derived['files_scanned']} file(s), "
+        f"enumerated_by={derived['coverage'].get('enumerated_by')}",
+    )
+
+    checkout = write_files(pathlib.Path(tmp) / "stamped-ci-checkout", tracked)
+    ci_summary, ci_derived = stamped_scan(checkout)
+    results.check(
+        "[scaffold template] a working tree and a checkout of the same files agree on the digest",
+        ci_summary["derived_digest"] == summary["derived_digest"],
+        f"{summary['derived_digest'][:12]} vs {ci_summary['derived_digest'][:12]}",
+    )
+    results.check(
+        "[scaffold template] a directory that is not a work tree falls back to reading the disk",
+        ci_derived["coverage"].get("enumerated_by") == "walk",
+        ci_derived["coverage"].get("enumerated_by"),
+    )
+
+    # test_digest_ignores_the_collectors_own_version asserts this for every *plugin*, and cannot
+    # reach a template. The template stamped both `generated_by` and `coverage` into the hash, so a
+    # piece scaffolded from it would have failed that test on the day it was added — and reported
+    # drift in every repository that had already run :scan, on nothing but a version bump.
+    probe = pathlib.Path(tmp) / "stamped-digest-probe.mjs"
+    probe.write_text(
+        "import { digestOf } from %r;\n"
+        "const facts = { piece: 'x', generated_by: 'x@0.1.0', findings: [1, 2] };\n"
+        "console.log(JSON.stringify({\n"
+        "  version: digestOf(facts) === digestOf({ ...facts, generated_by: 'x@9.9.9' }),\n"
+        "  absent: digestOf(facts) === digestOf({ piece: 'x', findings: [1, 2] }),\n"
+        "  coverage:\n"
+        "    digestOf(facts) === digestOf({ ...facts, coverage: { enumerated_by: 'walk' } }),\n"
+        "}));\n" % str(collector),
+        encoding="utf-8",
+    )
+    result = run(["node", str(probe)])
+    if results.check(
+        "[scaffold template] digestOf is callable", result.returncode == 0, result.stderr[:200]
+    ):
+        out = json.loads(result.stdout)
+        results.check(
+            "[scaffold template] the digest ignores the collector's own version",
+            out["version"] and out["absent"],
+            out,
+        )
+        results.check(
+            "[scaffold template] and it ignores how the file list was enumerated",
+            out["coverage"],
+            out,
+        )
+
+
 def test_change_control_rules_agree_across_languages(results, tmp):
     """The segregation rules are implemented twice, and two implementations of one rule drift.
 
@@ -1638,6 +1916,7 @@ def main(argv):
             test_emotion_recognition_is_biometric(results, tmp)
             test_art5_screen(results, tmp)
             test_skeleton_never_asserts(results, tmp)
+            test_ai_inventory_scans_what_ci_checks_out(results, tmp)
             test_datamap_reads_every_declared_format(results, tmp)
             test_datamap_scans_what_ci_checks_out(results, tmp)
             test_datamap_reports_the_schema_it_cannot_read(results, tmp)
@@ -1649,6 +1928,7 @@ def main(argv):
             test_datamap_digest_agrees_across_languages(results, tmp)
             test_datamap_render_is_gated_and_matches_the_push(results, tmp)
             test_digest_ignores_the_collectors_own_version(results, tmp)
+            test_scaffold_template_scans_what_ci_checks_out(results, tmp)
             test_change_control_rules_agree_across_languages(results, tmp)
             test_change_control_export_survives_a_forbidden_setting(results, tmp)
             test_iac_never_copies_the_line(results, tmp)
@@ -1657,6 +1937,7 @@ def main(argv):
             test_iac_classification(results, tmp)
             test_iac_reports_what_stopped_reproducing(results, tmp)
             test_iac_skeleton_never_decides(results, tmp)
+            test_iac_scans_what_ci_checks_out(results, tmp)
             test_audit_pack_sample_is_redrawable(results, tmp)
             test_audit_pack_gap_analysis(results, tmp)
             test_audit_pack_assembles_upstream_manifests(results, tmp)

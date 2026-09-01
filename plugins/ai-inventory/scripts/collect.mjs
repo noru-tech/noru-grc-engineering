@@ -18,13 +18,19 @@
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync,
+} from "node:fs";
 import { join, relative, sep, basename } from "node:path";
 
 export const PIECE = "ai-inventory";
 export const VERSION = "0.4.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
+// Directories that are in the repository but are not the repository: a checked-in vendor/ or dist/
+// holds a dependency's model calls or a build's output, not anything this codebase decided to run.
+// This is a second filter on top of git's answer below, not the primary one — a denylist can only
+// ever name the directories its author has already seen.
 const SKIP_DIRS = new Set([
   ".git", "node_modules", "dist", "build", "out", ".next", ".turbo", ".cache", "coverage",
   "vendor", "target", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache",
@@ -277,6 +283,86 @@ function parseArgs(argv) {
   return opts;
 }
 
+// --------------------------------------------------------------------------------------------- //
+// Which files are in scope. git decides, wherever there is a git to ask.
+//
+// `:diff` and CI mode both compare a committed manifest against a fresh scan, and CI scans an
+// `actions/checkout` — tracked files, and nothing else. A developer scans a working tree, which
+// holds whatever else they keep in it: scratch checkouts, worktrees, unpacked archives, generated
+// fixtures. Walking the working tree therefore produces drift nobody can resolve, because the
+// manifest can match one of those two environments or the other and never both — and here every
+// extra file is a provider, a model id or an Article 50 trigger site attributed to a path that is
+// not in the repository at all.
+//
+// `git ls-files` is the set CI checks out, and it honours .gitignore, .git/info/exclude and the
+// user's global excludesfile without this collector reimplementing any of them. It also settles
+// two questions a denylist leaves open, and both answers are deliberate:
+//
+//   * a tracked file that some ignore rule also matches is IN SCOPE. It is in the checkout, so it
+//     belongs in the inventory — what git tracks is the definition here, not what git would ignore.
+//   * a sparse checkout lists index entries that are not on disk. Those are dropped below, with
+//     symlinks and submodule gitlinks, because a file this collector cannot open is not a file it
+//     can describe.
+const BY_PATH = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+function isSkipped(rel) {
+  const parts = rel.split("/");
+  // The basename is never a directory, so it is never a skip: `dist` as a filename stays in scope.
+  for (let i = 0; i < parts.length - 1; i += 1) if (SKIP_DIRS.has(parts[i])) return true;
+  return false;
+}
+
+// The name half of "is this worth reading", shared by both enumerations below. Two file lists that
+// applied different extension rules would answer different questions, which is the disagreement
+// this pair exists to remove rather than to relocate.
+function isScannableName(name) {
+  const dot = name.lastIndexOf(".");
+  const ext = dot === -1 ? "" : name.slice(dot);
+  return CODE_EXT.has(ext) || name.startsWith(".env");
+}
+
+function trackedFiles(repo) {
+  let raw;
+  try {
+    raw = execFileSync("git", ["-C", repo, "ls-files", "-z"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      // The default is 1 MiB. A file *list* passes that on a large repository without being large
+      // in any other sense, and the throw would land in the catch below — silently downgrading
+      // exactly the repositories this matters most on. -z also turns off path quoting, so a
+      // non-ASCII filename arrives as itself rather than as an escape.
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    return null;
+  }
+  const paths = raw.split("\0").filter((rel) => rel !== "");
+  // An empty list is not the same answer as no answer, and the two have to be separated *here*,
+  // before the filters below. A directory inside a work tree but not tracked by it — an unpacked
+  // archive, a scratch copy, a repository whose first commit has not happened yet — gets an empty,
+  // successful `ls-files`, and must fall back to the disk rather than scan nothing at all. A
+  // repository that tracks files of which none are code has still had its scope answered by git,
+  // and reading the disk there would put the ignored directories straight back into the scan.
+  if (paths.length === 0) return null;
+  // A Set because an unmerged path is listed once per conflict stage.
+  const out = new Set();
+  for (const rel of paths) {
+    if (isSkipped(rel)) continue;
+    if (!isScannableName(rel.slice(rel.lastIndexOf("/") + 1))) continue;
+    let stat;
+    try {
+      stat = lstatSync(join(repo, rel));
+    } catch {
+      continue;
+    }
+    // lstat does not follow, so isFile() is already false for a symlink — excluded here for the
+    // same reason walk() excludes one: its target is either in the list already or outside the
+    // repository, and neither is a file worth reading twice.
+    if (stat.isFile() && stat.size <= MAX_FILE_BYTES) out.add(rel);
+  }
+  return [...out].sort(BY_PATH);
+}
+
 function walk(root) {
   const out = [];
   const stack = [root];
@@ -295,9 +381,7 @@ function walk(root) {
         if (SKIP_DIRS.has(entry.name)) continue;
         stack.push(full);
       } else if (entry.isFile()) {
-        const dot = entry.name.lastIndexOf(".");
-        const ext = dot === -1 ? "" : entry.name.slice(dot);
-        if (!CODE_EXT.has(ext) && !entry.name.startsWith(".env")) continue;
+        if (!isScannableName(entry.name)) continue;
         let size = 0;
         try {
           size = statSync(full).size;
@@ -310,9 +394,18 @@ function walk(root) {
     }
   }
   // Sort by repo-relative POSIX path so the result never depends on directory iteration order.
-  return out
-    .map((f) => relative(root, f).split(sep).join("/"))
-    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return out.map((f) => relative(root, f).split(sep).join("/")).sort(BY_PATH);
+}
+
+/**
+ * The files to read, and how they were chosen — the second half being the part that has to be
+ * reported. A scan of an exported tarball and a scan of a checkout are both legitimate and they do
+ * not see the same repository, so which one happened is a fact about the inventory.
+ */
+export function listFiles(repo) {
+  const tracked = trackedFiles(repo);
+  if (tracked) return { files: tracked, enumeratedBy: "git" };
+  return { files: walk(repo), enumeratedBy: "walk" };
 }
 
 function gitValue(repo, args, fallback) {
@@ -485,7 +578,7 @@ export function pairDisclosures(triggerHits, disclosureHits) {
 }
 
 export function scanRepository(repo) {
-  const files = walk(repo);
+  const { files, enumeratedBy } = listFiles(repo);
   const providers = new Map();
   const frameworks = new Map();
   const vectorStores = new Map();
@@ -631,6 +724,13 @@ export function scanRepository(repo) {
   return {
     piece: PIECE,
     generated_by: GENERATED_BY,
+    // Which files this scan could even see. A `walk` means the file list is whatever is on disk
+    // rather than whatever is committed, so a scan here and a scan in CI can legitimately
+    // disagree — and a reader comparing two inventories needs to know that before blaming one.
+    //
+    // It sits under `coverage` so it is out of the digest: the same file set enumerated two
+    // different ways is the same repository, and must not read as drift.
+    coverage: { enumerated_by: enumeratedBy },
     files_scanned: files.length,
     providers: byKey(providers),
     frameworks: byKey(frameworks),
@@ -660,8 +760,13 @@ export function digestOf(derived) {
   // Hashing it made a plugin upgrade indistinguishable from a schema change: every committed
   // manifest reported drift on the next run and CI mode failed with exit 3, for repositories where
   // nothing had moved. It stays in the derived file, and in the manifest, as provenance.
-  const { generated_by, ...facts } = derived;
+  //
+  // `coverage` is excluded for the same reason and a sharper one: the manifest does not record it,
+  // so an export and a checkout of one commit — the same repository, enumerated two ways — would
+  // produce a drift that re-running :scan could never clear.
+  const { generated_by, coverage, ...facts } = derived;
   void generated_by;
+  void coverage;
   return createHash("sha256").update(JSON.stringify(facts, null, 0)).digest("hex");
 }
 
@@ -966,6 +1071,7 @@ function main(argv) {
     derived_facts: relative(opts.repo, derivedPath).split(sep).join("/"),
     derived_digest: digest,
     drift,
+    enumerated_by: derived.coverage.enumerated_by,
     wrote_skeleton: wroteSkeleton,
     provenance,
     alerts: alertsFor(derived),
@@ -990,7 +1096,10 @@ function main(argv) {
     process.stdout.write(
       [
         ...renderAlerts(summary.alerts),
-        `scanned ${derived.files_scanned} file(s) in ${opts.repo}`,
+        derived.coverage.enumerated_by === "git"
+          ? `scanned ${derived.files_scanned} tracked file(s) in ${opts.repo}`
+          : `scanned ${derived.files_scanned} file(s) in ${opts.repo} — no tracked file list here, ` +
+            "so everything on disk was read and a scan in CI may not agree",
         `providers:      ${derived.providers.map((p) => p.key).join(", ") || "(none)"}`,
         `frameworks:     ${derived.frameworks.map((f) => f.key).join(", ") || "(none)"}`,
         `vector stores:  ${derived.vector_stores.map((v) => v.key).join(", ") || "(none)"}`,

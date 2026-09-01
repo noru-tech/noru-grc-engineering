@@ -12,13 +12,19 @@
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync,
+} from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 
 export const PIECE = "__PIECE__";
 export const VERSION = "0.1.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
+// Directories that are in the repository but are not the repository: a checked-in vendor/ or dist/
+// describes a dependency or a build's output, not anything this codebase decided. This is a second
+// filter on top of git's answer below, not the primary one — a denylist can only ever name the
+// directories its author has already seen.
 const SKIP_DIRS = new Set([
   ".git", "node_modules", "dist", "build", "out", ".next", ".turbo", "coverage",
   "vendor", "target", ".venv", "venv", "__pycache__", ".noru",
@@ -38,6 +44,74 @@ function parseArgs(argv) {
     else return { error: `unknown option '${arg}'` };
   }
   return opts;
+}
+
+// --------------------------------------------------------------------------------------------- //
+// Which files are in scope. git decides, wherever there is a git to ask. Leave this alone: it is
+// not piece-specific, and every piece that reimplemented it got the same defect.
+//
+// `:diff` and CI mode both compare a committed manifest against a fresh scan, and CI scans an
+// `actions/checkout` — tracked files, and nothing else. A developer scans a working tree, which
+// holds whatever else they keep in it: scratch checkouts, worktrees, unpacked archives, generated
+// fixtures. Walking the working tree therefore produces drift nobody can resolve, because the
+// manifest can match one of those two environments or the other and never both — and every extra
+// fact it records is cited to a path that is not in the repository at all.
+//
+// `git ls-files` is the set CI checks out, and it honours .gitignore, .git/info/exclude and the
+// user's global excludesfile without this collector reimplementing any of them. It also settles
+// two questions a denylist leaves open, and both answers are deliberate:
+//
+//   * a tracked file that some ignore rule also matches is IN SCOPE. It is in the checkout, so it
+//     belongs in the scan — what git tracks is the definition here, not what git would ignore.
+//   * a sparse checkout lists index entries that are not on disk. Those are dropped below, with
+//     symlinks and submodule gitlinks, because a file this collector cannot open is not a file it
+//     can cite.
+const BY_PATH = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+function isSkipped(rel) {
+  const parts = rel.split("/");
+  // The basename is never a directory, so it is never a skip: `dist` as a filename stays in scope.
+  for (let i = 0; i < parts.length - 1; i += 1) if (SKIP_DIRS.has(parts[i])) return true;
+  return false;
+}
+
+function trackedFiles(repo) {
+  let raw;
+  try {
+    raw = execFileSync("git", ["-C", repo, "ls-files", "-z"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      // The default is 1 MiB. A file *list* passes that on a large repository without being large
+      // in any other sense, and the throw would land in the catch below — silently downgrading
+      // exactly the repositories this matters most on. -z also turns off path quoting, so a
+      // non-ASCII filename arrives as itself rather than as an escape.
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    return null;
+  }
+  const paths = raw.split("\0").filter((rel) => rel !== "");
+  // An empty list is not the same answer as no answer. A directory inside a work tree but not
+  // tracked by it — an unpacked archive, a scratch copy, a repository whose first commit has not
+  // happened yet — gets an empty, *successful* `ls-files`, and scanning nothing at all is the one
+  // result this collector must never produce quietly.
+  if (paths.length === 0) return null;
+  // A Set because an unmerged path is listed once per conflict stage.
+  const out = new Set();
+  for (const rel of paths) {
+    if (isSkipped(rel)) continue;
+    let stat;
+    try {
+      stat = lstatSync(join(repo, rel));
+    } catch {
+      continue;
+    }
+    // lstat does not follow, so isFile() is already false for a symlink — excluded here for the
+    // same reason walk() excludes one: its target is either in the list already or outside the
+    // repository, and neither is a file worth reading twice.
+    if (stat.isFile()) out.add(rel);
+  }
+  return [...out].sort(BY_PATH);
 }
 
 function walk(root) {
@@ -62,7 +136,18 @@ function walk(root) {
     }
   }
   // Sorted, so the result never depends on directory iteration order. Do not remove.
-  return out.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return out.sort(BY_PATH);
+}
+
+/**
+ * The files to read, and how they were chosen — the second half being the part that has to be
+ * reported. A scan of an exported tarball and a scan of a checkout are both legitimate and they do
+ * not see the same repository, so which one happened is a fact about the result.
+ */
+export function listFiles(repo) {
+  const tracked = trackedFiles(repo);
+  if (tracked) return { files: tracked, enumeratedBy: "git" };
+  return { files: walk(repo), enumeratedBy: "walk" };
 }
 
 function gitValue(repo, args, fallback) {
@@ -93,10 +178,17 @@ export function repoProvenance(repo) {
 
 // TODO: this is the piece. Everything above and below is plumbing.
 export function collectFacts(repo) {
-  const files = walk(repo);
+  const { files, enumeratedBy } = listFiles(repo);
   return {
     piece: PIECE,
     generated_by: GENERATED_BY,
+    // Which files this scan could even see. A `walk` means the file list is whatever is on disk
+    // rather than whatever is committed, so a scan here and a scan in CI can legitimately
+    // disagree — and a reader comparing two manifests needs to know that before blaming one.
+    //
+    // It sits under `coverage` so it is out of the digest: the same file set enumerated two
+    // different ways is the same repository, and must not read as drift.
+    coverage: { enumerated_by: enumeratedBy },
     files_scanned: files.length,
     // TODO: replace with the facts this piece can stand behind, each carrying file:line.
     findings: [],
@@ -104,7 +196,22 @@ export function collectFacts(repo) {
 }
 
 export function digestOf(derived) {
-  return createHash("sha256").update(JSON.stringify(derived, null, 0)).digest("hex");
+  // This digest answers one question — has the repository changed since the manifest was written?
+  // Two things that are not part of that question are excluded, and both exclusions are load-
+  // bearing rather than tidiness.
+  //
+  // `generated_by` is the version of the tool that read the repository, not a fact about it.
+  // Hashing it makes a plugin upgrade indistinguishable from a change: every committed manifest
+  // reports drift on the next run and CI mode fails with exit 3, in repositories where nothing has
+  // moved. It stays in the derived file, and in the manifest, as provenance.
+  //
+  // `coverage` says how the file list was arrived at, not what was in it. The same files
+  // enumerated two ways are the same repository, so an export and a checkout of one commit must
+  // not read as drift.
+  const { generated_by, coverage, ...facts } = derived;
+  void generated_by;
+  void coverage;
+  return createHash("sha256").update(JSON.stringify(facts, null, 0)).digest("hex");
 }
 
 const PLAIN_SAFE = /^[A-Za-z0-9_][A-Za-z0-9 _./@-]*$/;
@@ -225,6 +332,7 @@ function main(argv) {
     derived_facts: relative(opts.repo, derivedPath).split(sep).join("/"),
     derived_digest: digest,
     drift,
+    enumerated_by: derived.coverage.enumerated_by,
     wrote_skeleton: wroteSkeleton,
     provenance,
     counts: { files_scanned: derived.files_scanned, findings: derived.findings.length },
@@ -235,7 +343,10 @@ function main(argv) {
   } else if (!opts.quiet) {
     process.stdout.write(
       [
-        `scanned ${derived.files_scanned} file(s) in ${opts.repo}`,
+        derived.coverage.enumerated_by === "git"
+          ? `scanned ${derived.files_scanned} tracked file(s) in ${opts.repo}`
+          : `scanned ${derived.files_scanned} file(s) in ${opts.repo} — no tracked file list here, ` +
+            "so everything on disk was read and a scan in CI may not agree",
         `findings: ${derived.findings.length}`,
         `derived facts: ${summary.derived_facts}`,
         wroteSkeleton ? `wrote skeleton: ${summary.manifest}` : "",
