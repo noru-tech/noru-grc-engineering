@@ -22,9 +22,10 @@
 | Protobuf | `*.proto` | `message` → collection, each numbered field |
 | GraphQL SDL | `*.graphql`, `*.gql`, `*.graphqls` | `type` and `input` → collection, each field |
 
-**Not read yet**: OpenAPI and JSON Schema, TypeORM and Sequelize entities, Mongoose schemas,
-ActiveRecord, Ecto, GORM structs, and TypeScript or Zod DTOs. A repository whose schema lives only in
-one of those produces an empty data map, which is not the same as having no personal data in it.
+**Not read yet**: OpenAPI and JSON Schema, TypeORM and Sequelize entities, Drizzle tables, Mongoose
+schemas, ActiveRecord, Ecto, GORM structs, and TypeScript or Zod DTOs. A repository whose schema
+lives only in one of those produces an empty data map, which is not the same as having no personal
+data in it.
 
 That used to be a sentence in this README that you had to remember to read. It is now a check. The
 collector looks for the marker that says "a schema is defined here" in each of those formats and
@@ -49,6 +50,31 @@ real, which is why they stay on the list.
 The marker is a deterministic text match, never an attempt to read the schema — the honest output is
 "there is one here and I cannot see inside it". A shape nobody has written a marker for is still
 invisible, so this table is still the thing to read before trusting a small result.
+
+## What it scans
+
+**Tracked files, wherever there is a git to ask** — `git ls-files`, which is the same set
+`actions/checkout` gives CI, and which honours `.gitignore`, `.git/info/exclude` and your global
+excludes file without this collector reimplementing any of them. That is what makes a scan on your
+machine and a scan in CI the same question: a working tree usually holds more than the repository
+does — worktrees, scratch checkouts, unpacked archives — and each of those is a full copy of the
+schema as far as a directory walk can tell. Mapping them produces datasets keyed off paths that are
+not in the repository, and drift no one can resolve, because the committed manifest can match one
+environment or the other and never both.
+
+Three consequences worth knowing. A **tracked** file that an ignore rule also matches is still in
+scope — it is in the checkout, so it is in the map. An index entry that is not on disk (a sparse
+checkout, a pending deletion) is not, because a file the collector cannot open is not one it can
+describe. And a schema file you have written but not yet `git add`ed is not in the map either: it
+is not in the checkout, so mapping it would put back the same disagreement in a smaller form. Stage
+it and scan again. Vendored and build directories (`vendor/`, `dist/`, `node_modules/`, …) stay
+excluded even when committed: those hold a dependency's schemas, not yours.
+
+Scanning something that is **not** a work tree — an exported tarball, a directory with no `.git` —
+is a legitimate thing to do, and there the collector reads what is on disk instead. That is a
+different question, so it says which one it answered: `coverage.enumerated_by` in the derived facts
+is `git` or `walk`, and the scan summary says so in words. Same files either way means the same
+`derived_digest`, so an export and a checkout of one commit do not read as drift.
 
 ## Structure is derived, meaning is judged
 

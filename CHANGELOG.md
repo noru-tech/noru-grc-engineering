@@ -6,6 +6,43 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Fixed
+
+**`privacy-datamap` scans the files git tracks, not the files on disk.** The collector walked the
+working tree behind a fixed list of directory names, so anything a project ignores for its own
+reasons — worktrees, scratch checkouts, unpacked archives, generated fixtures — was mapped as
+though it were source. CI scans an `actions/checkout` and a developer scans a working tree, so the
+two disagreed permanently: the committed manifest could match one environment or the other and
+never both, and every extra dataset was keyed off a path that is not in the repository at all. The
+file list now comes from `git ls-files`, which is the set CI checks out and which honours
+`.gitignore`, `.git/info/exclude` and the user's global excludes without this collector
+reimplementing any of them. A tracked file that an ignore rule also matches stays in scope; an
+index entry that is not on disk (a sparse checkout, a pending deletion) does not, and neither does
+a schema file that has been written but not yet staged — it is not in the checkout either, and
+mapping it would put the same disagreement back in a smaller form. `vendor/`, `dist/` and the rest
+of the built-in list stay excluded even when committed.
+
+Scanning a directory that is not a work tree still reads the disk, because an exported tarball is a
+legitimate thing to scan — but the scan now says which of the two questions it answered, in the
+summary and as `coverage.enumerated_by` in the derived facts. It is deliberately outside
+`derived_digest`: the same files enumerated two ways are the same repository, so an export and a
+checkout of one commit do not read as drift.
+
+**A Drizzle schema was invisible and unreported.** There is no Drizzle parser — the README is
+honest about the five formats that are read — but there was no *marker* either, so the coverage
+check that exists to catch exactly this reported nothing and the build stayed green. A repository
+whose records are defined in `pgTable(...)` produced an empty data map, and an empty data map and a
+repository with no personal data in it are the same file. `pgTable(`, `mysqlTable(` and
+`sqliteTable(` now raise a coverage candidate, which is exit `6` where nothing else parsed.
+
+### Upgrading
+
+**Re-run `:scan` on any repository whose working tree holds ignored copies of its own schema.** The
+file list changed, so `derived_digest` changes with it and the committed manifest reports drift
+once. What comes back is smaller and describes the repository rather than the machine it was
+scanned on. **A build that passed before can now fail with exit `6`** on a repository whose only
+schema is Drizzle: that map was empty before and is now reported as the blind spot it always was.
+
 ## 0.4.0 — 2026-08-30
 
 A ninth piece, a policy gate, and the first release in which this repository runs its own gates.

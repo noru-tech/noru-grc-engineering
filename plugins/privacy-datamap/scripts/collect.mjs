@@ -10,7 +10,9 @@
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync,
+} from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,6 +30,10 @@ const TABLE = JSON.parse(
 // reading it would cost more than it could ever tell us.
 const MAX_BYTES = 1_000_000;
 
+// Directories that are in the repository but are not the repository: a checked-in vendor/ or dist/
+// describes a dependency's schema or a build's output, not anything this codebase decided to store.
+// This is a second filter on top of git's answer below, not the primary one — a denylist can only
+// ever name the directories its author has already seen.
 const SKIP_DIRS = new Set([
   ".git", "node_modules", "dist", "build", "out", ".next", ".turbo", "coverage",
   "vendor", "target", ".venv", "venv", "__pycache__", ".noru",
@@ -47,6 +53,67 @@ function parseArgs(argv) {
     else return { error: `unknown option '${arg}'` };
   }
   return opts;
+}
+
+// --------------------------------------------------------------------------------------------- //
+// Which files are in scope. git decides, wherever there is a git to ask.
+//
+// `:diff` and CI mode both compare a committed manifest against a fresh scan, and CI scans an
+// `actions/checkout` — tracked files, and nothing else. A developer scans a working tree, which
+// holds whatever else they keep in it: scratch checkouts, worktrees, unpacked archives, generated
+// fixtures. Walking the working tree therefore produces drift nobody can resolve, because the
+// manifest can match one of those two environments or the other and never both — and every extra
+// dataset it adds is keyed off a path that is not in the repository at all.
+//
+// `git ls-files` is the set CI checks out, and it honours .gitignore, .git/info/exclude and the
+// user's global excludesfile without this collector reimplementing any of them. It also settles
+// two questions a denylist leaves open, and both answers are deliberate:
+//
+//   * a tracked file that some ignore rule also matches is IN SCOPE. It is in the checkout, so it
+//     belongs in the map — what git tracks is the definition here, not what git would ignore.
+//   * a sparse checkout lists index entries that are not on disk. Those are dropped below, with
+//     symlinks and submodule gitlinks, because a file this collector cannot open is not a file it
+//     can describe.
+const BY_PATH = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+function isSkipped(rel) {
+  const parts = rel.split("/");
+  // The basename is never a directory, so it is never a skip: `dist` as a filename stays in scope.
+  for (let i = 0; i < parts.length - 1; i += 1) if (SKIP_DIRS.has(parts[i])) return true;
+  return false;
+}
+
+function trackedFiles(repo) {
+  let raw;
+  try {
+    raw = execFileSync("git", ["-C", repo, "ls-files", "-z"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      // The default is 1 MiB. A file *list* passes that on a large repository without being large
+      // in any other sense, and the throw would land in the catch below — silently downgrading
+      // exactly the repositories this matters most on. -z also turns off path quoting, so a
+      // non-ASCII filename arrives as itself rather than as an escape.
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    return null;
+  }
+  // A Set because an unmerged path is listed once per conflict stage.
+  const out = new Set();
+  for (const rel of raw.split("\0")) {
+    if (rel === "" || isSkipped(rel)) continue;
+    let stat;
+    try {
+      stat = lstatSync(join(repo, rel));
+    } catch {
+      continue;
+    }
+    // lstat does not follow, so isFile() is already false for a symlink — excluded here for the
+    // same reason walk() excludes one: its target is either in the list already or outside the
+    // repository, and neither is a file worth mapping twice.
+    if (stat.isFile()) out.add(rel);
+  }
+  return [...out].sort(BY_PATH);
 }
 
 function walk(root) {
@@ -71,7 +138,22 @@ function walk(root) {
     }
   }
   // Sorted, so the result never depends on directory iteration order. Do not remove.
-  return out.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return out.sort(BY_PATH);
+}
+
+/**
+ * The files to read, and how they were chosen — the second half being the part that has to be
+ * reported. A scan of an exported tarball and a scan of a checkout are both legitimate and they do
+ * not see the same repository, so which one happened is a fact about the map.
+ */
+export function listFiles(repo) {
+  const tracked = trackedFiles(repo);
+  // An empty list is not the same answer as no answer. A directory inside a work tree but not
+  // tracked by it — an unpacked archive, a scratch copy, a repository whose first commit has not
+  // happened yet — gets an empty, *successful* `ls-files`, and scanning nothing at all is the one
+  // result this collector must never produce quietly.
+  if (tracked && tracked.length > 0) return { files: tracked, enumeratedBy: "git" };
+  return { files: walk(repo), enumeratedBy: "walk" };
 }
 
 function gitValue(repo, args, fallback) {
@@ -248,6 +330,10 @@ const UNPARSED_MARKERS = [
   { format: "typeorm", exts: [".ts", ".js"], marker: /^\s*@Entity\s*\(/m },
   { format: "mongoose", exts: [".ts", ".js"], marker: /new\s+(?:mongoose\.)?Schema\s*\(/ },
   { format: "sequelize", exts: [".ts", ".js"], marker: /DataTypes\.[A-Z]/ },
+  // `pgTable(` is a table declaration and nothing else, which is what earns it a place on this
+  // list where `z.object(` below is refused one: a Drizzle *Table call is persistence by
+  // definition, not a shape that might happen to be stored.
+  { format: "drizzle", exts: [".ts", ".js"], marker: /\b(?:pg|mysql|sqlite)Table\s*\(/ },
   { format: "activerecord", exts: [".rb"], marker: /^\s*create_table\s+[:'"]/m },
   { format: "ecto", exts: [".ex"], marker: /^\s*use\s+Ecto\.Schema\b/m },
   { format: "gorm", exts: [".go"], marker: /`[^`]*\bgorm:"/ },
@@ -357,7 +443,7 @@ export function discoverServices(files) {
 }
 
 export function collectFacts(repo) {
-  const files = walk(repo);
+  const { files, enumeratedBy } = listFiles(repo);
   const datasets = [];
   const parsedFiles = new Set();
   const parsedByKind = {};
@@ -434,6 +520,13 @@ export function collectFacts(repo) {
     // build where nothing was parsed and something was found that should have been — an empty map
     // must never be reportable as a clean one.
     coverage: {
+      // Which files this scan could even see. A `walk` means the file list is whatever is on disk
+      // rather than whatever is committed, so a scan here and a scan in CI can legitimately
+      // disagree — and a reader comparing two manifests needs to know that before blaming one.
+      //
+      // It sits under `coverage` so it is out of the digest: the same file set enumerated two
+      // different ways is the same repository, and must not read as drift.
+      enumerated_by: enumeratedBy,
       files_parsed: parsedFiles.size,
       parsed_by_kind: Object.fromEntries(Object.entries(parsedByKind).sort()),
       unparsed_candidates: findUnparsedCandidates(repo, files, parsedFiles),
@@ -695,6 +788,7 @@ function main(argv) {
     derived_facts: relative(opts.repo, derivedPath).split(sep).join("/"),
     derived_digest: digest,
     drift,
+    enumerated_by: derived.coverage.enumerated_by,
     wrote_skeleton: wroteSkeleton,
     rendered: rendered,
     provenance,
@@ -706,7 +800,10 @@ function main(argv) {
   } else if (!opts.quiet) {
     process.stdout.write(
       [
-        `scanned ${derived.files_scanned} file(s) in ${opts.repo}`,
+        derived.coverage.enumerated_by === "git"
+          ? `scanned ${derived.files_scanned} tracked file(s) in ${opts.repo}`
+          : `scanned ${derived.files_scanned} file(s) in ${opts.repo} — no tracked file list here, ` +
+            "so everything on disk was read and a scan in CI may not agree",
         `${derived.counts.datasets} dataset(s), ${derived.counts.collections} collection(s), ` +
           `${derived.counts.fields} field(s)`,
         `classified: ${derived.counts.classified}, needs review: ${derived.counts.needs_review}`,
