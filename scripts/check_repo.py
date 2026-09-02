@@ -125,18 +125,6 @@ def marketplace_plugin_directories():
     ]
 
 
-def _check_public_metadata_placeholders(problems, value, label, path="$"):
-    """Reject unfinished copy anywhere a marketplace client can render it."""
-    if isinstance(value, dict):
-        for key, child in value.items():
-            _check_public_metadata_placeholders(problems, child, label, f"{path}.{key}")
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            _check_public_metadata_placeholders(problems, child, label, f"{path}[{index}]")
-    elif isinstance(value, str) and PUBLIC_METADATA_PLACEHOLDER.search(value):
-        problems.append(f"{label} {path} contains unfinished placeholder text: {value!r}")
-
-
 def check_public_metadata(problems):
     """Reject unfinished copy in either marketplace or either client's plugin manifests."""
     paths = [
@@ -152,16 +140,13 @@ def check_public_metadata(problems):
     for path in paths:
         if not path.is_file():
             continue
-        data = json.loads(path.read_text(encoding="utf-8"))
-        _check_public_metadata_placeholders(
-            problems, data, str(path.relative_to(ROOT))
-        )
-
-
-def _check_codex_manifest_fields(problems, value, label):
-    """Reject fields outside the public Codex plugin ingestion contract."""
-    for field in sorted(UNSUPPORTED_CODEX_MANIFEST_FIELDS.intersection(value)):
-        problems.append(f"{label} declares unsupported Codex field '{field}'")
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            match = PUBLIC_METADATA_PLACEHOLDER.search(line)
+            if match:
+                problems.append(
+                    f"{path.relative_to(ROOT)}:{number}: contains unfinished placeholder text "
+                    f"'{match.group()}'"
+                )
 
 
 def check_codex_manifests(problems):
@@ -171,9 +156,10 @@ def check_codex_manifests(problems):
         if not manifest.is_file():
             continue
         data = json.loads(manifest.read_text(encoding="utf-8"))
-        _check_codex_manifest_fields(
-            problems, data, f"[{name}] .codex-plugin/plugin.json"
-        )
+        for field in sorted(UNSUPPORTED_CODEX_MANIFEST_FIELDS.intersection(data)):
+            problems.append(
+                f"[{name}] .codex-plugin/plugin.json declares unsupported Codex field '{field}'"
+            )
 
 
 def check_marketplaces(problems):
@@ -386,14 +372,15 @@ def check_special_categories(problems):
                 "a root that matches nothing silently covers nothing"
             )
 
-    def covered(key):
-        return any(key == root or key.startswith(root + ".") for root in roots)
-
     classification = ROOT / "plugins" / "privacy-datamap" / "references" / "classification.json"
     if not classification.is_file():
         return
     piece_keys = json.loads(classification.read_text(encoding="utf-8")).get("special_categories")
-    for key in sorted(k for k in (piece_keys or []) if not covered(k)):
+    for key in sorted(
+        key
+        for key in (piece_keys or [])
+        if not any(key == root or key.startswith(root + ".") for root in roots)
+    ):
         problems.append(
             f"[privacy-datamap] classification.json treats '{key}' as a special category but no "
             "root in contract/lib/taxonomy/special_categories.json covers it — the collector would "
