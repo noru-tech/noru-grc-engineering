@@ -1,7 +1,7 @@
 {
   "name": "noru",
   "version": "0.4.1",
-  "description": "Hub for the Noru last-mile pieces: connect, doctor, and repository context shared by every piece.",
+  "description": "Route, connect and diagnose Noru's last-mile GRC pieces for a repository.",
   "author": {
     "name": "Noru",
     "email": "support@noru.tech",
@@ -22,17 +22,19 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Noru GRC Engineering",
-    "shortDescription": "Connect, check and share context for the Noru last-mile pieces.",
-    "longDescription": "The hub for Noru's last-mile GRC pieces. It verifies the Noru MCP connection and the local toolchain, reports which scopes a piece needs, and gathers the repository context every piece reuses. Install it alongside any piece.",
+    "shortDescription": "Find and run the right last-mile GRC work for a repository.",
+    "longDescription": "The hub for Noru's last-mile GRC pieces. It reviews a repository to identify relevant pieces, verifies the Noru MCP connection and local toolchain, reports least-privilege scopes, and gathers the provenance every piece reuses. Install it alongside any piece.",
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
       "Noru MCP connection check",
       "Least-privilege scope reporting",
+      "Read-only repository triage",
+      "GRC piece routing",
       "Repository provenance",
       "Shared diff and plan helpers"
     ],
     "websiteURL": "https://noru.tech",
-    "defaultPrompt": "Check my Noru connection and tell me which last-mile pieces this repository can use."
+    "defaultPrompt": "Review this repository for local GRC work. Identify which Noru pieces are relevant, explain why with file citations, and recommend the smallest useful read-only next step. Do not write to Noru."
   }
 }

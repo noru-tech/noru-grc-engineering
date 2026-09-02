@@ -1,0 +1,124 @@
+{
+  "pieces": [
+    {
+      "name": "ai-inventory",
+      "summary": "Inventory AI systems and the controls around their use.",
+      "signals": [
+        "Model or provider SDK imports and concrete model identifiers",
+        "Agent, prompt, retrieval, evaluation or human-oversight code",
+        "User-facing generative or decision-support features"
+      ],
+      "inspect": [
+        "Tracked dependency manifests and application source",
+        "Agent, prompt, retrieval and evaluation directories",
+        "User-facing notices near AI-backed interactions"
+      ],
+      "caveat": "An SDK dependency alone does not prove that an AI system is deployed; cite actual call sites and report uncertainty."
+    },
+    {
+      "name": "audit-pack",
+      "summary": "Assemble audit scope, samples, workpapers and local evidence for one audit window.",
+      "signals": [
+        "A named audit framework and review window",
+        "Population exports, sampling inputs or workpaper directories",
+        "A request to prepare an auditor handover"
+      ],
+      "inspect": [
+        "Local audit artifacts and population files",
+        "Existing reviewed .noru manifests that may form pack inputs",
+        "Noru evidence context for the named audit scope"
+      ],
+      "caveat": "Repository files cannot establish the audit framework, period or testing conclusion; obtain those from the user and Noru."
+    },
+    {
+      "name": "change-control",
+      "summary": "Account for authorship, approval, merge and deployment separation over a change window.",
+      "signals": [
+        "A repository hosted on a supported forge",
+        "Pull-request, review, merge and deployment history",
+        "A request about change management or segregation of duties"
+      ],
+      "inspect": [
+        "Repository remotes and CI deployment configuration",
+        "Credentialed forge history and branch-protection settings",
+        "The user-specified review window"
+      ],
+      "caveat": "The working tree cannot prove who approved or deployed a change; classify this as possibly relevant until forge history is available."
+    },
+    {
+      "name": "evidence-push",
+      "summary": "Match local artifacts to Noru's unmet evidence queue and upload reviewed files.",
+      "signals": [
+        "Local reports, certificates, screenshots or signed records intended as evidence",
+        "A named control, framework or unmet evidence request",
+        "A request to file an artifact already held locally"
+      ],
+      "inspect": [
+        "The local artifacts the user placed in scope",
+        "Noru's current evidence queue for the named control or framework",
+        "Existing evidence records needed to avoid duplicates"
+      ],
+      "caveat": "A file's presence does not show that Noru needs it or that it satisfies an expectation; ask Noru and require human interpretation."
+    },
+    {
+      "name": "governance-records",
+      "summary": "File attributed records of governance decisions and assigned actions.",
+      "signals": [
+        "Board, committee, management-review or steering minutes",
+        "ISMS scope, statement of applicability or internal-audit records",
+        "Corrective-action plans or governance decisions held locally"
+      ],
+      "inspect": [
+        "Tracked governance and audit-document directories",
+        "Named participants, dates, decisions and action owners",
+        "Noru's unmet evidence expectations for the record"
+      ],
+      "caveat": "Do not infer that a meeting occurred, a decision was approved or an action was owned when the record does not say so."
+    },
+    {
+      "name": "iac-scan",
+      "summary": "Find compliance-relevant misconfiguration in infrastructure and pipeline configuration.",
+      "signals": [
+        "Terraform or CloudFormation infrastructure definitions",
+        "Kubernetes resource manifests",
+        "CI or deployment workflow configuration"
+      ],
+      "inspect": [
+        "Tracked infrastructure-as-code files",
+        "Kubernetes manifests and CI workflow directories",
+        "Noru assets, risks and existing findings needed to interpret results"
+      ],
+      "caveat": "A static rule match is a candidate finding, not a conclusion; the environment and an owner still have to be established."
+    },
+    {
+      "name": "privacy-datamap",
+      "summary": "Build a privacy data map from the records and interfaces a repository defines.",
+      "signals": [
+        "SQL DDL, migrations or ORM model definitions",
+        "Protobuf or GraphQL record schemas",
+        "Fields that appear to describe people, identifiers or their activity"
+      ],
+      "inspect": [
+        "Tracked schema, model, migration and API-contract files",
+        "Coverage markers for schema formats the collector cannot parse",
+        "Noru's privacy taxonomy and existing data-source map"
+      ],
+      "caveat": "Field names support classification but do not establish purpose, lawful basis or actual production use; those remain human decisions."
+    },
+    {
+      "name": "review-signoff",
+      "summary": "Turn a completed periodic review of machine output into an expiring human sign-off.",
+      "signals": [
+        "Access, firewall, hardening, asset, physical-access or vendor review exports",
+        "A recurring review cadence and review period",
+        "A named reviewer, outcome and owned exceptions"
+      ],
+      "inspect": [
+        "The review input and reconciliation output",
+        "Review dates, cadence, reviewer identity and exception owners",
+        "Noru's evidence queue for the relevant review"
+      ],
+      "caveat": "An export is not a sign-off; require the named human decision, review date, scope and expiry."
+    }
+  ]
+}

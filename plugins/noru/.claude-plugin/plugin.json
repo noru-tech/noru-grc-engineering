@@ -3,7 +3,7 @@
   "name": "noru",
   "displayName": "Noru GRC Engineering",
   "version": "0.4.1",
-  "description": "Hub for the Noru last-mile pieces: connect, doctor, and repository context shared by every piece.",
+  "description": "Route, connect and diagnose Noru's last-mile GRC pieces for a repository.",
   "author": {
     "name": "Noru",
     "email": "support@noru.tech"

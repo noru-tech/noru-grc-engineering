@@ -11,7 +11,7 @@ Full documentation, the exit-code table and the non-GitHub recipes are in
 - uses: actions/setup-node@v4
   with:
     node-version: "20"
-- uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.2.0
+- uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.4.1
   with:
     piece: ai-inventory
     mode: warn      # switch to gate once the report is quiet
@@ -52,7 +52,7 @@ to inspect. Two ways to read a failing run:
   ```yaml
   - id: gate
     continue-on-error: true
-    uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.2.0
+    uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.4.1
     with: { piece: ai-inventory, repo: . }
   - if: steps.gate.outcome == 'failure'
     run: |

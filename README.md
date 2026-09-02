@@ -36,7 +36,7 @@ directory, no flat-file risk register, no second source of truth to reconcile be
 | [`privacy-datamap`](./plugins/privacy-datamap/) | the schemas a repository holds — ORM models, migrations, SQL DDL, protobuf, GraphQL — and the personal data in them | a Fides privacy data map (`read/write:datamaps`) |
 | [`iac-scan`](./plugins/iac-scan/) | compliance-relevant misconfiguration in Terraform, CloudFormation, Kubernetes and pipeline configuration | security findings, keyed and closed by the same call |
 | [`change-control`](./plugins/change-control/) | who wrote, approved, merged and deployed each change over one window, and the branch protection that was supposed to keep those apart | a finding per separation that did not hold, plus the window as evidence |
-| [`noru`](./plugins/noru/) | — | the hub: `connect`, `doctor`, `context` |
+| [`noru`](./plugins/noru/) | repository signals and shared provenance | the hub: route, `connect`, `doctor`, `context` |
 
 Every piece is the same three moves, and exactly three commands:
 

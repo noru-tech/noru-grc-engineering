@@ -137,7 +137,7 @@
     {
       "name": "noru",
       "source": "./plugins/noru",
-      "description": "Hub for the Noru last-mile pieces: connect, doctor, and repository context shared by every piece.",
+      "description": "Review a repository, route it to the relevant last-mile pieces, and check the Noru connection, toolchain and provenance they share.",
       "version": "0.4.1",
       "license": "MIT",
       "category": "compliance",
