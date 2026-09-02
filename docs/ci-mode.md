@@ -292,7 +292,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.4.0
+      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.4.1
         with:
           piece: ai-inventory
           mode: warn        # switch to gate once the report is quiet
@@ -376,7 +376,7 @@ possible without a credential, so both are opt-in and both degrade rather than f
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.4.0
+      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.4.1
         env:
           NORU_API_KEY: ${{ secrets.NORU_API_KEY }}
         with:

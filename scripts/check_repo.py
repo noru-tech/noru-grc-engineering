@@ -8,7 +8,7 @@ What it covers, and why each one is here rather than left to review:
   * **Marketplace manifests** — the Claude Code and Codex marketplaces must agree on the same set of
     plugins at the same paths. They are two files nobody edits together, so they drift.
   * **Plugin manifests** — every declared source directory really contains a plugin whose name
-    matches, for both clients.
+    matches, for both clients, and no public metadata contains an unfinished placeholder.
   * **MCP config** — points at Noru's hosted endpoint and carries no credential.
   * **Schema / vocabulary sync** — a piece's bundled vocabulary and the contract schema describe the
     same enums. Two sources of truth is one too many, so this makes them one in effect.
@@ -98,6 +98,8 @@ SECRET_PATTERNS = [
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"), "a GitHub token"),
 ]
 PLACEHOLDER_TOKENS = ("<NORU_API_KEY>", "${NORU_API_KEY}", "…", "<your", "<redacted>", "example")
+PUBLIC_METADATA_PLACEHOLDER = re.compile(r"\b(?:TODO|TBD|CHANGE_ME)\b", re.IGNORECASE)
+UNSUPPORTED_CODEX_MANIFEST_FIELDS = {"commands", "hooks"}
 SCANNED_SUFFIXES = {".mjs", ".js", ".py", ".json", ".md", ".yml", ".yaml", ".txt", ".ts"}
 SKIP_DIRS = {".git", "node_modules", ".noru"}
 
@@ -108,6 +110,56 @@ def dotted(node, path):
             return None
         node = node[part]
     return node
+
+
+def marketplace_plugin_directories():
+    """Return the plugin names and source directories declared by Claude's marketplace."""
+    marketplace = ROOT / ".claude-plugin" / "marketplace.json"
+    if not marketplace.is_file():
+        return []
+    data = json.loads(marketplace.read_text(encoding="utf-8"))
+    return [
+        (entry["name"], (ROOT / entry["source"]).resolve())
+        for entry in data.get("plugins", [])
+        if isinstance(entry.get("source"), str)
+    ]
+
+
+def check_public_metadata(problems):
+    """Reject unfinished copy in either marketplace or either client's plugin manifests."""
+    paths = [
+        ROOT / ".claude-plugin" / "marketplace.json",
+        ROOT / ".agents" / "plugins" / "marketplace.json",
+    ]
+    for _name, directory in marketplace_plugin_directories():
+        paths.extend(
+            directory / rel / "plugin.json"
+            for rel in (".claude-plugin", ".codex-plugin")
+        )
+
+    for path in paths:
+        if not path.is_file():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            match = PUBLIC_METADATA_PLACEHOLDER.search(line)
+            if match:
+                problems.append(
+                    f"{path.relative_to(ROOT)}:{number}: contains unfinished placeholder text "
+                    f"'{match.group()}'"
+                )
+
+
+def check_codex_manifests(problems):
+    """Reject unsupported fields in every marketplace-listed Codex manifest."""
+    for name, directory in marketplace_plugin_directories():
+        manifest = directory / ".codex-plugin" / "plugin.json"
+        if not manifest.is_file():
+            continue
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        for field in sorted(UNSUPPORTED_CODEX_MANIFEST_FIELDS.intersection(data)):
+            problems.append(
+                f"[{name}] .codex-plugin/plugin.json declares unsupported Codex field '{field}'"
+            )
 
 
 def check_marketplaces(problems):
@@ -320,14 +372,15 @@ def check_special_categories(problems):
                 "a root that matches nothing silently covers nothing"
             )
 
-    def covered(key):
-        return any(key == root or key.startswith(root + ".") for root in roots)
-
     classification = ROOT / "plugins" / "privacy-datamap" / "references" / "classification.json"
     if not classification.is_file():
         return
     piece_keys = json.loads(classification.read_text(encoding="utf-8")).get("special_categories")
-    for key in sorted(k for k in (piece_keys or []) if not covered(k)):
+    for key in sorted(
+        key
+        for key in (piece_keys or [])
+        if not any(key == root or key.startswith(root + ".") for root in roots)
+    ):
         problems.append(
             f"[privacy-datamap] classification.json treats '{key}' as a special category but no "
             "root in contract/lib/taxonomy/special_categories.json covers it — the collector would "
@@ -445,6 +498,8 @@ def main(argv):
     problems = []
     try:
         plugin_names = check_marketplaces(problems)
+        check_public_metadata(problems)
+        check_codex_manifests(problems)
         check_pieces_registered(problems, plugin_names)
         check_reference_files_exist(problems)
         check_yaml_11_booleans(problems)

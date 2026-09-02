@@ -1,6 +1,6 @@
 {
   "name": "noru",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Hub for the Noru last-mile pieces: connect, doctor, and repository context shared by every piece.",
   "author": {
     "name": "Noru",
@@ -19,7 +19,6 @@
     "audit"
   ],
   "skills": "./skills/",
-  "commands": "./commands/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Noru GRC Engineering",

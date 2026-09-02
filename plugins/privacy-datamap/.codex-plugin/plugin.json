@@ -1,6 +1,6 @@
 {
   "name": "privacy-datamap",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Read the schemas a repository actually contains — ORM models, migrations, SQL DDL, API contracts — classify the personal data in them against the Fideslang taxonomy, and land the data map in Noru with a citation for every field and a named owner for every judgement.",
   "author": {
     "name": "Noru",
@@ -22,7 +22,6 @@
     "data-governance"
   ],
   "skills": "./skills/",
-  "commands": "./commands/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Privacy Datamap",

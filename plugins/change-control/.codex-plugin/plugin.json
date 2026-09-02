@@ -1,7 +1,7 @@
 {
   "name": "change-control",
-  "version": "0.4.0",
-  "description": "TODO: one sentence describing change-control.",
+  "version": "0.4.1",
+  "description": "Review forge change history and branch protection, identify segregation-of-duties exceptions, and land owned findings and window evidence in Noru.",
   "author": {
     "name": "Noru",
     "email": "support@noru.tech",
@@ -17,18 +17,20 @@
     "change-control"
   ],
   "skills": "./skills/",
-  "commands": "./commands/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Noru Change Control",
-    "shortDescription": "TODO: one sentence describing change-control.",
-    "longDescription": "TODO: one sentence describing change-control.",
+    "shortDescription": "Turn change history into owned segregation-of-duties evidence.",
+    "longDescription": "Exports GitHub or GitLab change history and branch protection for a review window, checks whether author, approver, merger and deployer separation held, and writes a reviewable manifest in which every exception has a disposition and named owner. After confirmation, it lands one finding per exception and the window's account as evidence in Noru.",
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
-      "TODO"
+      "GitHub and GitLab change-history export",
+      "Author, approver, merger and deployer separation checks",
+      "Branch-protection and bypass observations",
+      "Owned exceptions and window evidence in Noru"
     ],
     "websiteURL": "https://noru.tech",
-    "defaultPrompt": "TODO: what a user would type to reach change-control."
+    "defaultPrompt": "Review this repository's change controls for the last 90 days and show me what would land in Noru."
   }
 }
