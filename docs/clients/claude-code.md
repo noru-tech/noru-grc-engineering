@@ -12,6 +12,7 @@
 /plugin install audit-pack@noru-grc-engineering
 /plugin install iac-scan@noru-grc-engineering
 /plugin install privacy-datamap@noru-grc-engineering
+/plugin install change-control@noru-grc-engineering
 ```
 
 Install `noru` (the hub) alongside whichever pieces you want. Each piece works on its own, but the

@@ -17,8 +17,16 @@ python3 scripts/test_ci_mode.py        # CI mode fails on drift, on an expired c
                                        # personal data the baseline does not permit
 ```
 
+The repository checks above deliberately have no external dependency. Before publishing the
+marketplace for Claude Code, also run Claude's own strict validator:
+
+```bash
+claude plugin validate --strict .
+```
+
 | Property | How it is proven |
 |---|---|
+| Public marketplace metadata is complete | `check_repo.py` rejects `TODO`, `TBD` and `CHANGE_ME` anywhere in either marketplace or either client's plugin manifests, plus unsupported `commands` and `hooks` fields in Codex manifests |
 | Collectors are deterministic | `contract_test.py` runs each collector twice over two copies of `tests/fixture-repo/` and diffs the derived output byte for byte |
 | Collectors are offline | the collector source is scanned for every socket-opening API; a match fails the build |
 | Validators are stdlib-only | every `import` in a validator is checked against an allowed standard-library set |

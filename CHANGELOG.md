@@ -6,7 +6,21 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.4.1 — 2026-09-02
+
+A publication-readiness and collector-correctness patch: both marketplace clients now receive
+complete, valid plugin metadata, and repository scans agree with CI about which files exist and
+whether an entry point actually ran.
+
 ### Fixed
+
+**The `change-control` marketplace listing no longer ships placeholder copy.** Its Claude Code and
+Codex manifests now describe the forge export, segregation-of-duties checks and reviewed Noru write;
+`check_repo.py` rejects unfinished `TODO`, `TBD` and `CHANGE_ME` text in public marketplace metadata
+so another placeholder cannot pass the release gate. The native Claude marketplace validation is
+also documented as a separate pre-publication check. Codex manifests no longer declare the
+unsupported `commands` field; the command files remain in their conventional root directories for
+discovery, and the repository check rejects unsupported `commands` or `hooks` declarations.
 
 **Every collector was one symlink away from passing without scanning anything.** Each script
 decides whether to run `main()` by comparing `import.meta.url` against `process.argv[1]`, and the

@@ -11,7 +11,7 @@
       "name": "ai-inventory",
       "source": "./plugins/ai-inventory",
       "description": "Scan a repository for the AI systems, model providers and oversight points it actually contains, review the manifest in a PR, and land it in Noru as assets, vendors and evidence.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "license": "MIT",
       "category": "compliance",
       "keywords": [
@@ -32,7 +32,7 @@
       "name": "audit-pack",
       "source": "./plugins/audit-pack",
       "description": "Assemble the evidence bundle, sampling and workpapers an auditor asks for — for one framework over one audit window — from Noru's graph plus the local files an integration cannot reach, and land the tested conclusion for each control back in Noru.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "license": "MIT",
       "category": "compliance",
       "keywords": [
@@ -53,7 +53,7 @@
       "name": "change-control",
       "source": "./plugins/change-control",
       "description": "Who wrote each change, who approved it, who merged it and who deployed it, for one window — with every separation that did not hold owned by a named person, and the forge configuration that was supposed to keep them apart.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "license": "MIT",
       "category": "compliance",
       "keywords": [
@@ -75,7 +75,7 @@
       "name": "evidence-push",
       "source": "./plugins/evidence-push",
       "description": "Work Noru's own evidence queue: see which catalogue expectations are unmet, stage local artifacts against them, and upload with control mappings.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "license": "MIT",
       "category": "compliance",
       "keywords": [
@@ -96,7 +96,7 @@
       "name": "governance-records",
       "source": "./plugins/governance-records",
       "description": "File the records of human decisions in Noru: minutes, ISMS scope, statement of applicability, internal audit plans and reports, findings and corrective action plans, each attributed and dated.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "license": "MIT",
       "category": "compliance",
       "keywords": [
@@ -117,7 +117,7 @@
       "name": "iac-scan",
       "source": "./plugins/iac-scan",
       "description": "Scan the Terraform, CloudFormation, Kubernetes and CI configuration a repository actually contains, decide what each finding means in this environment, and land the result in Noru as security findings — closing the ones that no longer reproduce.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "license": "MIT",
       "category": "compliance",
       "keywords": [
@@ -138,7 +138,7 @@
       "name": "noru",
       "source": "./plugins/noru",
       "description": "Hub for the Noru last-mile pieces: connect, doctor, and repository context shared by every piece.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "license": "MIT",
       "category": "compliance",
       "keywords": [
@@ -157,7 +157,7 @@
       "name": "privacy-datamap",
       "source": "./plugins/privacy-datamap",
       "description": "Read the schemas a repository actually contains — ORM models, migrations, SQL DDL, API contracts — classify the personal data in them against the Fideslang taxonomy, review the result in a pull request, and land the data map in Noru.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "license": "MIT",
       "category": "compliance",
       "keywords": [
@@ -179,7 +179,7 @@
       "name": "review-signoff",
       "source": "./plugins/review-signoff",
       "description": "Turn a periodic review of machine output — access, rules, baselines, assets, physical access, vendors — into a named, dated, expiring sign-off in Noru.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "license": "MIT",
       "category": "compliance",
       "keywords": [

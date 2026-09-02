@@ -8,7 +8,7 @@ What it covers, and why each one is here rather than left to review:
   * **Marketplace manifests** — the Claude Code and Codex marketplaces must agree on the same set of
     plugins at the same paths. They are two files nobody edits together, so they drift.
   * **Plugin manifests** — every declared source directory really contains a plugin whose name
-    matches, for both clients.
+    matches, for both clients, and no public metadata contains an unfinished placeholder.
   * **MCP config** — points at Noru's hosted endpoint and carries no credential.
   * **Schema / vocabulary sync** — a piece's bundled vocabulary and the contract schema describe the
     same enums. Two sources of truth is one too many, so this makes them one in effect.
@@ -98,6 +98,8 @@ SECRET_PATTERNS = [
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"), "a GitHub token"),
 ]
 PLACEHOLDER_TOKENS = ("<NORU_API_KEY>", "${NORU_API_KEY}", "…", "<your", "<redacted>", "example")
+PUBLIC_METADATA_PLACEHOLDER = re.compile(r"\b(?:TODO|TBD|CHANGE_ME)\b", re.IGNORECASE)
+UNSUPPORTED_CODEX_MANIFEST_FIELDS = {"commands", "hooks"}
 SCANNED_SUFFIXES = {".mjs", ".js", ".py", ".json", ".md", ".yml", ".yaml", ".txt", ".ts"}
 SKIP_DIRS = {".git", "node_modules", ".noru"}
 
@@ -108,6 +110,24 @@ def dotted(node, path):
             return None
         node = node[part]
     return node
+
+
+def check_public_metadata_placeholders(problems, value, label, path="$"):
+    """Reject unfinished copy anywhere a marketplace client can render it."""
+    if isinstance(value, dict):
+        for key, child in value.items():
+            check_public_metadata_placeholders(problems, child, label, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            check_public_metadata_placeholders(problems, child, label, f"{path}[{index}]")
+    elif isinstance(value, str) and PUBLIC_METADATA_PLACEHOLDER.search(value):
+        problems.append(f"{label} {path} contains unfinished placeholder text: {value!r}")
+
+
+def check_codex_manifest_fields(problems, value, label):
+    """Reject fields outside the public Codex plugin ingestion contract."""
+    for field in sorted(UNSUPPORTED_CODEX_MANIFEST_FIELDS.intersection(value)):
+        problems.append(f"{label} declares unsupported Codex field '{field}'")
 
 
 def check_marketplaces(problems):
@@ -122,6 +142,13 @@ def check_marketplaces(problems):
 
     claude = json.loads(claude_path.read_text(encoding="utf-8"))
     codex = json.loads(codex_path.read_text(encoding="utf-8"))
+
+    check_public_metadata_placeholders(
+        problems, claude, ".claude-plugin/marketplace.json"
+    )
+    check_public_metadata_placeholders(
+        problems, codex, ".agents/plugins/marketplace.json"
+    )
 
     if claude.get("name") != codex.get("name"):
         problems.append(
@@ -165,6 +192,13 @@ def check_marketplaces(problems):
                 problems.append(f"[{name}] missing {rel}/plugin.json ({client})")
                 continue
             data = json.loads(manifest.read_text(encoding="utf-8"))
+            check_public_metadata_placeholders(
+                problems, data, str(manifest.relative_to(ROOT))
+            )
+            if client == "Codex":
+                check_codex_manifest_fields(
+                    problems, data, f"[{name}] {rel}/plugin.json"
+                )
             if data.get("name") != name:
                 problems.append(
                     f"[{name}] {rel}/plugin.json declares name '{data.get('name')}'"

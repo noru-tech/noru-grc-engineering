@@ -12,6 +12,7 @@ codex plugin add review-signoff@noru-grc-engineering
 codex plugin add audit-pack@noru-grc-engineering
 codex plugin add iac-scan@noru-grc-engineering
 codex plugin add privacy-datamap@noru-grc-engineering
+codex plugin add change-control@noru-grc-engineering
 ```
 
 Codex reads the marketplace from `.agents/plugins/marketplace.json` and each plugin from
