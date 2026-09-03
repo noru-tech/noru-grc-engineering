@@ -1,6 +1,6 @@
 {
   "name": "iac-scan",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Scan the Terraform, CloudFormation, Kubernetes and CI configuration a repository actually contains, decide what each finding means in this environment, and land the result in Noru as security findings — closing the ones that no longer reproduce.",
   "author": {
     "name": "Noru",

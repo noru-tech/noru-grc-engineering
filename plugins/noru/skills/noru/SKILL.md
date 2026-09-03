@@ -1,6 +1,6 @@
 ---
 name: noru
-version: 0.4.1
+version: 0.5.0
 description: Review repositories, CI pipelines and local artifacts to identify and run relevant Noru last-mile GRC pieces. Use when the user wants to discover applicable local GRC work, connect or diagnose the suite, run a piece, or author a new one.
 requires:
   bins: ["node", "python3", "git"]

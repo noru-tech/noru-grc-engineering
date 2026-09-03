@@ -53,6 +53,36 @@ const TEXT_EXTENSIONS = new Set([
   ".js", ".cjs", ".mjs", ".ts", ".tsx", ".py", ".rb", ".go", ".sh", ".yaml", ".yml", ".json",
 ]);
 
+function sourceSlugOnLine(line) {
+  const patterns = [
+    /\b(?:NORU_SOURCE_SLUG|source[_-]?slug|sourceSlug|slug)\b\s*[:=]\s*["']?([^\s"',}\]]+)/i,
+    /--(?:source-)?slug(?:=|\s+)["']?([^\s"']+)/i,
+    /--arg\s+slug\s+["']([^"']+)["']/i,
+  ];
+  for (const pattern of patterns) {
+    const match = line.match(pattern);
+    if (!match) continue;
+    const value = match[1]
+      .replace(/^\$\{\{\s*github\.repository\s*\}\}$/, "$GITHUB_REPOSITORY")
+      .replace(/^\$\{GITHUB_REPOSITORY\}$/, "$GITHUB_REPOSITORY");
+    // Payload references such as `{slug:$slug}` name a variable but do not tell us which source it
+    // identifies. The declaration (`--arg slug ...`, an env value, or a literal) is the useful one.
+    if (/^\$(slug|sourceSlug|source_slug)$/.test(value)) return null;
+    return value;
+  }
+  return null;
+}
+
+function workflowPushLines(relative, lines) {
+  if (!/^\.github\/workflows\/.*\.ya?ml$/i.test(relative)) return [];
+  const privacyPiece = lines.findIndex((line) => /\bpiece\s*:\s*privacy-datamap\b/i.test(line));
+  if (privacyPiece < 0) return [];
+  const push = lines.findIndex(
+    (line) => /\bsteps\s*:\s*(?:all|[^#\n]*\bpush\b)/i.test(line),
+  );
+  return push < 0 ? [] : [push + 1];
+}
+
 function trackedFiles(repo) {
   const output = tryRun("git", ["-C", repo, "ls-files", "-z"]);
   return output === null ? [] : output.split("\0").filter(Boolean);
@@ -60,6 +90,7 @@ function trackedFiles(repo) {
 
 export function detectPrivacyWriters(repo) {
   const signals = [];
+  const slugDeclarations = [];
   for (const relative of trackedFiles(repo)) {
     if (!TEXT_EXTENSIONS.has(extname(relative).toLowerCase())) continue;
     const path = join(repo, relative);
@@ -71,7 +102,9 @@ export function detectPrivacyWriters(repo) {
     }
     if (Buffer.byteLength(text) > MAX_INSPECTED_BYTES || text.includes("\0")) continue;
 
-    text.split("\n").forEach((line, index) => {
+    const lines = text.split("\n");
+    const fileSignals = [];
+    lines.forEach((line, index) => {
       const kinds = [];
       if (
         /\/v1\/privacy\/datamaps\b/.test(line) &&
@@ -80,15 +113,47 @@ export function detectPrivacyWriters(repo) {
         kinds.push("REST datamap write");
       }
       if (/\bingestDatamap\s*\(/.test(line)) kinds.push("MCP datamap write");
+      if (/\/?privacy-datamap:push\b/.test(line)) kinds.push("plugin datamap push");
+      if (/privacy-datamap\/scripts\/push\.mjs\b/.test(line)) {
+        kinds.push("plugin datamap push entrypoint");
+      }
       if (/\.fides\/datamap\.ya?ml/.test(line) && /\.github\/workflows\//.test(relative)) {
         kinds.push("workflow watches generated datamap");
       }
-      for (const kind of kinds) signals.push({ path: relative, line: index + 1, kind });
+      for (const kind of kinds) fileSignals.push({ path: relative, line: index + 1, kind });
     });
+    for (const line of workflowPushLines(relative, lines)) {
+      fileSignals.push({ path: relative, line, kind: "noru-ci privacy datamap push" });
+    }
+    signals.push(...fileSignals);
+
+    if (fileSignals.length > 0) {
+      lines.forEach((line, index) => {
+        const value = sourceSlugOnLine(line);
+        if (value !== null) slugDeclarations.push({ path: relative, line: index + 1, value });
+      });
+    }
   }
 
   const writers = [...new Set(signals.map((signal) => signal.path))];
-  return { signals, writers, duplicate: writers.length > 1 };
+  const bySlug = new Map();
+  for (const declaration of slugDeclarations) {
+    const refs = bySlug.get(declaration.value) ?? [];
+    refs.push({ path: declaration.path, line: declaration.line });
+    bySlug.set(declaration.value, refs);
+  }
+  // The slug itself is deliberately omitted from the result. A repository identity is not a
+  // credential, but doctor has a stronger and easier promise: it reports signal type and file:line,
+  // never the matched configuration value.
+  const slugCollisions = [...bySlug.values()]
+    .filter((refs) => new Set(refs.map((ref) => ref.path)).size > 1)
+    .map((refs) => ({ declarations: refs }));
+  return {
+    signals,
+    writers,
+    slug_collisions: slugCollisions,
+    duplicate: writers.length > 1 || slugCollisions.length > 0,
+  };
 }
 
 export function runChecks(repo) {
@@ -98,7 +163,7 @@ export function runChecks(repo) {
   const inGitRepo = tryRun("git", ["-C", repo, "rev-parse", "--is-inside-work-tree"]) === "true";
   const privacyWriters = inGitRepo
     ? detectPrivacyWriters(repo)
-    : { signals: [], writers: [], duplicate: false };
+    : { signals: [], writers: [], slug_collisions: [], duplicate: false };
 
   return [
     {
@@ -164,7 +229,12 @@ export function runChecks(repo) {
       detail: privacyWriters.duplicate
         ? `${privacyWriters.writers.length} possible datamap writers: ${privacyWriters.signals
             .map((signal) => `${signal.path}:${signal.line} (${signal.kind})`)
-            .join(", ")}`
+            .join(", ")}${privacyWriters.slug_collisions.length > 0
+              ? `; repeated source slug declaration(s): ${privacyWriters.slug_collisions
+                  .flatMap((collision) => collision.declarations)
+                  .map((declaration) => `${declaration.path}:${declaration.line}`)
+                  .join(", ")}`
+              : ""}`
         : privacyWriters.writers.length === 1
           ? `one possible datamap writer: ${privacyWriters.signals
               .map((signal) => `${signal.path}:${signal.line} (${signal.kind})`)

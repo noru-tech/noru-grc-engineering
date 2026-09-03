@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.5.0 — 2026-09-03
+
 ### Added
 
 - `/noru:review` performs deterministic branch triage, discovers the independently installed piece
@@ -17,7 +19,15 @@ one version number; the release workflow fails if they disagree.
 - The developer onboarding path now separates credential-free pull-request checks from reviewed,
   protected publication and calls out the current MCP/headless execution boundary.
 - `/noru:doctor` warns when tracked code or workflows indicate multiple possible privacy data-map
-  publishers, reporting only signal type and `file:line`.
+  publishers or repeated source-slug declarations, reporting only signal type and `file:line`. Its
+  regression fixture mirrors the Noru monorepo's current privacy-sync workflow so one workflow with
+  several signals remains one publisher.
+- The `noru-review` GitHub action and copyable pull-request template detect affected pieces, run one
+  consolidated credential-free review, support warning and enforcement modes, and cannot expose a
+  diff or push step even when a repository accidentally provides a Noru key.
+- Marketplace documentation now exposes the executable compatibility contract—runtime, generated
+  artifacts, scopes and write transport—and repository checks keep every independently installed
+  plugin on the same credential-free MCP server declaration.
 
 ### Changed
 

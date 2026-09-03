@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "noru",
   "displayName": "Noru GRC Engineering",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Run consolidated repository reviews and read-only Noru status across independently installed GRC pieces.",
   "author": {
     "name": "Noru",

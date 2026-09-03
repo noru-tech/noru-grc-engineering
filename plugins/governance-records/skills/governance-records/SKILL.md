@@ -1,6 +1,6 @@
 ---
 name: governance-records
-version: 0.4.1
+version: 0.5.0
 description: File the records of human decisions into Noru — steering committee and management review minutes, board and audit committee minutes, ISMS scope, statement of applicability, internal audit plans, reports and checklists, findings and corrective action plans. Reads the documents a governance process already produced, extracts who met, what was decided and what was assigned to whom, and lands each one as attributed evidence against the expectations Noru says are unmet. Use when the user wants to get minutes or governance documents into Noru, evidence a management review or internal audit, record a corrective action plan, or close a governance evidence gap before an audit.
 requires:
   bins: ["node", "python3", "git"]

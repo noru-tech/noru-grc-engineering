@@ -15,6 +15,7 @@ python3 scripts/test_idempotency.py    # a second push is a no-op, end to end
 python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
 python3 scripts/test_ci_mode.py        # CI mode fails on drift, on an expired claim, and on
                                        # personal data the baseline does not permit
+python3 scripts/test_ci_review.py      # branch routing produces one structurally read-only report
 python3 scripts/test_hub.py            # branch routing, installed subsets and read-only hub contracts
 ```
 
@@ -29,6 +30,7 @@ claude plugin validate --strict .
 |---|---|
 | Public marketplace metadata is complete | `check_repo.py` rejects `TODO`, `TBD` and `CHANGE_ME` anywhere in either marketplace or either client's plugin manifests, plus unsupported `commands` and `hooks` fields in Codex manifests |
 | Review routing works with an independently installed subset | `test_hub.py` routes a branch containing both AI and schema changes while exposing only `privacy-datamap`; privacy is ready and the still-selected AI review is explicitly unavailable rather than silently skipped |
+| The copyable PR workflow cannot publish | `test_ci_review.py` routes a real branch diff and asserts that every executed step is one of scan, validate, expiry or policy; `check_repo.py` also requires the wrapper to strip `NORU_API_KEY` and rejects secrets or `pull_request_target` in the supported template |
 | The hub status surface stays read-only | `check_repo.py` and `test_hub.py` require every status capability to declare a `read:*` scope and a `find*`, `get*` or `list*` tool, and require the command's capability-first, no-push and partial-section contracts |
 | Collectors are deterministic | `contract_test.py` runs each collector twice over two copies of `tests/fixture-repo/` and diffs the derived output byte for byte |
 | Collectors are offline | the collector source is scanned for every socket-opening API; a match fails the build |

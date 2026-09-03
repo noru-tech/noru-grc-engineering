@@ -1,0 +1,141 @@
+name: "Noru GRC pull-request review"
+description: >
+  Detect the GRC pieces affected by a branch, run their local checks, and produce one read-only
+  report. This action cannot diff or push to Noru.
+author: "Noru"
+
+branding:
+  icon: shield
+  color: gray-dark
+
+inputs:
+  repo:
+    description: "Path to the repository to review."
+    required: false
+    default: "."
+  base-ref:
+    description: >
+      Base commit or branch for routing and policy comparison. The checkout must contain it.
+    required: true
+  pieces:
+    description: >
+      Optional comma-separated override. Empty selects pieces from branch-change signals.
+    required: false
+    default: ""
+  mode:
+    description: "warn reports findings; gate fails on them. Start with warn."
+    required: false
+    default: "warn"
+  fail-on:
+    description: "Optional comma-separated finding kinds, or none."
+    required: false
+    default: ""
+  baseline:
+    description: "Optional path to the committed privacy baseline."
+    required: false
+    default: ""
+  max-age-days:
+    description: "Optional review cadence. Zero does not invent one."
+    required: false
+    default: "0"
+  warn-within-days:
+    description: "How far ahead to report an expiry."
+    required: false
+    default: "30"
+  gate-on-new:
+    description: "Gate only on policy findings introduced by this branch."
+    required: false
+    default: "false"
+  report-path:
+    description: "Where to write the consolidated JSON report."
+    required: false
+    default: ""
+  summary:
+    description: "Write the consolidated result to the GitHub job summary."
+    required: false
+    default: "true"
+
+outputs:
+  status:
+    description: "pass, warn, skipped, fail or error."
+    value: ${{ steps.review.outputs.status }}
+  report:
+    description: "Path to the consolidated JSON report."
+    value: ${{ steps.review.outputs.report }}
+  selected-pieces:
+    description: "JSON array of selected pieces."
+    value: ${{ steps.review.outputs.selected-pieces }}
+
+runs:
+  using: composite
+  steps:
+    - name: node and python3 must already be on the runner
+      shell: bash
+      run: |
+        set -euo pipefail
+        command -v node >/dev/null 2>&1 || { echo "::error::noru-review needs node"; exit 1; }
+        command -v python3 >/dev/null 2>&1 || { echo "::error::noru-review needs python3"; exit 1; }
+
+    - name: detect and review affected pieces
+      id: review
+      shell: bash
+      env:
+        NORU_REVIEW_REPO: ${{ inputs.repo }}
+        NORU_REVIEW_BASE_REF: ${{ inputs.base-ref }}
+        NORU_REVIEW_PIECES: ${{ inputs.pieces }}
+        NORU_REVIEW_MODE: ${{ inputs.mode }}
+        NORU_REVIEW_FAIL_ON: ${{ inputs.fail-on }}
+        NORU_REVIEW_BASELINE: ${{ inputs.baseline }}
+        NORU_REVIEW_MAX_AGE_DAYS: ${{ inputs.max-age-days }}
+        NORU_REVIEW_WARN_WITHIN_DAYS: ${{ inputs.warn-within-days }}
+        NORU_REVIEW_GATE_ON_NEW: ${{ inputs.gate-on-new }}
+        NORU_REVIEW_REPORT_PATH: ${{ inputs.report-path }}
+        NORU_REVIEW_SUMMARY: ${{ inputs.summary }}
+      run: |
+        set -uo pipefail
+        root="$GITHUB_ACTION_PATH"
+        while [ "$root" != "/" ] && [ ! -f "$root/scripts/ci_review.py" ]; do
+          root="$(dirname "$root")"
+        done
+        if [ ! -f "$root/scripts/ci_review.py" ]; then
+          echo "::error::could not find scripts/ci_review.py above $GITHUB_ACTION_PATH"
+          exit 1
+        fi
+
+        report="${NORU_REVIEW_REPORT_PATH:-${RUNNER_TEMP:-/tmp}/noru-ci-review.json}"
+        text_report="${RUNNER_TEMP:-/tmp}/noru-ci-review.txt"
+        args=(
+          "--repo=$NORU_REVIEW_REPO"
+          "--plugins=$root/plugins"
+          "--base-ref=$NORU_REVIEW_BASE_REF"
+          "--mode=$NORU_REVIEW_MODE"
+          "--max-age-days=$NORU_REVIEW_MAX_AGE_DAYS"
+          "--warn-within-days=$NORU_REVIEW_WARN_WITHIN_DAYS"
+          "--report=$report"
+          "--output=text"
+        )
+        [ -n "$NORU_REVIEW_PIECES" ] && args+=("--pieces=$NORU_REVIEW_PIECES")
+        [ -n "$NORU_REVIEW_FAIL_ON" ] && args+=("--fail-on=$NORU_REVIEW_FAIL_ON")
+        [ -n "$NORU_REVIEW_BASELINE" ] && args+=("--baseline=$NORU_REVIEW_BASELINE")
+        [ "$NORU_REVIEW_GATE_ON_NEW" = "true" ] && args+=("--gate-on-new")
+
+        python3 "$root/scripts/ci_review.py" "${args[@]}" > "$text_report"
+        code=$?
+        cat "$text_report"
+        if [ "$NORU_REVIEW_SUMMARY" = "true" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          {
+            echo '```text'
+            cat "$text_report"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+        if [ -f "$report" ]; then
+          python3 - "$report" >> "$GITHUB_OUTPUT" <<'PY'
+        import json, sys
+        report = json.load(open(sys.argv[1]))
+        print(f"status={report['status']}")
+        print(f"selected-pieces={json.dumps(report['selected_pieces'], separators=(',', ':'))}")
+        PY
+        fi
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+        exit "$code"

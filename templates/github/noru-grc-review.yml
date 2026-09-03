@@ -1,0 +1,33 @@
+name: Noru GRC review
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+# The review action is structurally read-only and receives no Noru credential. Fork pull requests
+# run the same local checks as first-party pull requests; a piece whose external input is absent is
+# reported as skipped, never passed.
+permissions:
+  contents: read
+
+concurrency:
+  group: noru-grc-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Detect and review affected GRC pieces
+        uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.5.0
+        with:
+          base-ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+          # Set the repository variable NORU_GRC_MODE=gate after the warning report is understood.
+          mode: ${{ vars.NORU_GRC_MODE || 'warn' }}
+          gate-on-new: true

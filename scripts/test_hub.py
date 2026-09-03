@@ -278,11 +278,14 @@ def main(argv):
         workflows = repo / ".github" / "workflows"
         workflows.mkdir(parents=True)
         (repo / "publish.js").write_text(
+            'const sourceSlug = "noru-tech/noru";\n'
             'fetch("https://api.noru.tech/v1/privacy/datamaps", { token: "do-not-print" });\n',
             encoding="utf-8",
         )
         (workflows / "privacy.yml").write_text(
-            'on:\n  push:\n    paths: [".fides/datamap.yml"]\n', encoding="utf-8"
+            'on:\n  push:\n    paths: [".fides/datamap.yml"]\n'
+            'env:\n  NORU_SOURCE_SLUG: noru-tech/noru\n',
+            encoding="utf-8",
         )
         git(repo, "add", "publish.js", ".github/workflows/privacy.yml")
         git(repo, "commit", "-m", "add competing datamap writers")
@@ -300,9 +303,65 @@ def main(argv):
         )
         results.check(
             "privacy writer warning cites files without echoing source content",
-            "publish.js:1" in writer_check["detail"]
+            "publish.js:2" in writer_check["detail"]
             and ".github/workflows/privacy.yml:3" in writer_check["detail"]
             and "do-not-print" not in json.dumps(writer_check),
+            writer_check,
+        )
+        results.check(
+            "doctor detects repeated source slugs without printing the slug",
+            "repeated source slug declaration(s)" in writer_check["detail"]
+            and "publish.js:1" in writer_check["detail"]
+            and ".github/workflows/privacy.yml:5" in writer_check["detail"]
+            and "noru-tech/noru" not in writer_check["detail"],
+            writer_check,
+        )
+
+    # A sanitized copy of noru-tech/noru's real sync-privacy-data-map workflow. It legitimately
+    # contains a path trigger, a slug declaration and a REST write in one file; those are signals
+    # for one publisher, not three separate writers.
+    with tempfile.TemporaryDirectory(prefix="noru-hub-real-workflow-") as tmp:
+        repo = pathlib.Path(tmp) / "repo"
+        workflow = repo / ".github" / "workflows" / "sync-privacy-data-map.yml"
+        workflow.parent.mkdir(parents=True)
+        git(repo.parent, "init", "-b", "main", str(repo))
+        git(repo, "config", "user.email", "fixture@example.com")
+        git(repo, "config", "user.name", "Fixture")
+        workflow.write_text(
+            "name: Sync privacy data map\n"
+            "on:\n"
+            "  push:\n"
+            "    branches: [main]\n"
+            "    paths:\n"
+            "      - \".fides/datamap.yml\"\n"
+            "jobs:\n"
+            "  sync:\n"
+            "    steps:\n"
+            "      - name: Convert and push data map\n"
+            "        env:\n"
+            "          NORU_API_TOKEN: ${{ secrets.NORU_PRIVACY_DATAMAP_TOKEN }}\n"
+            "          NORU_SOURCE_SLUG: ${{ github.repository }}\n"
+            "        run: |\n"
+            "          jq -n --arg slug \"$GITHUB_REPOSITORY\" '{slug:$slug}'\n"
+            "          curl -X POST \"$NORU_API_URL/v1/privacy/datamaps\" --data @-\n",
+            encoding="utf-8",
+        )
+        git(repo, "add", ".github/workflows/sync-privacy-data-map.yml")
+        git(repo, "commit", "-m", "add current Noru privacy sync workflow")
+        doctor = run(
+            ["node", str(DOCTOR), f"--repo={repo}", "--output=json", "--quiet"], repo
+        )
+        doctor_payload = json.loads(doctor.stdout)
+        writer_check = next(
+            check for check in doctor_payload["checks"] if check["id"] == "privacy-writers"
+        )
+        results.check(
+            "doctor treats the Noru monorepo privacy sync workflow as one writer",
+            doctor.returncode == 0
+            and writer_check["ok"]
+            and "one possible datamap writer" in writer_check["detail"]
+            and ".github/workflows/sync-privacy-data-map.yml" in writer_check["detail"]
+            and "NORU_PRIVACY_DATAMAP_TOKEN" not in writer_check["detail"],
             writer_check,
         )
 

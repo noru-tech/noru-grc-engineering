@@ -124,7 +124,8 @@ codex plugin add change-control@noru-grc-engineering
 
 Then configure Noru MCP: [Codex guide](./docs/clients/codex.md).
 
-Also: [Cursor](./docs/clients/cursor.md) · [generic MCP clients](./docs/clients/generic-mcp.md)
+Also: [Cursor](./docs/clients/cursor.md) · [generic MCP clients](./docs/clients/generic-mcp.md) ·
+[marketplace capability metadata](./docs/marketplace.md)
 
 For an end-to-end repository rollout, including read-only pull-request checks and the separate
 publication boundary, follow [developer onboarding](./docs/developer-onboarding.md).
@@ -150,11 +151,15 @@ The same pieces run headless, so the record stays true between audits instead of
 before one:
 
 ```yaml
-- uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.4.1
+- uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.5.0
   with:
-    piece: ai-inventory
+    base-ref: ${{ github.event.pull_request.base.sha }}
     mode: warn      # switch to gate once the report is quiet
 ```
+
+The [supported GitHub template](./templates/github/noru-grc-review.yml) supplies the full checkout,
+permissions and fork-safe defaults. Use the lower-level `noru-ci` action when a repository wants to
+run one explicitly adopted piece rather than route a branch diff.
 
 Three things fail a build, and **all of them are computed from the repository, a calendar and a
 committed file** — no network, no credential, so this works on a pull request from a fork:
@@ -268,6 +273,8 @@ noru-grc-engineering/
 │   ├── privacy-datamap/                # :scan :diff :push  (MCP)
 │   └── change-control/                 # :scan :diff :push  (MCP) + credentialed forge exporters
 ├── .github/actions/noru-ci/            # the CI-mode action: scan, validate, expiry, diff, push
+├── .github/actions/noru-review/        # branch routing + structurally read-only consolidated CI
+├── templates/github/                   # copyable, fork-safe pull-request workflow
 ├── scripts/                            # scaffolder, contract test, checks — stdlib/built-ins only
 ├── tests/fixture-repo/                 # the repository the collectors are tested against
 └── docs/
@@ -285,6 +292,7 @@ python3 scripts/test_collectors.py    # collectors detect what the pieces claim 
 python3 scripts/test_idempotency.py   # a second push must be a no-op
 python3 scripts/contract_test.py      # every plugin satisfies requirements 1-9
 python3 scripts/test_ci_mode.py       # CI mode really fails on drift and on an expired claim
+python3 scripts/test_ci_review.py     # one fork-safe branch report, with no diff or push route
 python3 scripts/test_hub.py           # branch routing and duplicate-writer warnings stay read-only
 ```
 

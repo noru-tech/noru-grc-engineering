@@ -1,6 +1,6 @@
 {
   "name": "ai-inventory",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Scan a repository for the AI systems, model providers and oversight points it actually contains, review the manifest in a PR, and land it in Noru.",
   "author": {
     "name": "Noru",

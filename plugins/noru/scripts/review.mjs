@@ -129,6 +129,13 @@ export function reviewRepository(opts) {
   if (git(repo, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
     throw new Error(`${repo} is not a git work tree`);
   }
+  try {
+    git(repo, ["rev-parse", "--verify", "--quiet", `${opts.baseRef}^{commit}`]);
+  } catch {
+    throw new Error(
+      `base ref '${opts.baseRef}' does not resolve in this checkout; fetch the base branch with full history`,
+    );
+  }
   const mergeBase = git(repo, ["merge-base", opts.baseRef, "HEAD"]);
   const head = git(repo, ["rev-parse", "HEAD"]);
   const branch = git(repo, ["branch", "--show-current"]);
