@@ -13,13 +13,15 @@ const ROUTING_PATH = join(ROOT, "references", "routing.json");
 const SIGNALS_PATH = join(ROOT, "references", "review-signals.json");
 const USAGE =
   "usage: review.mjs [--repo=<path>] [--base-ref=<ref>] [--pieces=a,b] " +
-  "[--include-untracked] [--with-diff] [--output=json|text] [--quiet]\n";
+  "[--available-pieces=a,b] [--include-untracked] [--with-diff|--run-diff] " +
+  "[--output=json|text] [--quiet]\n";
 
 function parseArgs(argv) {
   const opts = {
     repo: process.cwd(),
     baseRef: "origin/main",
     explicit: null,
+    available: null,
     includeUntracked: false,
     withDiff: false,
     json: false,
@@ -30,8 +32,10 @@ function parseArgs(argv) {
     else if (arg.startsWith("--base-ref=")) opts.baseRef = arg.slice(11);
     else if (arg.startsWith("--pieces=")) {
       opts.explicit = arg.slice(9).split(",").map((value) => value.trim()).filter(Boolean);
+    } else if (arg.startsWith("--available-pieces=")) {
+      opts.available = arg.slice(19).split(",").map((value) => value.trim()).filter(Boolean);
     } else if (arg === "--include-untracked") opts.includeUntracked = true;
-    else if (arg === "--with-diff") opts.withDiff = true;
+    else if (arg === "--with-diff" || arg === "--run-diff") opts.withDiff = true;
     else if (arg === "--output=json") opts.json = true;
     else if (arg === "--output=text") opts.json = false;
     else if (arg === "--quiet") opts.quiet = true;
@@ -136,21 +140,46 @@ export function reviewRepository(opts) {
   const names = new Set(catalogue.map((piece) => piece.name));
   const unknown = (opts.explicit ?? []).filter((name) => !names.has(name));
   if (unknown.length > 0) throw new Error(`unknown piece(s): ${unknown.join(", ")}`);
+  const unknownAvailable = (opts.available ?? []).filter((name) => !names.has(name));
+  if (unknownAvailable.length > 0) {
+    throw new Error(`unknown available piece(s): ${unknownAvailable.join(", ")}`);
+  }
+  const available = opts.available == null ? null : new Set(opts.available);
 
   const pieces = catalogue.map((piece) => {
+    const installed = available === null ? null : available.has(piece.name);
     if (opts.explicit !== null) {
       const selected = opts.explicit.includes(piece.name);
       return {
         name: piece.name,
         disposition: selected ? "selected" : "skipped",
         reasons: [selected ? "explicitly requested" : "not in the explicit piece selection"],
+        installed,
+        run_state:
+          selected && installed === false ? "unavailable" : selected ? "ready" : "not_selected",
+        availability_reason:
+          installed === false
+            ? `the ${piece.name} plugin is not present in the host's available skills`
+            : installed === true
+              ? `the ${piece.name} plugin is available independently`
+              : "installed-plugin availability was not supplied to the selector",
       };
     }
     const reasons = reasonsFor(repo, considered, signals[piece.name] ?? {});
+    const selected = reasons.length > 0;
     return {
       name: piece.name,
-      disposition: reasons.length > 0 ? "selected" : "skipped",
-      reasons: reasons.length > 0 ? reasons : ["no branch-change signal matched"],
+      disposition: selected ? "selected" : "skipped",
+      reasons: selected ? reasons : ["no branch-change signal matched"],
+      installed,
+      run_state:
+        selected && installed === false ? "unavailable" : selected ? "ready" : "not_selected",
+      availability_reason:
+        installed === false
+          ? `the ${piece.name} plugin is not present in the host's available skills`
+          : installed === true
+            ? `the ${piece.name} plugin is available independently`
+            : "installed-plugin availability was not supplied to the selector",
     };
   });
 
@@ -165,6 +194,7 @@ export function reviewRepository(opts) {
     clean: considered.length === 0,
     changed_files: considered,
     excluded_untracked: opts.includeUntracked ? [] : untracked.map((file) => file.path),
+    available_pieces: opts.available ?? null,
     pieces,
   };
 }
@@ -175,10 +205,16 @@ function render(report) {
     `  ${report.changed_files.length} changed file(s); ${report.excluded_untracked.length} untracked file(s) excluded`,
     "",
   ];
-  if (report.clean) lines.push("No considered branch changes. No pieces selected.", "");
+  if (report.clean && !report.pieces.some((piece) => piece.disposition === "selected")) {
+    lines.push("No considered branch changes. No pieces selected.", "");
+  }
   for (const piece of report.pieces) {
-    lines.push(`  ${piece.disposition === "selected" ? "+" : "-"} ${piece.name}: ${piece.disposition}`);
+    const availability = piece.run_state === "unavailable" ? " (not installed)" : "";
+    lines.push(
+      `  ${piece.disposition === "selected" ? "+" : "-"} ${piece.name}: ${piece.disposition}${availability}`,
+    );
     for (const reason of piece.reasons) lines.push(`      ${reason}`);
+    if (piece.run_state === "unavailable") lines.push(`      ${piece.availability_reason}`);
   }
   if (report.excluded_untracked.length > 0) {
     lines.push("", "Untracked files were reported but not used for routing; stage them or pass --include-untracked:");

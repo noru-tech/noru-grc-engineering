@@ -137,7 +137,7 @@
     {
       "name": "noru",
       "source": "./plugins/noru",
-      "description": "Review a repository, route it to the relevant last-mile pieces, and check the Noru connection, toolchain and provenance they share.",
+      "description": "Run consolidated branch reviews across independently installed GRC pieces, summarize live Noru work requiring attention with read scopes only, and check shared connection and repository context.",
       "version": "0.4.1",
       "license": "MIT",
       "category": "compliance",

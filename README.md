@@ -134,8 +134,8 @@ publication boundary, follow [developer onboarding](./docs/developer-onboarding.
 ```text
 /noru:connect        # confirm the MCP connection and pick least-privilege scopes
 /noru:doctor         # node, python3, git, .gitignore hygiene
-/noru:review         # select relevant checks for this branch; no Noru writes
-/ai-inventory:scan   # → .noru/ai-inventory.yml, reviewed like any other diff
+/noru:review         # run relevant installed checks for this branch; no Noru writes
+/noru:status         # summarize live blockers and expiring work; read scopes only
 /ai-inventory:diff   # → the exact plan, reads only
 /ai-inventory:push   # → writes, after you confirm
 ```

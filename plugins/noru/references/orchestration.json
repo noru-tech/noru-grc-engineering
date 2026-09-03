@@ -1,0 +1,134 @@
+{
+  "mcp_contract_version": "1.0.0",
+  "pieces": {
+    "ai-inventory": {
+      "manifest": ".noru/ai-inventory.yml",
+      "scan_command": "/ai-inventory:scan",
+      "diff_command": "/ai-inventory:diff",
+      "scan_read_tools": [],
+      "diff_read_tools": [
+        "findOrganization",
+        "getOrganizationAssets",
+        "getOrganizationControls",
+        "getOrganizationEvidence",
+        "getOrganizationFrameworks",
+        "getOrganizationVendors"
+      ]
+    },
+    "audit-pack": {
+      "manifest": ".noru/audit-pack.yml",
+      "generated_files": [".noru/audit-pack/"],
+      "scan_command": "/audit-pack:scan",
+      "diff_command": "/audit-pack:diff",
+      "scan_read_tools": [
+        "getOrganizationFrameworks",
+        "getOrganizationControls",
+        "getControlContext",
+        "getEvidenceForControl",
+        "getEvidenceItems"
+      ],
+      "diff_read_tools": ["findOrganization", "getOrganizationEvidence"],
+      "needs_input": ["framework", "audit window"]
+    },
+    "change-control": {
+      "manifest": ".noru/change-control.yml",
+      "scan_command": "/change-control:scan",
+      "diff_command": "/change-control:diff",
+      "scan_read_tools": [
+        "getOrganizationControls",
+        "getControlContext",
+        "getEvidenceForControl"
+      ],
+      "diff_read_tools": ["findOrganization", "getOrganizationEvidence", "getSecurityFindings"],
+      "needs_input": ["review window", "forge export access"]
+    },
+    "evidence-push": {
+      "manifest": ".noru/evidence-push.yml",
+      "scan_command": "/evidence-push:scan",
+      "diff_command": "/evidence-push:diff",
+      "scan_read_tools": ["getOrganizationControls", "getControlContext", "getEvidenceItems"],
+      "diff_read_tools": ["findOrganization", "getOrganizationEvidence"]
+    },
+    "governance-records": {
+      "manifest": ".noru/governance-records.yml",
+      "scan_command": "/governance-records:scan",
+      "diff_command": "/governance-records:diff",
+      "scan_read_tools": ["getOrganizationControls", "getControlContext", "getEvidenceItems"],
+      "diff_read_tools": ["findOrganization", "getOrganizationEvidence"]
+    },
+    "iac-scan": {
+      "manifest": ".noru/iac-scan.yml",
+      "scan_command": "/iac-scan:scan",
+      "diff_command": "/iac-scan:diff",
+      "scan_read_tools": ["getSecurityFindings", "getOrganizationAssets", "getOrganizationRisks"],
+      "diff_read_tools": ["findOrganization", "getSecurityFindings"]
+    },
+    "privacy-datamap": {
+      "manifest": ".noru/privacy-datamap.yml",
+      "generated_files": [".fides/datamap.yml"],
+      "scan_command": "/privacy-datamap:scan",
+      "diff_command": "/privacy-datamap:diff",
+      "scan_read_tools": [],
+      "diff_read_tools": [
+        "findOrganization",
+        "getPrivacyDataMap",
+        "getPrivacyTaxonomy",
+        "listPrivacyDatasets"
+      ]
+    },
+    "review-signoff": {
+      "manifest": ".noru/review-signoff.yml",
+      "scan_command": "/review-signoff:scan",
+      "diff_command": "/review-signoff:diff",
+      "scan_read_tools": [
+        "getOrganizationControls",
+        "getControlContext",
+        "getEvidenceForControl",
+        "getEvidenceItems"
+      ],
+      "diff_read_tools": ["findOrganization", "getOrganizationEvidence"]
+    }
+  },
+  "status_sections": {
+    "framework_posture": {
+      "tools": ["getOrganizationFrameworks"],
+      "scope": "read:frameworks"
+    },
+    "controls_and_evidence_gaps": {
+      "tools": ["getOrganizationControls", "getControlContext"],
+      "scope": "read:controls"
+    },
+    "evidence_expiry_and_signoffs": {
+      "tools": ["getOrganizationEvidence"],
+      "scope": "read:evidence",
+      "record_url": "https://app.noru.tech/evidence-vault/{id}"
+    },
+    "security_findings": {
+      "tools": ["getSecurityFindings"],
+      "scope": "read:risks",
+      "record_url": "https://app.noru.tech/security/findings/{id}"
+    },
+    "accepted_risks": {
+      "tools": ["getOrganizationRisks"],
+      "scope": "read:risks",
+      "record_url": "https://app.noru.tech/risk/register/{id}"
+    },
+    "privacy_inbox": {
+      "tools": ["listPrivacyReviewItems"],
+      "scope": "read:datamaps"
+    },
+    "privacy_overview": {
+      "tools": ["getPrivacyOverview"],
+      "scope": "read:datamaps"
+    },
+    "privacy_assessments": {
+      "tools": ["listPrivacyAssessments"],
+      "scope": "read:datamaps",
+      "record_url": "https://app.noru.tech/privacy/assessments/{id}"
+    }
+  },
+  "record_urls": {
+    "control": "https://app.noru.tech/controls/{id}",
+    "privacy_review": "https://app.noru.tech/privacy/review"
+  }
+}

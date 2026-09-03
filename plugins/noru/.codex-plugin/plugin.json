@@ -1,7 +1,7 @@
 {
   "name": "noru",
   "version": "0.4.1",
-  "description": "Route, connect and diagnose Noru's last-mile GRC pieces for a repository.",
+  "description": "Run consolidated repository reviews and read-only Noru status across independently installed GRC pieces.",
   "author": {
     "name": "Noru",
     "email": "support@noru.tech",
@@ -23,7 +23,7 @@
   "interface": {
     "displayName": "Noru GRC Engineering",
     "shortDescription": "Find and run the right last-mile GRC work for a repository.",
-    "longDescription": "The hub for Noru's last-mile GRC pieces. It reviews a repository to identify relevant pieces, verifies the Noru MCP connection and local toolchain, reports least-privilege scopes, and gathers the provenance every piece reuses. Install it alongside any piece.",
+    "longDescription": "The hub for Noru's last-mile GRC pieces. It discovers independently installed pieces, runs consolidated branch reviews, reports live Noru work requiring attention with read scopes only, verifies the connection and local toolchain, and gathers the provenance every piece reuses.",
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
@@ -35,6 +35,7 @@
       "Least-privilege scope reporting",
       "Read-only repository triage",
       "Read-only branch review with explicit piece selection",
+      "Read-only consolidated Noru status with per-section scope degradation",
       "GRC piece routing",
       "Repository provenance",
       "Shared diff and plan helpers"

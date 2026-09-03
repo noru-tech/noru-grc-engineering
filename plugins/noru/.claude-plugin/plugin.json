@@ -3,7 +3,7 @@
   "name": "noru",
   "displayName": "Noru GRC Engineering",
   "version": "0.4.1",
-  "description": "Route, connect and diagnose Noru's last-mile GRC pieces for a repository.",
+  "description": "Run consolidated repository reviews and read-only Noru status across independently installed GRC pieces.",
   "author": {
     "name": "Noru",
     "email": "support@noru.tech"

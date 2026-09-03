@@ -15,6 +15,7 @@ python3 scripts/test_idempotency.py    # a second push is a no-op, end to end
 python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
 python3 scripts/test_ci_mode.py        # CI mode fails on drift, on an expired claim, and on
                                        # personal data the baseline does not permit
+python3 scripts/test_hub.py            # branch routing, installed subsets and read-only hub contracts
 ```
 
 The repository checks above deliberately have no external dependency. Before publishing the
@@ -27,6 +28,8 @@ claude plugin validate --strict .
 | Property | How it is proven |
 |---|---|
 | Public marketplace metadata is complete | `check_repo.py` rejects `TODO`, `TBD` and `CHANGE_ME` anywhere in either marketplace or either client's plugin manifests, plus unsupported `commands` and `hooks` fields in Codex manifests |
+| Review routing works with an independently installed subset | `test_hub.py` routes a branch containing both AI and schema changes while exposing only `privacy-datamap`; privacy is ready and the still-selected AI review is explicitly unavailable rather than silently skipped |
+| The hub status surface stays read-only | `check_repo.py` and `test_hub.py` require every status capability to declare a `read:*` scope and a `find*`, `get*` or `list*` tool, and require the command's capability-first, no-push and partial-section contracts |
 | Collectors are deterministic | `contract_test.py` runs each collector twice over two copies of `tests/fixture-repo/` and diffs the derived output byte for byte |
 | Collectors are offline | the collector source is scanned for every socket-opening API; a match fails the build |
 | Validators are stdlib-only | every `import` in a validator is checked against an allowed standard-library set |
@@ -96,6 +99,10 @@ These pieces are **reviewed and internally consistent, not field-tested.** Every
 proven against fixtures on every build; none of it has been exercised against a live organization
 at production scale. Treat a first run as something to check, not something to trust:
 
+- `/noru:review` and `/noru:status` are agent-orchestrated commands. Their deterministic routing,
+  installed-subset handling and read-only capability matrix are executed in tests, but the host's
+  cross-skill invocation and the live MCP report assembly are not simulated here. Exercise the first
+  production run against a read-only key and check each section against the Noru UI.
 - A collector's recall against a large polyglot codebase is unproven. It will miss a provider
   reached through a hand-rolled HTTP client.
 - The Article 50 disclosure states are a *repository* fact. Whether that fact matches the running

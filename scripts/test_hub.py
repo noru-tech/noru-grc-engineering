@@ -10,6 +10,11 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 REVIEW = ROOT / "plugins" / "noru" / "scripts" / "review.mjs"
 DOCTOR = ROOT / "plugins" / "noru" / "scripts" / "doctor.mjs"
+CONTEXT = ROOT / "plugins" / "noru" / "scripts" / "context.mjs"
+ORCHESTRATION = ROOT / "plugins" / "noru" / "references" / "orchestration.json"
+ROUTING = ROOT / "plugins" / "noru" / "references" / "routing.json"
+REVIEW_COMMAND = ROOT / "plugins" / "noru" / "commands" / "review.md"
+STATUS_COMMAND = ROOT / "plugins" / "noru" / "commands" / "status.md"
 
 
 class Results:
@@ -52,15 +57,109 @@ def main(argv):
         return 2
 
     results = Results()
+    orchestration = json.loads(ORCHESTRATION.read_text(encoding="utf-8"))
+    routed_names = {
+        piece["name"] for piece in json.loads(ROUTING.read_text(encoding="utf-8"))["pieces"]
+    }
+    results.check(
+        "orchestration covers every routed piece exactly once",
+        set(orchestration["pieces"]) == routed_names,
+        orchestration["pieces"].keys(),
+    )
+    piece_contracts_match = True
+    piece_contract_detail = []
+    for name, entry in orchestration["pieces"].items():
+        contract = json.loads((ROOT / "plugins" / name / "piece.json").read_text(encoding="utf-8"))
+        expected_scan = f"/{name}:scan"
+        expected_diff = f"/{name}:diff"
+        ok = (
+            entry["manifest"] == contract["artifact"]
+            and entry["scan_command"] == expected_scan
+            and entry["diff_command"] == expected_diff
+            and entry.get("generated_files", [])
+            == [output["path"] for output in contract.get("outputs", [])]
+        )
+        piece_contracts_match = piece_contracts_match and ok
+        if not ok:
+            piece_contract_detail.append(name)
+    results.check(
+        "review orchestration agrees with each independently installed piece contract",
+        piece_contracts_match,
+        piece_contract_detail,
+    )
+    status_sections = orchestration["status_sections"]
+    results.check(
+        "status capability matrix is read-only",
+        all(
+            section["scope"].startswith("read:")
+            and all(tool.startswith(("find", "get", "list")) for tool in section["tools"])
+            for section in status_sections.values()
+        ),
+        status_sections,
+    )
+
+    review_command = REVIEW_COMMAND.read_text(encoding="utf-8")
+    status_command = STATUS_COMMAND.read_text(encoding="utf-8")
+    results.check(
+        "review command enforces capability discovery and the no-push boundary",
+        "getMcpCapabilities" in review_command
+        and "Never invoke a `:push`" in review_command
+        and "capabilities.write" in review_command
+        and "Nothing was written to Noru" in review_command,
+    )
+    results.check(
+        "status command covers filters, partial scopes, links and privacy reconciliation",
+        all(
+            fragment in status_command
+            for fragment in (
+                "--framework=",
+                "--domain=",
+                "--control=",
+                "--due-before=",
+                "getMcpCapabilities",
+                "nextCursor",
+                "counts.byKind",
+                "Unavailable or partial sections",
+                "Nothing was written to Noru",
+            )
+        ),
+    )
+    results.check(
+        "status report orders blockers before facts and recommendations",
+        status_command.index("Blockers and expired items")
+        < status_command.index("Live Noru facts")
+        < status_command.index("Recommendations"),
+    )
+
     with tempfile.TemporaryDirectory(prefix="noru-hub-") as tmp:
         repo = pathlib.Path(tmp) / "repo"
         repo.mkdir()
         git(repo, "init", "-b", "main")
         git(repo, "config", "user.email", "fixture@example.com")
         git(repo, "config", "user.name", "Fixture")
+        git(
+            repo,
+            "remote",
+            "add",
+            "origin",
+            "https://fixture-user:fixture-password@example.com/acme/repo.git?token=hidden#part",
+        )
         (repo / "README.md").write_text("fixture\n", encoding="utf-8")
         git(repo, "add", "README.md")
         git(repo, "commit", "-m", "initial")
+
+        context_result = run(
+            ["node", str(CONTEXT), f"--repo={repo}", "--output=json", "--quiet"], repo
+        )
+        context_payload = json.loads(context_result.stdout)
+        results.check(
+            "review context includes a credential-sanitized repository remote",
+            context_result.returncode == 0
+            and context_payload["provenance"]["remote"]
+            == "https://example.com/acme/repo.git"
+            and context_payload["provenance"]["slug"] == "acme/repo",
+            context_payload,
+        )
 
         unchanged, payload = review(repo)
         results.check("unchanged branch succeeds", unchanged.returncode == 0, unchanged.stderr)
@@ -93,6 +192,24 @@ def main(argv):
             pieces["privacy-datamap"]["disposition"] == "selected"
             and pieces["ai-inventory"]["disposition"] == "selected",
             pieces,
+        )
+        subset, payload = review(repo, "--available-pieces=privacy-datamap")
+        pieces = dispositions(payload)
+        results.check(
+            "independently installed subset marks relevant absent pieces unavailable",
+            subset.returncode == 0
+            and pieces["privacy-datamap"]["run_state"] == "ready"
+            and pieces["privacy-datamap"]["installed"] is True
+            and pieces["ai-inventory"]["disposition"] == "selected"
+            and pieces["ai-inventory"]["run_state"] == "unavailable"
+            and pieces["ai-inventory"]["installed"] is False,
+            pieces,
+        )
+        diff_alias, payload = review(repo, "--run-diff")
+        results.check(
+            "run-diff alias records the optional diff request",
+            diff_alias.returncode == 0 and payload["requested_diff"] is True,
+            payload,
         )
         results.check(
             "content reasons carry line citations",
@@ -150,6 +267,12 @@ def main(argv):
             "an unresolved base ref fails explicitly",
             bad.returncode == 2 and "error:" in bad.stderr,
             bad.stderr,
+        )
+        bad_piece = review(repo, "--available-pieces=not-a-piece")[0]
+        results.check(
+            "unknown installed piece names fail explicitly",
+            bad_piece.returncode == 2 and "unknown available piece" in bad_piece.stderr,
+            bad_piece.stderr,
         )
 
         workflows = repo / ".github" / "workflows"

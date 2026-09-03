@@ -8,9 +8,12 @@ one version number; the release workflow fails if they disagree.
 
 ### Added
 
-- `/noru:review` performs deterministic, read-only branch triage across all shipped pieces, cites
-  the signals behind every selection, keeps skipped pieces visible, and can run selected local
-  checks without ever invoking a push.
+- `/noru:review` performs deterministic branch triage, discovers the independently installed piece
+  subset, runs selected local scans and validators without invoking a push, optionally prepares
+  read-only diffs, and keeps unavailable and failed pieces visible in one partial-result report.
+- `/noru:status` reports live blockers, control and evidence gaps, expiry, findings, accepted risks,
+  Privacy Inbox work, special-category processing, assessments and due sign-offs using only the read
+  tools exposed by `getMcpCapabilities`; missing scopes degrade only their section.
 - The developer onboarding path now separates credential-free pull-request checks from reviewed,
   protected publication and calls out the current MCP/headless execution boundary.
 - `/noru:doctor` warns when tracked code or workflows indicate multiple possible privacy data-map

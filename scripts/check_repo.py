@@ -388,6 +388,79 @@ def check_hub_routing(problems):
     if not review_command.is_file():
         problems.append("[noru] missing commands/review.md")
 
+    orchestration_path = ROOT / "plugins" / "noru" / "references" / "orchestration.json"
+    status_command = ROOT / "plugins" / "noru" / "commands" / "status.md"
+    if not orchestration_path.is_file():
+        problems.append("[noru] missing references/orchestration.json")
+        return
+    try:
+        orchestration = json.loads(orchestration_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        problems.append(f"[noru] references/orchestration.json is invalid JSON: {exc}")
+        return
+
+    orchestration_pieces = orchestration.get("pieces")
+    if not isinstance(orchestration_pieces, dict):
+        problems.append("[noru] references/orchestration.json must contain a 'pieces' object")
+    else:
+        orchestrated = set(orchestration_pieces)
+        if orchestrated != declared:
+            problems.append(
+                "[noru] orchestration pieces do not match declared pieces: "
+                f"missing {sorted(declared - orchestrated)}, "
+                f"unknown {sorted(orchestrated - declared)}"
+            )
+        for name, entry in orchestration_pieces.items():
+            if not isinstance(entry, dict):
+                problems.append(f"[noru] orchestration entry for {name} must be an object")
+                continue
+            piece_path = ROOT / "plugins" / name / "piece.json"
+            if not piece_path.is_file():
+                continue
+            contract = json.loads(piece_path.read_text(encoding="utf-8"))
+            if entry.get("manifest") != contract.get("artifact"):
+                problems.append(
+                    f"[noru] orchestration manifest for {name} is {entry.get('manifest')}, "
+                    f"piece.json declares {contract.get('artifact')}"
+                )
+            generated = [output.get("path") for output in contract.get("outputs", [])]
+            if entry.get("generated_files", []) != generated:
+                problems.append(
+                    f"[noru] orchestration generated files for {name} are "
+                    f"{entry.get('generated_files', [])}, piece.json declares {generated}"
+                )
+            for phase in ("scan", "diff"):
+                if entry.get(f"{phase}_command") != f"/{name}:{phase}":
+                    problems.append(
+                        f"[noru] orchestration {phase} command for {name} must be /{name}:{phase}"
+                    )
+                tools = entry.get(f"{phase}_read_tools")
+                if not isinstance(tools, list) or not all(isinstance(tool, str) for tool in tools):
+                    problems.append(
+                        f"[noru] orchestration {phase}_read_tools for {name} must be a string list"
+                    )
+
+    sections = orchestration.get("status_sections")
+    if not isinstance(sections, dict) or not sections:
+        problems.append("[noru] orchestration.json must declare status_sections")
+    else:
+        for name, section in sections.items():
+            scope = section.get("scope") if isinstance(section, dict) else None
+            tools = section.get("tools") if isinstance(section, dict) else None
+            if not isinstance(scope, str) or not scope.startswith("read:"):
+                problems.append(f"[noru] status section {name} must declare a read scope")
+            if not (
+                isinstance(tools, list)
+                and tools
+                and all(
+                    isinstance(tool, str) and tool.startswith(("find", "get", "list"))
+                    for tool in tools
+                )
+            ):
+                problems.append(f"[noru] status section {name} must contain read-tool names")
+    if not status_command.is_file():
+        problems.append("[noru] missing commands/status.md")
+
 
 def check_action_version_pins(problems):
     """Copyable action examples must not strand users on an older collector release."""
