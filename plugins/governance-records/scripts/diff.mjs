@@ -6,11 +6,8 @@
 //   .noru/.cache/noru-state.json                 existing evidence and its control links, written
 //                                                by the skill from getOrganizationEvidence
 //
-// No idempotency key is documented for evidence, so this piece does not assume one: every record
-// lands with a marker in its description that contains the record key and a digest of the rendered
-// account, and the diff looks for that marker in the evidence already in the organization. Same
-// key, same content -> skip. Same key, changed content -> a new record, because minutes that have
-// been rewritten are a different account and an auditor should see both.
+// Every create carries a content-addressed server key. The description marker remains a readable
+// compatibility probe for deployments predating that contract.
 //
 // Usage: node diff.mjs [--repo=<path>] [--output=json|text] [--quiet]
 // Exit codes: 0 plan written, 1 missing/unusable input, 2 usage error.
@@ -141,11 +138,16 @@ export function buildOperations(manifest, state) {
         ? `evidence ${existing.id} already carries this record's exact content marker`
         : superseded
           ? `evidence ${superseded.id} covers record '${record.key}' but the account has changed; ` +
-            "a new record will be created so both accounts remain visible (no idempotency key is " +
-            "documented for evidence — see the gap note in piece.json)"
+            "a new record will be created so both accounts remain visible"
           : "no evidence carries this record's marker yet",
-      idempotency: { kind: "client_probe", key: ["description contains marker"], marker },
+      idempotency: {
+        kind: "server_key",
+        key: ["organizationId", "operation", "arguments.idempotencyKey"],
+        value: `${MARKER_PREFIX}:${digest(marker)}`,
+        fallback: { kind: "client_probe", marker },
+      },
       arguments: {
+        idempotencyKey: `${MARKER_PREFIX}:${digest(marker)}`,
         title,
         description:
           `${marker} ${record.kind} for ${record.occurred_on}, filed by ${record.interpretation.owner} ` +
@@ -173,7 +175,10 @@ export function buildOperations(manifest, state) {
         reason:
           `evidence ${existing.id} exists but is not linked to '${mapping.control_id}'; the mapping ` +
           "was added to the manifest after the record was filed",
-        idempotency: { kind: "client_probe", key: ["evidenceId", "controlId"] },
+        idempotency: {
+          kind: "server_dedupe",
+          key: ["evidenceId", "controlId", "evidenceItemIds"],
+        },
         arguments: { evidenceId: existing.id, ...mappingArgs(mapping) },
       });
     }

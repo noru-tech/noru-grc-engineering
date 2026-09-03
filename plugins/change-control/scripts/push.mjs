@@ -69,8 +69,20 @@ function main(argv) {
       transport: op.transport,
       scope: op.scope,
       subject: op.subject,
-      effect: op.effect,
-      arguments: op.arguments,
+    effect: op.effect,
+    idempotency: op.idempotency,
+    ...(op.idempotency?.fallback
+      ? {
+          compatibility: {
+            when: "connected tool schema does not expose idempotencyKey",
+            mode: op.idempotency.fallback.kind,
+            arguments: Object.fromEntries(
+              Object.entries(op.arguments).filter(([key]) => key !== "idempotencyKey")
+            ),
+          },
+        }
+      : {}),
+    arguments: op.arguments,
     }));
 
   const callsPath = join(opts.repo, ".noru", ".cache", `${PIECE}.calls.json`);

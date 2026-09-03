@@ -54,21 +54,17 @@
   },
   "push": {
     "entrypoint": "scripts/push.mjs",
-    "mode": "keyed_upsert",
-    "collapses_to": {
-      "tool": "an idempotency-keyed variant of POST /v1/evidence/upload, if one is published",
-      "tracked_at": "https://github.com/noru-tech/noru-grc-engineering/issues"
-    },
+    "mode": "single_call",
     "operations": [
       {
         "name": "POST /v1/evidence/upload",
         "transport": "rest",
         "scope": "write:evidence",
         "idempotency": {
-          "kind": "client_probe",
-          "key": ["description contains marker"],
-          "verified_at": "https://api.noru.tech/llms.txt: \"Evidence Upload Guidance\" documents POST /v1/evidence/upload, its 50MB cap and its accepted MIME types, and the documented \"Idempotency/Upsert Behavior\" covers assets and security findings only. No idempotency key is documented for this endpoint, so the piece does not assume one.",
-          "gap": "No idempotency key is documented for this endpoint, so the piece does not rely on one: it embeds the artifact's sha256 in the evidence description and probes getOrganizationEvidence before uploading. A documented idempotency key for evidence — an externalId or a content hash — would let the probe go away."
+          "kind": "server_key",
+          "key": ["organizationId", "operation", "arguments.idempotencyKey"],
+          "verified_at": "Noru's evidence upload contract accepts Idempotency-Key, scopes it by organization and operation, returns created or reused, and rejects a changed payload under the same key. The plugin keeps its description-marker probe for deployments predating that contract.",
+          "fallback": "client_probe: description contains the artifact digest marker"
         }
       }
     ],

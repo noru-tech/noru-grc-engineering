@@ -38,9 +38,14 @@ One call in two needs a value from the one before it. Where a call carries `depe
 named field — the evidence id — from the result of the call it names, put it in, and **change
 nothing else**. That substitution is the only edit permitted to any call in this file.
 
-Do not improvise a call, do not reorder, do not add a control mapping that is not in the file, and
-do not retry a write on a 5xx without telling the user — where no idempotency key is documented, a
-blind retry is how duplicates happen.
+Do not improvise a call, reorder it, or add a control mapping that is not in the file. Exact keyed
+retries are safe when the server returns `created`/`reused`; use the recorded marker fallback for
+older servers.
+
+Before executing `createEvidence`, inspect the connected tool schema. When it exposes
+`idempotencyKey`, use the call's normal `arguments`. On an older deployment that does not expose
+that field, use `compatibility.arguments` instead and report that the marker-probe fallback was
+used. Do not silently remove any other argument.
 
 If the file contains no calls, you are done. That is what a second run should say.
 

@@ -96,9 +96,9 @@ signature for a review nobody did.
 
 ## Push has one wrinkle
 
-Two calls per sign-off: `createEvidence`, then `updateEvidence` to set the record's expiry — because
-the published create tool takes no expiry, and an attestation Noru does not know goes stale is one
-nothing can chase. The second call needs the id the first one returns, so it carries `depends_on`.
+The keyed `createEvidence` call includes `expiresAt`, so a new sign-off and its validity window land
+atomically. A separate `updateEvidence` appears only when the current-state probe finds that someone
+later changed the expiry on an existing record.
 Substitute that one field from the earlier call's result and change nothing else.
 
 ## What a second run should do

@@ -120,12 +120,12 @@ repository does not prove that. Say so in the rationale rather than implying the
 |---|---|---|
 | `ai_systems[]` | assets, `source: noru-ai-inventory`, `externalId: <slug>:<key>` | server upsert on `(source, externalId)` |
 | `providers[]` | vendors | server dedupe on name — the published tool description says an existing vendor is returned unchanged |
-| `ai_systems[]` | evidence, one per system, with repo + commit provenance | **client probe only** — see below |
-| evidence → controls | `linkEvidenceToControl` for the org's AI-framework controls | client probe |
+| `ai_systems[]` | evidence, one per system, with repo + commit provenance | server key; marker fallback for older servers |
+| evidence → controls | `linkEvidenceToControl` for the org's AI-framework controls | server dedupe on the link tuple |
 
-No idempotency key is documented for `createEvidence`, so the piece does not assume one. It embeds
-a content marker in the description and probes `getOrganizationEvidence` before creating. That
-fallback is recorded in `piece.json`, and it is why `:diff` before `:push` is not optional here.
+`createEvidence` receives a content-addressed `idempotencyKey`. A content marker and the
+`getOrganizationEvidence` probe remain as the compatibility fallback, recorded in `piece.json`.
+`:diff` before `:push` remains mandatory because it is the human review boundary.
 
 Because `ai_systems[].key` becomes half the asset upsert key, **it must never change** between scans
 of the same system. Renaming a key creates a second asset.

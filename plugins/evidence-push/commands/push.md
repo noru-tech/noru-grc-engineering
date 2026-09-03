@@ -61,7 +61,8 @@ If it prints "nothing to upload", you are done. That is what a second run should
   attached and, where you named `evidence_item_ids`, that it qualifies the right expectation.
 - Report each uploaded file with its evidence id. Uploaded evidence lands with
   `status: pending_review` — say so, because someone in Noru still has to review it.
-- Do not retry a failed upload automatically. Report the status and the (redacted) error, and let
-  the user decide; a blind retry, where no idempotency key is documented, is how duplicates happen.
+- Report `created`, `reused`, `failed`, and `skipped` separately. An exact retry is safe when Noru
+  returned an idempotency status. If the response identifies a legacy deployment, refresh the
+  marker probe before retrying instead of assuming the header was enforced.
 - Remind the user to commit `.noru/evidence-push.yml`, and to keep the artifacts themselves out of
   git unless they genuinely belong there.

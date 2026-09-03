@@ -8,6 +8,10 @@ one version number; the release workflow fails if they disagree.
 
 ### Added
 
+- Evidence-producing pieces now send stable, content-addressed idempotency keys, preserve marker
+  probes as an explicit older-server fallback, and report created versus reused upload outcomes.
+- Review sign-offs include expiry in their keyed create, removing the first-push dependency between
+  evidence creation and expiry update.
 - `/noru:review` performs deterministic branch triage, discovers the independently installed piece
   subset, runs selected local scans and validators without invoking a push, optionally prepares
   read-only diffs, and keeps unavailable and failed pieces visible in one partial-result report.

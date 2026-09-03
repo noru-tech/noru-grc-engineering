@@ -69,10 +69,10 @@
         "transport": "mcp",
         "scope": "write:evidence",
         "idempotency": {
-          "kind": "client_probe",
-          "key": ["description contains marker"],
-          "verified_at": "The createEvidence tool description published by https://api.noru.tech/v1/mcp documents creating text/note/link evidence with optional control mappings and states that file uploads are not supported over MCP; it documents no idempotency key. The \"Idempotency/Upsert Behavior\" section of https://api.noru.tech/llms.txt covers assets and security findings only. No key is documented for evidence, so this piece does not assume one.",
-          "gap": "No idempotency key is documented for evidence, so this piece does not rely on one: it embeds a marker built from the record key and a digest of the rendered account in the evidence description, and probes getOrganizationEvidence before creating. A documented key for evidence — an externalId, or the record key plus a content hash — would let the probe go away and would turn a rewritten account into an update rather than a second record."
+          "kind": "server_key",
+          "key": ["organizationId", "operation", "arguments.idempotencyKey"],
+          "verified_at": "Noru's createEvidence contract accepts idempotencyKey, scopes it by organization and operation, returns the original evidence id for identical retries, and rejects the same key with a changed payload. The description marker remains a compatibility probe for deployments predating that contract.",
+          "fallback": "client_probe: description contains the content marker"
         }
       },
       {
@@ -80,10 +80,9 @@
         "transport": "mcp",
         "scope": "write:evidence",
         "idempotency": {
-          "kind": "client_probe",
-          "key": ["evidenceId", "controlId"],
-          "verified_at": "The linkEvidenceToControl tool description published by https://api.noru.tech/v1/mcp documents linking an evidence record to a control and optionally narrowing the link to specific evidence-item template ids. It documents nothing about what a repeated link does, so this piece treats a repeat as unspecified rather than as safe.",
-          "gap": "The published description does not say whether linking the same evidence to the same control twice is a no-op, so the piece never relies on that: it reads the evidence record's current control links from getOrganizationEvidence and only emits a link that is genuinely missing. Documented repeat-link behaviour would let the probe go away."
+          "kind": "server_dedupe",
+          "key": ["evidenceId", "controlId", "evidenceItemIds"],
+          "verified_at": "Noru's linkEvidenceToControl contract documents the evidence/control/evidence-item tuple as a natural idempotency key; repeating an existing tuple succeeds as a no-op."
         }
       }
     ],

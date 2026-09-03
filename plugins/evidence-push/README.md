@@ -92,20 +92,18 @@ in the validator, not halfway through an upload batch.
 
 `controlMappings` is always sent; the legacy `controlIds` field never is.
 
-## Idempotency, honestly
+## Idempotency
 
-Noru's published API documentation documents upsert behaviour for assets and security findings; it
-documents no idempotency key for `POST /v1/evidence/upload`. This piece does not assume one. It
-embeds the artifact's sha256 in the evidence description and probes `getOrganizationEvidence` before
-uploading, so a second run has something of its own to recognise.
+Each upload sends an `Idempotency-Key` derived from the artifact sha256. The digest marker and
+`getOrganizationEvidence` probe remain for deployments predating that contract.
 
 Two consequences worth saying out loud:
 
-- edit that description in the Noru UI and the probe stops matching; a re-run will upload again
-- a blind retry after a failure is how duplicates happen, so `push.mjs` never retries by itself
+- editing the description does not defeat the server-side key
+- interrupted batches can resume: completed items return `reused`, and failed items retry with the
+  same key
 
-What the claim was checked against, and what a documented key would let the piece drop, are recorded
-in [`piece.json`](./piece.json).
+The older-server fallback and the contract source are recorded in [`piece.json`](./piece.json).
 
 ## Verify
 

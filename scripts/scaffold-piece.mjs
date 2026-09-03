@@ -91,11 +91,11 @@ function pieceJson(name) {
           transport: "mcp",
           scope: "write:evidence",
           idempotency: {
-            kind: "client_probe",
-            key: ["description contains marker"],
+            kind: "server_key",
+            key: ["organizationId", "operation", "arguments.idempotencyKey"],
             verified_at:
-              "TODO: the public documentation where you confirmed this behaviour — a section of https://api.noru.tech/llms.txt, or the tool description published at https://api.noru.tech/v1/mcp. If it is not documented, say so and treat the claim as unverified.",
-            gap: "TODO: what the published API does not document, what this piece does instead, and what a documented key would let it drop",
+              "Noru's createEvidence contract documents idempotencyKey, organization-and-operation scoping, identical replay, and changed-payload conflict behavior.",
+            fallback: "client_probe: description contains the piece marker",
           },
         },
       ],

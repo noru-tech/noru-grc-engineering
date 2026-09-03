@@ -16,11 +16,8 @@
 // One workpaper, one record, one control. A single blob mapped to forty controls is the antipattern
 // that makes evidence unreadable, and it is exactly what "assemble a pack" invites.
 //
-// No idempotency key is documented for evidence, so this piece does not assume one: every record
-// lands with a marker in its description built from the pack key, the workpaper key and a digest of
-// the rendered workpaper, and the diff looks for that marker in evidence already in the
-// organization. Same workpaper, same content -> skip. Changed content -> a new record, because a
-// re-tested control is a different account and an auditor should see both.
+// Every create carries a content-addressed server key. The description marker remains a readable
+// compatibility probe for deployments predating that contract.
 //
 // Usage: node diff.mjs [--repo=<path>] [--output=json|text] [--quiet]
 // Exit codes: 0 plan written, 1 missing/unusable input, 2 usage error.
@@ -173,11 +170,16 @@ export function buildOperations(manifest, state) {
         ? `evidence ${existing.id} already carries this workpaper's exact content marker`
         : superseded
           ? `evidence ${superseded.id} covers workpaper '${workpaper.key}' but the account has ` +
-            "changed; a new record will be created so both conclusions remain visible (no " +
-            "idempotency key is documented for evidence — see the gap note in piece.json)"
+            "changed; a new record will be created so both conclusions remain visible"
           : "no evidence carries this workpaper's marker yet",
-      idempotency: { kind: "client_probe", key: ["description contains marker"], marker },
+      idempotency: {
+        kind: "server_key",
+        key: ["organizationId", "operation", "arguments.idempotencyKey"],
+        value: `${MARKER_PREFIX}:${digest(marker)}`,
+        fallback: { kind: "client_probe", marker },
+      },
       arguments: {
+        idempotencyKey: `${MARKER_PREFIX}:${digest(marker)}`,
         title,
         description:
           `${marker} Audit workpaper for ${workpaper.control_id} over ${pack.window.from}..` +
@@ -207,7 +209,10 @@ export function buildOperations(manifest, state) {
       reason:
         `evidence ${existing.id} exists but is not linked to '${workpaper.control_id}'; the mapping ` +
         "was added to the workpaper after the record was filed",
-      idempotency: { kind: "client_probe", key: ["evidenceId", "controlId"] },
+      idempotency: {
+        kind: "server_dedupe",
+        key: ["evidenceId", "controlId", "evidenceItemIds"],
+      },
       arguments: { evidenceId: existing.id, ...mappingArgs(workpaper) },
     });
   }

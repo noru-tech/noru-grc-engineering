@@ -1,6 +1,5 @@
-# Fixture: the same bytes staged twice under two names. The upload endpoint has no idempotency
-# key, so this would land as two evidence records for one artifact — the failure mode the whole
-# client-probe workaround exists to avoid, caught before a single request is made.
+# Fixture: the same bytes staged twice under two names would share a content-addressed key but carry
+# different payloads. Reject the ambiguous manifest before it can become a server conflict.
 # Expected: exit 1, "the same file content is already uploaded".
 version: 0.1.0
 piece: evidence-push

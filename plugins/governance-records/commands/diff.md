@@ -20,9 +20,8 @@ Only a valid manifest produces the parsed file, so an invalid one cannot reach `
 
 ## 2. Read the current evidence from Noru
 
-No idempotency key is documented for evidence, so the piece does not assume one: it probes instead.
-Each record lands with a marker in its description built from the record key and a digest of the
-rendered account, and the diff looks for that marker in evidence already in the organization.
+Each record carries a content-addressed server key. It also lands with a marker built from the
+record key and rendered-account digest; the diff keeps that probe for older Noru deployments.
 
 Call `findOrganization` and `getOrganizationEvidence`, then write
 `<repo>/.noru/.cache/noru-state.json`:
@@ -67,8 +66,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/diff.mjs" --repo=<repo>
 ## 4. Show it to the user
 
 Print the plan, and for each `create` show the control ids and evidence item ids it will satisfy.
-Say plainly that this piece's idempotency is a client-side probe against a marker, not a server-side
-key: if someone edits the description in the Noru UI, or the account itself is rewritten, a re-run
-files a new record rather than updating the old one. That gap is recorded in `piece.json`.
+Say plainly that current servers enforce the key, so description edits do not defeat idempotency.
+Rewriting the account changes its content-addressed key and deliberately files a new historical
+record; the marker probe is the compatibility fallback.
 
 Then stop. `/governance-records:push` is a separate, explicitly confirmed step.

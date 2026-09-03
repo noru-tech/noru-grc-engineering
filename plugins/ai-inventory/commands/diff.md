@@ -86,9 +86,7 @@ not a failure.
 
 ## 4. Show it to the user
 
-Print the plan. Call out anything that would be created rather than updated, and any operation whose
-idempotency is `client_probe` — those are the ones with no documented idempotency key, where the
-piece is relying on a description marker of its own. They are listed with their gap in
-`piece.json`.
+Print the plan. Call out anything that would be created rather than updated, every `server_key`,
+and its recorded `client_probe` compatibility fallback for older deployments.
 
 Then stop. `/ai-inventory:push` is a separate, explicitly confirmed step.

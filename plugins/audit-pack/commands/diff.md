@@ -21,9 +21,8 @@ file is what the pack under `.noru/audit-pack/` is rendered from.
 
 ## 2. Read the current evidence from Noru
 
-No idempotency key is documented for evidence, so the piece does not assume one: it probes instead.
-Each workpaper lands with a marker in its description built from the pack key, the workpaper key and
-a digest of the rendered workpaper.
+Each workpaper carries a content-addressed server key. It also keeps a marker in its description,
+built from the pack key, workpaper key and rendered digest, as the older-server fallback.
 
 Call `findOrganization` and `getOrganizationEvidence`, then write
 `<repo>/.noru/.cache/noru-state.json`:
@@ -70,9 +69,8 @@ Print the plan, and say two things plainly:
 - **the pack itself is not being pushed.** What lands is the tested conclusion per control; the
   index, the workpapers and the sampling worksheets stay local, because Noru is the register and a
   folder is not.
-- **idempotency here is a client-side probe against a marker, not a server-side key.** If someone
-  edits a description in the Noru UI, or a control is re-tested, a re-run files a **new** record
-  rather than updating the old one. For an audit trail that is the behaviour you want — both
+- **idempotency uses a server-side key.** Description edits do not defeat it. Re-testing a control
+  changes the content-addressed key and files a **new** record rather than updating the old one. Both
   conclusions stay visible — but it is a consequence of a missing key, not a design choice, and the
   gap is recorded in `piece.json`.
 

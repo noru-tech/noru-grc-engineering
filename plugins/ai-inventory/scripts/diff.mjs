@@ -36,9 +36,8 @@ const PIECE = "ai-inventory";
 // (https://api.noru.tech/llms.txt, "Idempotency/Upsert Behavior") says an existing
 // (source, externalId) is updated in place rather than duplicated.
 const ASSET_SOURCE = "noru-ai-inventory";
-// Marker embedded in evidence descriptions. No idempotency key is documented for evidence, so the
-// piece gives itself one to recognise: a client probe matches this via getOrganizationEvidence's
-// `search` filter.
+// Marker embedded in evidence descriptions. It remains a compatibility probe for older Noru
+// deployments; current servers use the explicit key emitted with createEvidence.
 const EVIDENCE_MARKER_PREFIX = "noru-grc-engineering:ai-inventory";
 
 const USAGE = "usage: diff.mjs [--repo=<path>] [--output=json|text] [--quiet]\n";
@@ -356,14 +355,16 @@ export function buildOperations(manifest, state) {
         ? `evidence ${existing.id} already carries this exact content marker`
         : stale
           ? `evidence ${stale.id} covers this system but the content changed; a new record will be created ` +
-            "(no idempotency key is documented for evidence — see the gap note in piece.json)"
+            "with a new content-addressed idempotency key"
           : "no evidence carries this system's marker yet",
       idempotency: {
-        kind: "client_probe",
-        key: ["description contains marker"],
-        marker,
+        kind: "server_key",
+        key: ["organizationId", "operation", "arguments.idempotencyKey"],
+        value: `${EVIDENCE_MARKER_PREFIX}:${digest(marker)}`,
+        fallback: { kind: "client_probe", marker },
       },
       arguments: {
+        idempotencyKey: `${EVIDENCE_MARKER_PREFIX}:${digest(marker)}`,
         title,
         description: `${marker} AI system inventory generated from ${slug} @ ${manifest.source.commit_sha} (${manifest.source.branch}).`,
         content: body,
@@ -383,7 +384,10 @@ export function buildOperations(manifest, state) {
       reason:
         "noru-state.json listed no controls under the organization's AI frameworks, so the evidence " +
         "will land unlinked — enable an AI framework in Noru, or re-run :scan after refreshing the snapshot",
-      idempotency: { kind: "client_probe", key: ["evidenceId", "controlId"] },
+      idempotency: {
+        kind: "server_dedupe",
+        key: ["evidenceId", "controlId", "evidenceItemIds"],
+      },
       arguments: {},
     });
   }

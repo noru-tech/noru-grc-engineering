@@ -112,21 +112,15 @@ the export itself belongs in git at all: an entitlement dump is a list of who ca
 being attested rather than at a line of source. Line `1` on the export is the honest answer when the
 whole file is what was reviewed.
 
-## Idempotency, honestly
+## Idempotency
 
-Two operations per sign-off, and neither has a documented key:
+`createEvidence` carries a content-addressed `idempotencyKey` and `expiresAt`, so the sign-off and
+its validity window land atomically. An identical retry returns the original evidence id; editing
+the description later does not defeat the key. The description marker remains the compatibility
+probe for deployments predating this server contract.
 
-- `createEvidence` — no idempotency key is documented for evidence, so the piece embeds a marker
-  built from the review key and a digest of the rendered attestation, and probes
-  `getOrganizationEvidence` before creating
-- `updateEvidence` — sets `expiresAt` on the record the create produced. The record is addressed by
-  an id the piece only learns from the create in the same plan, so the call carries `depends_on` and
-  the executing client substitutes that one field
-
-Consequences to be straight about: edit the description in the Noru UI and the probe stops matching;
-re-signing the same period produces a second record rather than replacing the first. A documented
-key for evidence — or an expiry that could be set at creation time — would remove both the probe and
-the second call. That is recorded in [`piece.json`](./piece.json).
+`updateEvidence` is now only a drift repair: it appears when an existing sign-off's stored expiry
+no longer matches the attestation. Re-signing changed content produces a new historical record.
 
 A new period is a new key. Last quarter's access review is not this quarter's, and the piece will
 not pretend otherwise.

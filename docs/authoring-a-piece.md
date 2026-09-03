@@ -82,6 +82,7 @@ Every write needs an idempotency key, and you must say which kind it is and **wh
 |---|---|
 | `server_upsert` | documented to update in place on the key (`createAsset` on `(source, externalId)`) |
 | `server_dedupe` | documented to return the existing record unchanged (`createVendor` on name) |
+| `server_key` | caller supplies an explicit key; identical retries return the original result and a changed payload is rejected |
 | `client_probe` | **no idempotency key is documented** — read Noru first and skip. Must also fill in `gap` |
 
 Check it against something a reader of this repository can open: Noru's API documentation at

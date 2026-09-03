@@ -155,16 +155,11 @@ Run `:diff` before your first `:push`, and read it.
 
 ## Known gaps, stated rather than discovered later
 
-- **No idempotency key is documented for evidence — but the ingredient now exists.** Noru's published
-  API documentation documents upsert behaviour for assets and security findings; neither
-  `createEvidence` nor `POST /v1/evidence/upload` documents a key, so both pieces still fall back to
-  a client probe. Edit an evidence description in the Noru UI and the probe stops matching; a re-run
-  uploads again. Recorded in each `piece.json` with what a documented key would let the piece drop.
-  What changed is that Noru now computes a canonical content digest at capture and returns it, which
-  is exactly the stable key the probe has been approximating. Closing this gap is no longer blocked
-  on Noru computing anything — only on the API documenting the digest as an upsert key and honouring
-  it on write.
-- **No piece is `mode: single_call`.** Every one fans out several individually-keyed writes because
+- **Evidence idempotency requires a current Noru deployment.** Evidence creates and uploads now send
+  explicit, content-addressed keys and report `created` or `reused`. Description markers remain as
+  the disclosed fallback for older servers, where an ambiguous failure still requires a refreshed
+  probe before retrying.
+- **Only `evidence-push` is `mode: single_call`.** The other pieces fan out individually-keyed writes because
   the published API offers no single ingest operation for these artifacts. Every one declares
   `collapses_to`. `iac-scan` is the closest: its writes are documented server-side upserts, so the
   remaining debt there is one call per finding rather than any question about correctness.
@@ -176,14 +171,13 @@ Run `:diff` before your first `:push`, and read it.
   that was renamed, a file that moved out of scope, and a misconfiguration that was genuinely
   remediated all look identical from here. The plan says so in its reason text and the push command
   tells the user to say which kind of close it was; nothing automates that distinction.
-- **`review-signoff` sets its expiry in a second, dependent call.** The published `createEvidence`
-  input fields do not carry an expiry, so the record is created first and the expiry applied to it
-  afterwards. A push interrupted between the two leaves a sign-off without its expiry; re-running
-  the piece repairs it.
+- **`review-signoff` may repair later expiry drift.** New records include expiry in their keyed
+  create. A separate update is emitted only if the state snapshot shows that an existing record's
+  expiry was changed afterwards.
 - **`governance-records` creates rather than updates when an account is rewritten.** The marker
   includes a digest of the rendered record, so re-filed minutes become a second record. For an
   account of a meeting that is arguably correct — an auditor should see both — but it is a
-  consequence of having no documented key, not a decision anyone made.
+  deliberate immutable-history behavior; the content-addressed key changes with the account.
 - **The two YAML loaders still disagree about YAML 1.1 booleans, but a file can no longer walk into
   it unnoticed.** PyYAML resolves `yes`, `no`, `on` and `off` to booleans; the bundled fallback
   leaves them as strings. This entry used to say "no fixture is written that way, so nothing fails

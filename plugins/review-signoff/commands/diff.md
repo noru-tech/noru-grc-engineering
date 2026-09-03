@@ -20,9 +20,8 @@ Only a valid manifest produces the parsed file, so an invalid one cannot reach `
 
 ## 2. Read the current evidence from Noru
 
-No idempotency key is documented for evidence, so the piece does not assume one: it probes. Each
-sign-off lands with a marker in its description built from the review key and a digest of the
-rendered attestation, and the diff looks for that marker in evidence already in the organization.
+Each sign-off carries a content-addressed server key and includes its expiry in the create. The
+description marker remains a compatibility probe for older Noru deployments.
 
 Call `findOrganization` and `getOrganizationEvidence`, then write
 `<repo>/.noru/.cache/noru-state.json`:
@@ -51,15 +50,13 @@ you can narrow to `noru-grc-engineering:review-signoff` rather than pulling the 
 node "${CLAUDE_PLUGIN_ROOT}/scripts/diff.mjs" --repo=<repo>
 ```
 
-Two operations per sign-off:
+Normally one operation per sign-off:
 
 - `createEvidence` — `+ create` when no evidence carries this sign-off's marker, `= skip` when it
   already does
-- `updateEvidence` — `~ update` to put the sign-off's expiry on the record, `= skip` when the record
-  already expires on that day
+- `updateEvidence` — emitted only to repair expiry drift on an existing record
 
-On a first run the update is addressed to a record that does not exist yet, so it carries
-`depends_on`: the evidence id comes from the create above it.
+On a first run, `createEvidence` carries both `idempotencyKey` and `expiresAt`.
 
 **A plan of all `skip` is the correct result of a second run.**
 
@@ -68,8 +65,8 @@ On a first run the update is addressed to a record that does not exist yet, so i
 Print the plan, and for each `create` show the control ids and evidence item ids it will satisfy,
 who signed it, and the date it expires. Say plainly that:
 
-- idempotency here is a client-side probe against a marker, not a server-side key — edit the
-  description in the Noru UI and a re-run files the record again
+- current servers enforce the key, so editing the description in the Noru UI does not create a
+  duplicate; the marker is the older-server fallback
 - a re-signed period produces a second record rather than replacing the first
 - the expiry is a real date in Noru, not just text: the record will go stale on it
 

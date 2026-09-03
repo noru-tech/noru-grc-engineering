@@ -404,8 +404,8 @@
           "required": ["kind", "key", "verified_at"],
           "properties": {
             "kind": {
-              "description": "server_upsert = the server updates in place on the key. server_dedupe = the server returns the existing record unchanged on the key. client_probe = the server has no key, so the piece must read Noru first and skip an existing record; this is a gap, and `gap` must say so.",
-              "enum": ["server_upsert", "server_dedupe", "client_probe"]
+              "description": "server_upsert = the server updates in place on a natural key. server_dedupe = the server returns the existing record unchanged on a natural key. server_key = the caller supplies an explicit idempotency key and identical retries return the original result. client_probe = the server has no key, so the piece must read Noru first and skip an existing record; this is a gap, and `gap` must say so.",
+              "enum": ["server_upsert", "server_dedupe", "server_key", "client_probe"]
             },
             "key": {
               "type": "array",
@@ -418,6 +418,10 @@
             },
             "gap": {
               "description": "Required when kind is client_probe: what is missing server-side and what would fix it.",
+              "type": "string"
+            },
+            "fallback": {
+              "description": "Compatibility behavior used when a deployment predates the documented server-side key.",
               "type": "string"
             }
           },

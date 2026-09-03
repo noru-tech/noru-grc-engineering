@@ -182,12 +182,11 @@ Commit it. `.noru/.cache/` is machine state — keep it out of git.
 |---|---|---|
 | `createAsset` | server upsert | `(source, externalId)` where source is `noru-ai-inventory` — documented upsert behaviour |
 | `createVendor` | server dedupe | vendor name — the published tool description says an existing record is returned |
-| `createEvidence` | **client probe** | a content marker in the description; no idempotency key is documented for evidence |
-| `linkEvidenceToControl` | client probe | the piece reads the control context first; a duplicate link comes back as `ALREADY_LINKED`, which is benign |
+| `createEvidence` | server key | a stable content-addressed `idempotencyKey`; the description marker remains the legacy fallback |
+| `linkEvidenceToControl` | server dedupe | the evidence/control/evidence-item tuple; repeats return `reused` |
 
-The two client probes are fallbacks, not design. Each is written down in
-[`piece.json`](./piece.json), with the public documentation it was checked against and what a
-documented key would let the piece drop.
+The marker probes are compatibility fallbacks, not the primary concurrency boundary. Each is
+written down in [`piece.json`](./piece.json) with the contract it was checked against.
 
 A second `:scan` + `:diff` on an unchanged repository must produce a plan of all `skip`. If it does
 not, that is a bug.

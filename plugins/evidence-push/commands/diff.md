@@ -20,9 +20,8 @@ Only a valid manifest produces the parsed file, so an invalid one cannot reach `
 
 ## 2. Read the current evidence from Noru
 
-No idempotency key is documented for `POST /v1/evidence/upload`, so the piece does not assume one:
-it probes instead. Each upload's description carries a marker containing the artifact's content
-digest, and the diff looks for that marker in evidence already in the org.
+Each upload carries an `Idempotency-Key` derived from the artifact digest. Its description also
+carries a digest marker, and the diff keeps that probe for older Noru deployments.
 
 Call `findOrganization` and `getOrganizationEvidence`, then write
 `<repo>/.noru/.cache/noru-state.json`:
@@ -58,8 +57,8 @@ Each line is one artifact:
 ## 4. Show it to the user
 
 Print the plan, and for each `create` show the control ids and evidence item ids it will satisfy.
-Say plainly that this piece's idempotency is a client-side probe against a marker, not a server-side
-key — if someone edits the description in the Noru UI, the probe stops matching and a re-run will
-upload again. That gap is recorded in `piece.json`.
+Say plainly that each upload carries a stable `Idempotency-Key` derived from the artifact digest.
+The marker probe is retained for older Noru deployments; description edits do not defeat the
+server-side key on current deployments.
 
 Then stop. `/evidence-push:push` is a separate, explicitly confirmed step.

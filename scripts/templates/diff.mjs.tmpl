@@ -12,6 +12,7 @@
 //   1 = the manifest or the state snapshot is missing or unusable
 //   2 = usage error
 
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -27,6 +28,9 @@ import {
 
 const PIECE = "__PIECE__";
 const MARKER_PREFIX = "noru-grc-engineering:__PIECE__";
+function digest(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
 const USAGE = "usage: diff.mjs [--repo=<path>] [--output=json|text] [--quiet]\n";
 
 function loadJson(path, label) {
@@ -48,6 +52,7 @@ export function buildOperations(manifest, state) {
   const src = manifest.source;
   return (manifest.items ?? []).map((item) => {
     const marker = `[${MARKER_PREFIX}#${item.key}]`;
+    const idempotencyKey = `${MARKER_PREFIX}:${digest(JSON.stringify(item))}`;
     const existing = evidence.find((e) => String(e.description ?? "").includes(marker));
     return {
       operation: "createEvidence",
@@ -58,8 +63,14 @@ export function buildOperations(manifest, state) {
       reason: existing
         ? `evidence ${existing.id} already carries this marker`
         : "no evidence carries this marker yet",
-      idempotency: { kind: "client_probe", key: ["description contains marker"], marker },
+      idempotency: {
+        kind: "server_key",
+        key: ["organizationId", "operation", "arguments.idempotencyKey"],
+        value: idempotencyKey,
+        fallback: { kind: "client_probe", marker },
+      },
       arguments: {
+        idempotencyKey,
         title: item.title,
         description: `${marker} ${item.kind} from ${src.slug} @ ${src.commit_sha} (${src.branch}).`,
         content: [

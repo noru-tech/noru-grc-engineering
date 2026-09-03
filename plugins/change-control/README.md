@@ -170,14 +170,14 @@ deliberately not in git.
 | Operation | Transport | Kind | Key |
 |---|---|---|---|
 | `createSecurityFinding` | MCP | `server_upsert` | `(source, externalId)` |
-| `createEvidence` | MCP | `client_probe` | marker in the description |
-| `linkEvidenceToControl` | MCP | `client_probe` | `evidenceId` + `controlId` |
+| `createEvidence` | MCP | `server_key` | content-addressed `idempotencyKey` |
+| `linkEvidenceToControl` | MCP | `server_dedupe` | evidence + control + evidence item |
 
 Each exception becomes one security finding keyed on `(source, externalId)`, which is a documented
 server-side upsert — so re-running the piece after an exception is remediated **closes** the finding
 with the same call that filed it, exactly as `iac-scan` does. The window's attestation is an evidence
-record, and evidence has no documented key, so that half falls back to a probe. What a documented key
-would buy is written down in [`piece.json`](./piece.json).
+record with a stable server key. Its description marker remains the older-server fallback recorded
+in [`piece.json`](./piece.json).
 
 ## Verify
 

@@ -38,17 +38,22 @@ If it prints "nothing to push", you are done — that is what a second run shoul
 Read `.noru/.cache/ai-inventory.calls.json` and execute each entry through the Noru MCP connection,
 in `order`, using the named tool and its `arguments` verbatim:
 
+Before executing `createEvidence`, inspect the connected tool schema. When it exposes
+`idempotencyKey`, use the call's normal `arguments`. On an older deployment that does not expose
+that field, use `compatibility.arguments` instead and report that the marker-probe fallback was
+used. Do not silently remove any other argument.
+
 - `createVendor` — upserts by name within the organization; Noru returns the existing vendor
   unchanged if one matches.
 - `createAsset` — upserts on `(source, externalId)`, where source is `noru-ai-inventory`.
-- `createEvidence` — no idempotency key is documented for it. The plan already probed for this
-  piece's content marker; if a call is in the file, no matching evidence existed at diff time.
+- `createEvidence` — carries the content-addressed `idempotencyKey` in the call file. The marker
+  probe remains the compatibility fallback for servers whose published schema lacks that field.
 - `linkEvidenceToControl` — link the evidence created above to the AI-framework controls in the
   plan. A duplicate link returns `ALREADY_LINKED`, which is a benign outcome, not a failure.
 
-**Do not improvise a call that is not in the file**, do not reorder, and do not retry a write on a
-5xx without telling the user — a retried create, where no idempotency key is documented, is how
-duplicates happen.
+**Do not improvise a call that is not in the file** and do not reorder. Exact keyed retries are
+safe on a server that returns `created`/`reused`; on a legacy server, refresh the marker probe before
+retrying after an ambiguous failure.
 
 ## 3. Verify and report
 

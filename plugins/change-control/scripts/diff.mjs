@@ -13,6 +13,7 @@
 //   2 = usage error
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -48,8 +49,8 @@ function loadJson(path, label) {
  *      close one: an exception dispositioned `remediated` or `false_positive` is pushed with
  *      status `resolved`, so re-running the piece after the fix lands closes the record rather
  *      than leaving a stale open finding beside a fixed problem.
- *   2. The window itself becomes one evidence record. Evidence has no documented idempotency key,
- *      so this half probes for a marker first.
+ *   2. The window itself becomes one evidence record with a content-addressed server key. The
+ *      marker remains a compatibility probe for older Noru deployments.
  *   3. Each control mapping links that evidence to a control the queue snapshot offered. The
  *      evidence id does not exist until the create above runs, so the call carries `depends_on`
  *      and the executing client substitutes it.
@@ -59,6 +60,10 @@ const SOURCE = "noru-grc-engineering/change-control";
 
 export function externalIdFor(slug, window, changeKey, rule) {
   return `${slug}:${window.opens_on}..${window.closes_on}:${changeKey}:${rule}`;
+}
+
+function digest(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 // A remediated or false-positive exception is not an open problem, and pushing it as one would
@@ -133,6 +138,8 @@ export function buildOperations(manifest, state) {
   );
   const changes = manifest.changes ?? [];
   const withExceptions = changes.filter((c) => (c.exceptions ?? []).length > 0);
+  const attestation = renderAttestation(manifest);
+  const idempotencyKey = `${MARKER_PREFIX}:${digest(attestation)}`;
   const createIndex = operations.length;
   operations.push({
     operation: "createEvidence",
@@ -143,14 +150,20 @@ export function buildOperations(manifest, state) {
     reason: existingEvidence
       ? `evidence ${existingEvidence.id} already carries this marker`
       : "no evidence carries this marker yet",
-    idempotency: { kind: "client_probe", key: ["description contains marker"], marker },
+    idempotency: {
+      kind: "server_key",
+      key: ["organizationId", "operation", "arguments.idempotencyKey"],
+      value: idempotencyKey,
+      fallback: { kind: "client_probe", marker },
+    },
     arguments: {
+      idempotencyKey,
       title: `Change control, ${window.opens_on} to ${window.closes_on} — ${src.slug}`,
       description:
         `${marker} ${changes.length} change(s) merged into ` +
         `${manifest.controls?.default_branch ?? src.branch}, of which ${withExceptions.length} ` +
         `carried a separation that did not hold. From ${src.slug} @ ${src.commit_sha}.`,
-      content: renderAttestation(manifest),
+      content: attestation,
       tags: [PIECE, src.slug, `${window.opens_on}..${window.closes_on}`],
     },
   });
@@ -165,7 +178,10 @@ export function buildOperations(manifest, state) {
       reason: existingEvidence
         ? `evidence ${existingEvidence.id} already exists and is assumed linked`
         : "the evidence record does not exist yet",
-      idempotency: { kind: "client_probe", key: ["evidenceId", "controlId"] },
+      idempotency: {
+        kind: "server_dedupe",
+        key: ["evidenceId", "controlId", "evidenceItemIds"],
+      },
       ...(existingEvidence
         ? {}
         : {

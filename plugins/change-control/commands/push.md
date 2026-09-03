@@ -22,6 +22,11 @@ Execute exactly the calls the plan lists, in order, and nothing else. Where an o
 `depends_on`, substitute the named field from the result of the operation it points at — that is the
 evidence id, which does not exist until the create runs.
 
+Before executing `createEvidence`, inspect the connected tool schema. When it exposes
+`idempotencyKey`, use the call's normal `arguments`. On an older deployment that does not expose
+that field, use `compatibility.arguments` instead and report that the marker-probe fallback was
+used. Do not silently remove any other argument.
+
 ## Before you confirm
 
 - Every `needs_review: true` is gone, and gone because somebody decided — not because it was

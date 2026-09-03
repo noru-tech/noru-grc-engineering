@@ -68,7 +68,7 @@
     "entrypoint": "scripts/push.mjs",
     "mode": "keyed_upsert",
     "collapses_to": {
-      "tool": "a single idempotency-keyed ingest that takes an attestation — the reviewed input's digest, the outcome, the exceptions, and an owner with a validity period — and creates the evidence record with its expiry already set, instead of a create followed by an update that has to be threaded with the new record's id",
+      "tool": "a single batch ingest that takes reviewed attestations and files their evidence records together; individual records are already idempotency-keyed and carry expiry at creation",
       "tracked_at": "https://github.com/noru-tech/noru-grc-engineering/issues"
     },
     "operations": [
@@ -77,10 +77,10 @@
         "transport": "mcp",
         "scope": "write:evidence",
         "idempotency": {
-          "kind": "client_probe",
-          "key": ["description contains marker"],
-          "verified_at": "The createEvidence tool description published by https://api.noru.tech/v1/mcp documents creating text/note/link evidence with optional control mappings and states that file uploads are not supported over MCP; it documents no idempotency key, and its published input fields do not include an expiry. The \"Idempotency/Upsert Behavior\" section of https://api.noru.tech/llms.txt covers assets and security findings only.",
-          "gap": "No idempotency key is documented for evidence, so this piece does not rely on one: it embeds a marker built from the review key and a digest of the rendered attestation in the evidence description, and probes getOrganizationEvidence before creating. A documented key would let the probe go away; a documented expiry field on create would remove the second operation entirely."
+          "kind": "server_key",
+          "key": ["organizationId", "operation", "arguments.idempotencyKey"],
+          "verified_at": "Noru's createEvidence contract accepts idempotencyKey, scopes it by organization and operation, returns the original evidence id for identical retries, and rejects the same key with a changed payload. The description marker remains a compatibility probe for deployments predating that contract.",
+          "fallback": "client_probe: description contains the content marker"
         }
       },
       {
@@ -90,8 +90,8 @@
         "idempotency": {
           "kind": "client_probe",
           "key": ["evidenceId", "expiresAt"],
-          "verified_at": "The updateEvidence tool description published by https://api.noru.tech/v1/mcp documents updating an existing evidence record's fields, including its expiry; https://api.noru.tech/llms.txt documents the equivalent REST operation as PATCH /v1/evidence/{id}, \"Updates evidence fields\". Setting the same field to the same value twice is not documented as having any further effect, but nothing published says so either, so the piece checks first.",
-          "gap": "The record is addressed by an id the piece only learns from the create in the same plan, and no key is documented that would let a later run recognise the record without first probing getOrganizationEvidence for the marker it wrote itself. Until an expiry can be set at creation time, or a documented key exists, this stays a probe plus a dependent call."
+          "verified_at": "The updateEvidence tool updates an existing evidence record by id. The plugin emits this repair only when its current-state probe shows expiry drift; first-time sign-off creation already includes expiry atomically.",
+          "gap": "Noru does not expose a conditional update token for evidence expiry, so the plugin probes current state before repairing a manually changed expiry. Repeating the same patch cannot create another record."
         }
       }
     ],

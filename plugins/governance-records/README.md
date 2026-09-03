@@ -115,20 +115,17 @@ The validator enforces these as errors, not warnings:
    `next_review_due` — contract requirement 8 scopes expiry to technical claims and lets procedural
    obligations run on a review cadence instead, but it has to be one of the two.
 
-## Idempotency, honestly
+## Idempotency
 
-Noru's published API documentation documents upsert behaviour for assets and security findings; it
-documents no idempotency key for evidence. This piece does not assume one. Each record lands with a
-marker in its description built from the record key and a digest of the rendered account, and
-`:diff` probes `getOrganizationEvidence` for that marker before proposing anything.
+Each record carries a content-addressed `idempotencyKey`. It also lands with a marker built from the
+record key and rendered-account digest; `:diff` keeps that probe for older Noru deployments.
 
 Two consequences worth saying out loud:
 
-- edit that description in the Noru UI and the probe stops matching; a re-run will file the record
-  again
+- editing the description does not defeat the server-side key
 - if the *account* changes — someone rewrote the minutes — the marker changes and a second record is
   created rather than the first being overwritten. For minutes that is arguably right: an auditor
-  should see both versions. It is still a workaround for a missing key, not a design.
+  should see both versions. The content-addressed key makes that an explicit design.
 
 What the claim was checked against, and what a documented key would let the piece drop, are recorded
 in [`piece.json`](./piece.json).

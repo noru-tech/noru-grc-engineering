@@ -128,12 +128,14 @@
         "transport": "mcp",
         "scope": "write:evidence",
         "idempotency": {
-          "kind": "client_probe",
+          "kind": "server_key",
           "key": [
-            "description contains marker"
+            "organizationId",
+            "operation",
+            "arguments.idempotencyKey"
           ],
-          "verified_at": "https://api.noru.tech/llms.txt: the documented \"Idempotency/Upsert Behavior\" covers assets and security findings, and neither it nor the published createEvidence tool description documents an idempotency key for evidence. The piece therefore does not assume one.",
-          "gap": "No idempotency key is documented for evidence creation, so the piece does not rely on one being there: it embeds a content marker in the description and probes getOrganizationEvidence with `search` before writing. If a documented idempotency key for evidence, or a single documented ingest operation, becomes available, the probe can be dropped."
+          "verified_at": "Noru's createEvidence contract accepts idempotencyKey, scopes it by organization and operation, returns the original evidence id for identical retries, and rejects the same key with a changed payload. The description marker remains a compatibility probe for deployments predating that contract.",
+          "fallback": "client_probe: description contains the content marker"
         }
       },
       {
@@ -141,13 +143,13 @@
         "transport": "mcp",
         "scope": "write:evidence",
         "idempotency": {
-          "kind": "client_probe",
+          "kind": "server_dedupe",
           "key": [
             "evidenceId",
-            "controlId"
+            "controlId",
+            "evidenceItemIds"
           ],
-          "verified_at": "Published linkEvidenceToControl tool description at https://api.noru.tech/v1/mcp: it links an evidence record to a control and documents no idempotency key, so the piece checks before linking rather than assuming a repeat is free.",
-          "gap": "The published read surface has no call that directly answers 'is this evidence already linked to this control', so the piece reads getControlContext and compares before linking."
+          "verified_at": "Noru's linkEvidenceToControl contract documents the evidence/control/evidence-item tuple as a natural idempotency key; repeating an existing tuple succeeds as a no-op."
         }
       }
     ],

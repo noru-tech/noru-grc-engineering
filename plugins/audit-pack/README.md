@@ -139,12 +139,12 @@ people. Keep `.noru/.cache/` out of git either way.
 
 | Operation | Kind | Key | Second run |
 |---|---|---|---|
-| `createEvidence` | `client_probe` | marker in the description | skip — the marker is already there |
-| `linkEvidenceToControl` | `client_probe` | `evidenceId` + `controlId` | skip — the link already exists |
+| `createEvidence` | `server_key` | content-addressed `idempotencyKey` | return the original record as `reused` |
+| `linkEvidenceToControl` | `server_dedupe` | evidence + control + evidence item | return `reused` |
 
-No idempotency key is documented for evidence, so this piece does not assume one: it embeds a marker
-built from the pack key, the workpaper key and a digest of the rendered workpaper, and probes before
-creating. Re-testing a control changes the workpaper, so it files a **new** record rather than
+The marker built from the pack key, workpaper key and rendered digest remains a legacy-server probe;
+current servers use the stable key emitted with the create. Re-testing a control changes the
+workpaper and its key, so it files a **new** record rather than
 overwriting the old conclusion — which is the behaviour you want from an audit trail, and is also
 what the missing key forces. The gap is recorded in `piece.json`.
 

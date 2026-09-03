@@ -82,7 +82,10 @@ async function uploadOne(baseUrl, apiKey, repo, op) {
   try {
     response = await fetch(`${baseUrl}${UPLOAD_PATH}`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Idempotency-Key": op.arguments.idempotencyKey,
+      },
       body: form,
     });
   } catch (error) {
@@ -94,11 +97,13 @@ async function uploadOne(baseUrl, apiKey, repo, op) {
     return { ok: false, status: response.status, error: redact(text).slice(0, 500) };
   }
   let evidenceId = null;
+  let idempotencyStatus = null;
   let storedDigest = null;
   try {
     const parsed = JSON.parse(text);
     evidenceId = parsed?.data?.id ?? parsed?.id ?? null;
     storedDigest = parsed?.data?.integrity?.artifact?.digest ?? null;
+    idempotencyStatus = parsed?.data?.idempotencyStatus ?? null;
   } catch {
     evidenceId = null;
   }
@@ -126,6 +131,8 @@ async function uploadOne(baseUrl, apiKey, repo, op) {
     status: response.status,
     evidenceId,
     digestVerified: Boolean(storedDigest),
+    idempotencyStatus: idempotencyStatus ?? "created",
+    idempotencyMode: idempotencyStatus ? "server_key" : "legacy_marker_probe",
   };
 }
 
@@ -211,6 +218,7 @@ async function main(argv) {
         sha256: op.arguments.sha256,
         mime_type: op.arguments.mimeType,
         size_bytes: op.arguments.sizeBytes,
+        idempotency_key: op.arguments.idempotencyKey,
         control_mappings: JSON.parse(op.arguments.form.controlMappings),
       })),
     };
@@ -253,6 +261,8 @@ async function main(argv) {
       ok: result.ok,
       status: result.status,
       evidence_id: result.evidenceId ?? null,
+      outcome: result.idempotencyStatus ?? null,
+      idempotency_mode: result.idempotencyMode ?? null,
       error: result.error ?? null,
     });
   }
@@ -263,6 +273,8 @@ async function main(argv) {
     ok: failures === 0,
     base_url: baseUrl,
     uploaded: results.filter((r) => r.ok).length,
+    created: results.filter((r) => r.ok && r.outcome === "created").length,
+    reused: results.filter((r) => r.ok && r.outcome === "reused").length,
     failed: failures,
     skipped: plan.operations.length - pending.length,
     results,
@@ -274,11 +286,13 @@ async function main(argv) {
     for (const r of results) {
       process.stdout.write(
         r.ok
-          ? `  uploaded ${r.file} -> evidence ${r.evidence_id ?? "(id not returned)"}\n`
+          ? `  ${String(r.outcome ?? "uploaded").padEnd(8)} ${r.file} -> evidence ${r.evidence_id ?? "(id not returned)"}\n`
           : `  FAILED   ${r.file} (HTTP ${r.status}) ${r.error}\n`
       );
     }
-    process.stdout.write(`\n${payload.uploaded} uploaded, ${payload.failed} failed, ${payload.skipped} skipped.\n`);
+    process.stdout.write(
+      `\n${payload.created} created, ${payload.reused} reused, ${payload.failed} failed, ${payload.skipped} skipped.\n`
+    );
   }
   return failures === 0 ? 0 : 1;
 }

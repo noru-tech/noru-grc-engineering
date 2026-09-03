@@ -6,17 +6,8 @@
 //   .noru/.cache/noru-state.json             existing evidence with its expiry, written by the
 //                                            skill from getOrganizationEvidence
 //
-// Two operations per sign-off, and the second one is the point of this piece:
-//
-//   createEvidence   the attestation itself. No idempotency key is documented for evidence, so the
-//                    piece probes for a marker of its own rather than assuming one.
-//   updateEvidence   sets expiresAt from the sign-off's own expiry, so the record goes stale in
-//                    Noru on the day the human said it would. Leaving the expiry only in the text
-//                    would make the piece's central claim invisible to everything that reads the
-//                    register.
-//
-// The update is addressed by evidence id, which on a first run does not exist yet: the operation
-// carries `depends_on`, and the id is substituted from the result of the create.
+// One idempotency-keyed create per sign-off. The expiry lands atomically with the attestation; the
+// description marker remains a compatibility probe for older Noru deployments.
 //
 // Usage: node diff.mjs [--repo=<path>] [--output=json|text] [--quiet]
 // Exit codes: 0 plan written, 1 missing/unusable input, 2 usage error.
@@ -125,13 +116,14 @@ export function buildOperations(manifest, state) {
     const body = signoffBody(review, manifest);
     const marker = signoffMarker(review.key, digest(body));
     const title = `${review.title} (signed ${review.interpretation.decided_at})`;
+    const wanted = expiryInstant(review.interpretation.expires_at);
     const existing = evidence.find((e) => String(e.description ?? "").includes(marker));
     const superseded = evidence.find(
       (e) =>
         !String(e.description ?? "").includes(marker) &&
         String(e.description ?? "").includes(`${MARKER_PREFIX}#${review.key}@`)
     );
-    const createIndex = operations.length;
+    const idempotencyKey = `${MARKER_PREFIX}:${digest(marker)}`;
 
     operations.push({
       operation: "createEvidence",
@@ -143,11 +135,16 @@ export function buildOperations(manifest, state) {
         ? `evidence ${existing.id} already carries this sign-off's exact content marker`
         : superseded
           ? `evidence ${superseded.id} covers review '${review.key}' but the attestation has ` +
-            "changed; a new record will be created (no idempotency key is documented for evidence " +
-            "— see the gap note in piece.json)"
+            "changed; a new content-addressed record will be created"
           : "no evidence carries this sign-off's marker yet",
-      idempotency: { kind: "client_probe", key: ["description contains marker"], marker },
+      idempotency: {
+        kind: "server_key",
+        key: ["organizationId", "operation", "arguments.idempotencyKey"],
+        value: idempotencyKey,
+        fallback: { kind: "client_probe", marker },
+      },
       arguments: {
+        idempotencyKey,
         title,
         description:
           `${marker} ${review.kind} performed ${review.performed_on}, signed by ` +
@@ -155,43 +152,29 @@ export function buildOperations(manifest, state) {
           `${review.interpretation.expires_at}. Source: ${src.slug} @ ${src.commit_sha} (${src.branch}).`,
         content: body,
         tags: [PIECE, review.kind, review.cadence],
+        expiresAt: wanted,
         controlMappings: (review.control_mappings ?? []).map(mappingArgs),
       },
     });
 
-    // The expiry has to reach the record itself, not just its text: an attestation that Noru does
-    // not know goes stale is one nothing can chase.
-    const wanted = expiryInstant(review.interpretation.expires_at);
+    // Creation is atomic now. This separate update only repairs later manual
+    // drift on an already-filed record; it is never part of the first push.
     const currentExpiry = existing ? (existing.expiresAt ?? null) : null;
     const expirySet = currentExpiry !== null && currentExpiry.slice(0, 10) === wanted.slice(0, 10);
-
-    operations.push({
-      operation: "updateEvidence",
-      transport: "mcp",
-      scope: "write:evidence",
-      subject: `${review.key} expires ${review.interpretation.expires_at}`,
-      effect: expirySet ? "skip" : "update",
-      reason: expirySet
-        ? `evidence ${existing.id} already expires on ${review.interpretation.expires_at}`
-        : existing
-          ? `evidence ${existing.id} carries expiry ${currentExpiry ?? "(none)"}; the sign-off is ` +
-            `valid until ${review.interpretation.expires_at}`
-          : "sets the sign-off's expiry on the record the preceding call creates",
-      idempotency: { kind: "client_probe", key: ["evidenceId", "expiresAt"] },
-      ...(existing
-        ? {}
-        : {
-            depends_on: {
-              operation_index: createIndex,
-              field: "evidenceId",
-              note: "substitute the evidence id returned by the createEvidence call above",
-            },
-          }),
-      arguments: {
-        evidenceId: existing ? existing.id : null,
-        expiresAt: wanted,
-      },
-    });
+    if (existing && !expirySet) {
+      operations.push({
+        operation: "updateEvidence",
+        transport: "mcp",
+        scope: "write:evidence",
+        subject: `${review.key} expires ${review.interpretation.expires_at}`,
+        effect: "update",
+        reason:
+          `evidence ${existing.id} carries expiry ${currentExpiry ?? "(none)"}; the sign-off is ` +
+          `valid until ${review.interpretation.expires_at}`,
+        idempotency: { kind: "client_probe", key: ["evidenceId", "expiresAt"] },
+        arguments: { evidenceId: existing.id, expiresAt: wanted },
+      });
+    }
   }
 
   return operations;

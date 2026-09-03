@@ -110,6 +110,42 @@ def write_state(repo, payload):
     path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
+def check_evidence_server_keys(results, label, operations):
+    creates = [op for op in operations if op["operation"] == "createEvidence"]
+    if creates:
+        results.check(
+            f"[{label}] every evidence create carries its declared stable server key",
+            all(
+                op["idempotency"]["kind"] == "server_key"
+                and op["arguments"].get("idempotencyKey")
+                and op["arguments"]["idempotencyKey"] == op["idempotency"].get("value")
+                for op in creates
+            ),
+            json.dumps(
+                [
+                    {
+                        "kind": op["idempotency"].get("kind"),
+                        "key": op["arguments"].get("idempotencyKey"),
+                    }
+                    for op in creates
+                ]
+            ),
+        )
+
+    links = [op for op in operations if op["operation"] == "linkEvidenceToControl"]
+    if links:
+        results.check(
+            f"[{label}] evidence links declare the server's natural dedupe tuple",
+            all(
+                op["idempotency"]["kind"] == "server_dedupe"
+                and op["idempotency"]["key"]
+                == ["evidenceId", "controlId", "evidenceItemIds"]
+                for op in links
+            ),
+            json.dumps([op["idempotency"] for op in links]),
+        )
+
+
 def state_after_ai_inventory(operations):
     """Build the org snapshot that would exist if every planned write had succeeded."""
     assets, vendors, evidence = [], [], []
@@ -164,6 +200,7 @@ def test_ai_inventory(results, tmp):
     if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
         return
     plan = json.loads(first.stdout)
+    check_evidence_server_keys(results, label, plan["operations"])
     results.check(
         f"[{label}] first diff plans real writes",
         plan["summary"]["create"] > 0,
@@ -247,6 +284,16 @@ def test_evidence_push(results, tmp):
     if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
         return
     plan = json.loads(first.stdout)
+    upload_creates = [op for op in plan["operations"] if op["effect"] == "create"]
+    results.check(
+        f"[{label}] every upload carries the declared content-addressed server key",
+        all(
+            op["idempotency"]["kind"] == "server_key"
+            and op["arguments"].get("idempotencyKey") == op["idempotency"].get("value")
+            for op in upload_creates
+        ),
+        json.dumps([op["idempotency"] for op in upload_creates]),
+    )
     results.check(
         f"[{label}] first diff plans real uploads",
         plan["summary"]["create"] > 0,
@@ -269,7 +316,10 @@ def test_evidence_push(results, tmp):
         payload = json.loads(dry.stdout)
         results.check(
             f"[{label}] dry run sends controlMappings, never the legacy controlIds",
-            all("control_mappings" in u for u in payload["would_upload"]),
+            all(
+                "control_mappings" in u and u.get("idempotency_key")
+                for u in payload["would_upload"]
+            ),
             json.dumps(payload["would_upload"])[:200],
         )
         results.check(
@@ -358,6 +408,7 @@ def test_governance_records(results, tmp):
     if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
         return
     plan = json.loads(first.stdout)
+    check_evidence_server_keys(results, label, plan["operations"])
     results.check(
         f"[{label}] first diff plans real writes",
         plan["summary"]["create"] > 0,
@@ -438,7 +489,7 @@ def test_governance_records(results, tmp):
 
 
 def state_after_review_signoff(operations):
-    """As above, and it also has to thread the evidence id the update depends on."""
+    """Apply sign-off creates and any later expiry-drift repairs."""
     evidence = []
     created_at_index = {}
     for i, op in enumerate(operations):
@@ -450,7 +501,7 @@ def state_after_review_signoff(operations):
                 "id": f"NORU-EVD-{i}",
                 "title": args["title"],
                 "description": args["description"],
-                "expiresAt": None,
+                "expiresAt": args.get("expiresAt"),
             }
             evidence.append(record)
             created_at_index[i] = record
@@ -476,9 +527,10 @@ def test_review_signoff(results, tmp):
     if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
         return
     plan = json.loads(first.stdout)
+    check_evidence_server_keys(results, label, plan["operations"])
     results.check(
         f"[{label}] first diff plans real writes",
-        plan["summary"]["create"] > 0 and plan["summary"]["update"] > 0,
+        plan["summary"]["create"] > 0 and plan["summary"]["update"] == 0,
         json.dumps(plan["summary"]),
     )
     results.check(
@@ -486,10 +538,10 @@ def test_review_signoff(results, tmp):
         all(
             op["arguments"]["expiresAt"].startswith("20")
             for op in plan["operations"]
-            if op["operation"] == "updateEvidence"
+            if op["operation"] == "createEvidence"
         ),
         json.dumps(
-            [op["arguments"] for op in plan["operations"] if op["operation"] == "updateEvidence"]
+            [op["arguments"] for op in plan["operations"] if op["operation"] == "createEvidence"]
         )[:200],
     )
 
@@ -510,17 +562,11 @@ def test_review_signoff(results, tmp):
     calls = json.loads(first_push.stdout)["calls"]
     results.check(f"[{label}] first push has calls to make", len(calls) > 0, len(calls))
 
-    # The dependent call has to point at a call that is actually in this push, by its position
-    # after skipped operations were dropped — an off-by-one here would send a null evidence id.
+    # Expiry is part of the create now, so a first push has no generated-id dependency to thread.
     dependent = [c for c in calls if "depends_on" in c]
     results.check(
-        f"[{label}] every dependent call names an earlier call in this push",
-        len(dependent) > 0
-        and all(
-            1 <= c["depends_on"]["order"] < c["order"]
-            and calls[c["depends_on"]["order"] - 1]["tool"] == "createEvidence"
-            for c in dependent
-        ),
+        f"[{label}] first push needs no dependent expiry call",
+        len(dependent) == 0,
         json.dumps([{"order": c["order"], "depends_on": c.get("depends_on")} for c in calls]),
     )
     results.check(
@@ -801,6 +847,7 @@ def test_audit_pack(results, tmp):
     if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
         return
     plan = json.loads(first.stdout)
+    check_evidence_server_keys(results, label, plan["operations"])
     results.check(
         f"[{label}] first diff plans real writes",
         plan["summary"]["create"] > 0,
@@ -1022,6 +1069,7 @@ def test_change_control(results, tmp):
         return
     plan = json.loads(first.stdout)
     operations = plan["operations"]
+    check_evidence_server_keys(results, label, operations)
 
     findings = [o for o in operations if o["operation"] == "createSecurityFinding"]
     results.check(

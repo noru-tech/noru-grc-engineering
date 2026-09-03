@@ -83,11 +83,11 @@ this an error.
 - **Never handle a credential.** MCP auth belongs to the client.
 - **Never invent a control id, evidence item, tool name or scope.** Ask Noru.
 
-## Idempotency, honestly
+## Idempotency
 
-No idempotency key is documented for evidence, so the piece gives itself a marker to recognise: the
-record key plus a digest of the rendered account, embedded in the evidence description, probed
-through `getOrganizationEvidence`. Be straight with the user about the two consequences:
+Every create carries a stable, content-addressed `idempotencyKey`. The record marker and
+`getOrganizationEvidence` probe remain for compatibility with older Noru deployments. Be straight
+with the user about the consequences:
 
 - edit that description in the Noru UI and a re-run files the record again
 - rewrite the minutes and the digest changes, so a *second* record is created rather than the first

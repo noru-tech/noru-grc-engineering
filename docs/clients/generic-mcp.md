@@ -54,12 +54,10 @@ added to the manifest afterwards; `createEvidence` carries the mappings on a fir
 |---|---|---|
 | `:scan` (read) | `getOrganizationControls`, `getControlContext`, `getEvidenceForControl`, `getEvidenceItems` | `read:controls`, `read:evidence` |
 | `:diff` (read) | `getOrganizationEvidence` | `read:evidence` |
-| `:push` (write) | `createEvidence`, then `updateEvidence` to set the sign-off's expiry | `write:evidence` |
+| `:push` (write) | keyed `createEvidence` with expiry; `updateEvidence` only for later expiry drift | `write:evidence` |
 
-This is the one piece whose call list has an ordering dependency: the published `createEvidence`
-input fields do not include an expiry, so the expiry is set afterwards on the record that call
-returns. Those calls carry `depends_on`, naming the earlier call and the single field to substitute.
-Substituting that field is the only edit a client may make to any emitted call.
+New sign-offs carry expiry in the create, so there is no generated-id dependency. A later
+`updateEvidence` call appears only when the current-state snapshot shows expiry drift.
 
 ### audit-pack
 
@@ -70,10 +68,9 @@ Substituting that field is the only edit a client may make to any emitted call.
 | `:push` (write) | `createEvidence`, `linkEvidenceToControl` | `write:evidence` |
 
 This is the piece that mostly *consumes*: the pack under `.noru/audit-pack/` is a local deliverable
-and what lands in Noru is the tested conclusion for each control. No idempotency key is documented
-for evidence, so the diff probes rather than assuming one — each workpaper carries a marker in its
-description built from the pack key, the workpaper key and a digest of the rendered workpaper, and
-`getOrganizationEvidence`'s `search` filter narrows to it.
+and what lands in Noru is the tested conclusion for each control. Each workpaper create carries a
+content-addressed server key. Its description marker and the narrowed state probe remain for older
+deployments.
 
 ### iac-scan
 
@@ -144,5 +141,6 @@ Documented codes: `UNAUTHORIZED`, `FORBIDDEN` (missing scope), `NOT_FOUND`, `BAD
 — an already-linked evidence record comes back as `ALREADY_LINKED`, which is benign. Handle codes
 you receive; do not hardcode ones you have not seen.
 
-**Do not retry a write on a 5xx without a human deciding.** No idempotency key is documented for
-evidence creation or for the upload endpoint, so a blind retry is how duplicates happen.
+Evidence creates and uploads accept stable idempotency keys and report `created` or `reused`.
+Retry the exact payload with the exact key after an ambiguous failure. If the connected server's
+published schema lacks the key, use the plugin's marker-probe fallback and refresh state first.

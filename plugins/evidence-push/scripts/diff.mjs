@@ -6,11 +6,8 @@
 //   .noru/.cache/noru-state.json            existing evidence, written by the skill from
 //                                           getOrganizationEvidence
 //
-// POST /v1/evidence/upload has no idempotency key: two identical uploads produce two evidence
-// records. So this piece probes instead. Every upload carries a marker in its description that
-// includes the artifact's content digest, and the diff looks for that marker in the evidence
-// already in the org. Same file, same mapping -> skip. That is the whole idempotency story for
-// this piece, and it is a client-side workaround for a server-side gap recorded in piece.json.
+// New Noru servers key uploads atomically. The description marker remains as a compatibility probe
+// for older deployments and as a readable audit hint; it is no longer the concurrency boundary.
 //
 // Usage: node diff.mjs [--repo=<path>] [--output=json|text] [--quiet]
 // Exit codes: 0 plan written, 1 missing/unusable input, 2 usage error.
@@ -34,6 +31,10 @@ const USAGE = "usage: diff.mjs [--repo=<path>] [--output=json|text] [--quiet]\n"
 
 export function uploadMarker(sha256) {
   return `[${MARKER_PREFIX}#${sha256.slice(0, 16)}]`;
+}
+
+export function uploadIdempotencyKey(sha256) {
+  return `noru-grc:evidence-push:${sha256}`;
 }
 
 function loadJson(path, label) {
@@ -77,8 +78,14 @@ export function buildOperations(manifest, state, repo) {
         : existing
           ? `evidence ${existing.id} already carries this content marker (${marker})`
           : "no evidence in the organization carries this artifact's content marker",
-      idempotency: { kind: "client_probe", key: ["description contains marker"], marker },
+      idempotency: {
+        kind: "server_key",
+        key: ["organizationId", "operation", "arguments.idempotencyKey"],
+        value: uploadIdempotencyKey(upload.sha256),
+        fallback: { kind: "client_probe", marker },
+      },
       arguments: {
+        idempotencyKey: uploadIdempotencyKey(upload.sha256),
         file: upload.file,
         sha256: upload.sha256,
         mimeType: upload.mime_type,
