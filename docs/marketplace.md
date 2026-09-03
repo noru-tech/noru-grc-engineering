@@ -28,7 +28,7 @@ do not support a field. It declares:
 - generated artifacts and their purpose;
 - exact read and write scopes;
 - every write operation and whether its transport is MCP or REST;
-- idempotency behaviour, provenance and confirmation requirements.
+- provenance and confirmation requirements.
 
 Collectors require Node.js 18 or newer. Validators require Python 3 and use only the standard
 library, with optional PyYAML parity coverage in the repository matrix. Seven pieces publish over
