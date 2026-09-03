@@ -10,6 +10,7 @@ What it covers, and why each one is here rather than left to review:
   * **Plugin manifests** — every declared source directory really contains a plugin whose name
     matches, for both clients, and no public metadata contains an unfinished placeholder.
   * **MCP config** — points at Noru's hosted endpoint and carries no credential.
+  * **Supported workflows** — the copyable PR review stays fork-safe and structurally read-only.
   * **Hub routing** — every declared piece appears exactly once in the hub's routing catalogue.
   * **Published examples** — copyable `noru-ci` examples pin the current marketplace version.
   * **Schema / vocabulary sync** — a piece's bundled vocabulary and the contract schema describe the
@@ -203,6 +204,8 @@ def check_marketplaces(problems):
             f"Claude {sorted(claude_entries)} vs Codex {sorted(codex_entries)}"
         )
 
+    shared_mcp = None
+    shared_mcp_owner = None
     for name, entry in sorted(claude_entries.items()):
         source = entry.get("source")
         if not isinstance(source, str):
@@ -243,17 +246,27 @@ def check_marketplaces(problems):
                 problems.append(f"[{name}] {rel}/plugin.json license is not MIT")
 
         mcp = directory / ".mcp.json"
-        if mcp.is_file():
-            config = json.loads(mcp.read_text(encoding="utf-8"))
-            server = (config.get("mcpServers") or {}).get("noru", {})
-            if server.get("url") != MCP_URL:
-                problems.append(f"[{name}] .mcp.json url is {server.get('url')}, expected {MCP_URL}")
-            for key in ("headers", "env", "token", "apiKey", "authorization"):
-                if key in server:
-                    problems.append(
-                        f"[{name}] .mcp.json declares '{key}' — authentication belongs to the MCP "
-                        "client, never to a committed config"
-                    )
+        if not mcp.is_file():
+            problems.append(f"[{name}] has no independent .mcp.json declaration")
+            continue
+        config = json.loads(mcp.read_text(encoding="utf-8"))
+        server = (config.get("mcpServers") or {}).get("noru", {})
+        if server.get("url") != MCP_URL:
+            problems.append(f"[{name}] .mcp.json url is {server.get('url')}, expected {MCP_URL}")
+        for key in ("headers", "env", "token", "apiKey", "authorization"):
+            if key in server:
+                problems.append(
+                    f"[{name}] .mcp.json declares '{key}' — authentication belongs to the MCP "
+                    "client, never to a committed config"
+                )
+        if shared_mcp is None:
+            shared_mcp = server
+            shared_mcp_owner = name
+        elif server != shared_mcp:
+            problems.append(
+                f"[{name}] .mcp.json differs from [{shared_mcp_owner}]; independently installed "
+                "plugins must declare the same logical Noru server without depending on the hub"
+            )
 
     return sorted(claude_entries)
 
@@ -476,9 +489,12 @@ def check_action_version_pins(problems):
     paths = [
         ROOT / "README.md",
         ROOT / "docs" / "ci-mode.md",
+        ROOT / "docs" / "developer-onboarding.md",
         ROOT / ".github" / "actions" / "noru-ci" / "README.md",
+        ROOT / ".github" / "actions" / "noru-review" / "README.md",
+        ROOT / "templates" / "github" / "noru-grc-review.yml",
     ]
-    pattern = re.compile(r"noru-ci@v([0-9]+\.[0-9]+\.[0-9]+)")
+    pattern = re.compile(r"noru-(?:ci|review)@v([0-9]+\.[0-9]+\.[0-9]+)")
     found = 0
     for path in paths:
         if not path.is_file():
@@ -488,11 +504,40 @@ def check_action_version_pins(problems):
                 found += 1
                 if match.group(1) != expected:
                     problems.append(
-                        f"{path.relative_to(ROOT)}:{number}: pins noru-ci@v{match.group(1)}, "
+                        f"{path.relative_to(ROOT)}:{number}: pins a Noru action at v{match.group(1)}, "
                         f"but the marketplace version is {expected}"
                     )
     if not found:
-        problems.append("no copyable noru-ci@v<version> example is documented")
+        problems.append("no copyable Noru action pinned at v<version> is documented")
+
+
+def check_supported_workflows(problems):
+    """The supported PR template must stay fork-safe and structurally unable to publish."""
+    template = ROOT / "templates" / "github" / "noru-grc-review.yml"
+    action = ROOT / ".github" / "actions" / "noru-review" / "action.yml"
+    script = ROOT / "scripts" / "ci_review.py"
+    for path in (template, action, script):
+        if not path.is_file():
+            problems.append(f"missing supported review component {path.relative_to(ROOT)}")
+    if not template.is_file() or not action.is_file() or not script.is_file():
+        return
+
+    template_text = template.read_text(encoding="utf-8")
+    if "pull_request_target" in template_text:
+        problems.append("supported PR template must never use pull_request_target")
+    if "contents: read" not in template_text:
+        problems.append("supported PR template must request only read access to repository contents")
+    if "NORU_API_KEY" in template_text or "secrets." in template_text:
+        problems.append("supported PR template must not receive a Noru or repository secret")
+
+    action_text = action.read_text(encoding="utf-8")
+    script_text = script.read_text(encoding="utf-8")
+    if "--steps=scan,validate,expiry,policy" not in script_text:
+        problems.append("consolidated PR review must hard-code the local read-only CI steps")
+    if 'env.pop("NORU_API_KEY", None)' not in script_text:
+        problems.append("consolidated PR review must remove NORU_API_KEY from child processes")
+    if "inputs:\n  steps:" in action_text:
+        problems.append("noru-review must not expose a steps input that could enable push")
 
 
 
@@ -737,6 +782,7 @@ def main(argv):
         check_pieces_registered(problems, plugin_names)
         check_hub_routing(problems)
         check_action_version_pins(problems)
+        check_supported_workflows(problems)
         check_reference_files_exist(problems)
         check_yaml_11_booleans(problems)
         check_special_categories(problems)

@@ -34,7 +34,7 @@ import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const PIECE = "iac-scan";
-export const VERSION = "0.4.1";
+export const VERSION = "0.5.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 // The `source` this piece's findings carry in Noru. A finding is keyed on (source, externalId), so

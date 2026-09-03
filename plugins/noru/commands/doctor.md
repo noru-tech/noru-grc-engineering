@@ -21,7 +21,7 @@ Checks, and why each one matters:
 | `.noru/` | Created by a piece's `:scan` on first run |
 | `.noru/.cache/` gitignored | The cache holds machine state **and snapshots of the organization's compliance data**. Commit `.noru/<piece>.yml`; do not commit the cache |
 | `NORU_API_KEY` presence | Only the `evidence-push` upload needs it. The script reports set/not set and never reads the value |
-| possible privacy data-map writers | Warns when more than one tracked REST/MCP call or workflow may publish the generated map; reports only signal type and `file:line`, never matched content |
+| possible privacy data-map writers | Warns when more than one tracked REST/MCP/plugin path may publish the generated map, or when writer configurations repeat a source slug; reports only signal type and `file:line`, never matched values |
 
 If `.noru/.cache/` is not ignored, offer to add it:
 
@@ -33,8 +33,9 @@ Then run the hub's context command to show the provenance a push would carry, an
 the working tree is dirty — a push from a dirty tree records a commit sha that does not describe
 what was actually scanned.
 
-Treat `privacy-writers` as an advisory warning. If it finds more than one path, list the citations and
-recommend choosing one authoritative publisher before enabling deployment automation. Do not infer
-that a matching call is active, and do not disable anything without the user's request.
+Treat `privacy-writers` as an advisory warning. If it finds more than one path or a repeated source
+slug, list the citations and recommend choosing one authoritative publisher before enabling
+deployment automation. Do not infer that a matching call is active, and do not disable anything
+without the user's request.
 
 Report the failures with their hints, and stop there. This command changes nothing.

@@ -39,8 +39,10 @@ named owner and rationale rather than accepting classifier output as a complianc
 
 ## 3. Add a credential-free pull-request check
 
-Start in warning mode and pin a release tag. The full checkout is required when comparing findings
-with the merge base.
+Copy [`templates/github/noru-grc-review.yml`](../templates/github/noru-grc-review.yml) into the
+adopting repository as `.github/workflows/noru-grc-review.yml`. It starts in warning mode, pins a
+release tag, detects the relevant pieces from the branch, and produces one consolidated report. The
+full checkout is required when comparing findings with the merge base.
 
 ```yaml
 name: grc
@@ -50,7 +52,7 @@ permissions:
   contents: read
 
 jobs:
-  privacy:
+  review:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,18 +61,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.4.1
+      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.5.0
         with:
-          piece: privacy-datamap
+          base-ref: ${{ github.event.pull_request.base.sha }}
           mode: warn
-          base-ref: origin/main
           gate-on-new: true
 ```
 
 This path runs local collection, validation, expiry, and policy checks. It needs no Noru secret and
-does not push. Change `mode` to `gate` after the report is understood and the committed manifest is
-current. Repeat the action for each piece the repository has adopted; `/noru:review` helps choose
-them but is not itself a replacement for the deterministic per-piece CI checks.
+has no input capable of running diff or push. Change `mode` to `gate` after the report is understood
+and the committed manifests are current. Pass `pieces: privacy-datamap,ai-inventory` only when the
+repository wants an explicit adopted set instead of automatic branch routing. A fork receives no
+credential; checks needing an external queue say `skipped`, never `passed`.
 
 ## 4. Review the exact Noru change
 
@@ -92,10 +94,16 @@ to execute the reviewed calls; emitting a call plan in headless CI does not exec
 `evidence-push` is the exception because its file upload uses REST and reads `NORU_API_KEY` from the
 job environment at the point of use.
 
-If publishing is automated, put it on a protected branch or deployment environment with human
-approval—never `pull_request_target`—and make that workflow the only writer for the source. Keep PR
-checks read-only. `/noru:doctor` warns when tracked code or workflows indicate more than one privacy
-data-map publisher, but the warning is a signal to review, not proof that both paths are active.
+There is no generic protected-publication GitHub template yet. Seven pieces publish through MCP,
+which the current headless action cannot execute, and the REST-backed evidence piece still needs a
+live queue snapshot to produce its bound plan. Approval for those pieces therefore remains in the
+authenticated MCP host. Do not replace it with a direct REST call that bypasses the reviewed plan.
+
+When supported headless MCP execution exists, put automated publication on a protected branch or
+deployment environment with human approval—never `pull_request_target`—and make that workflow the
+only writer for the source. Keep PR checks read-only. `/noru:doctor` warns when tracked code or
+workflows indicate more than one privacy data-map publisher or repeat its source slug, but the
+warning is a signal to review, not proof that both paths are active.
 
 See [CI mode](./ci-mode.md) for exit codes, GitLab and shell examples, policy baselines, and staged
 adoption.

@@ -1,6 +1,6 @@
 {
   "name": "review-signoff",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Turn a periodic review of machine output — access, rules, baselines, assets, physical access, vendors — into a named, dated, expiring sign-off in Noru.",
   "author": {
     "name": "Noru",

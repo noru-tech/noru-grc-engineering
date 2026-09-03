@@ -40,6 +40,7 @@ jobs:
           python3 scripts/test_idempotency.py
           python3 scripts/contract_test.py
           python3 scripts/test_ci_mode.py
+          python3 scripts/test_ci_review.py
           python3 scripts/test_hub.py
 
       - name: tag, marketplace entries and plugin manifests agree on one version
