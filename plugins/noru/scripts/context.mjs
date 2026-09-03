@@ -41,14 +41,28 @@ function gitValue(repo, args, fallback) {
   }
 }
 
+function safeRemote(value) {
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
 export function provenance(repo) {
-  const remote = gitValue(repo, ["remote", "get-url", "origin"], "");
+  const remote = safeRemote(gitValue(repo, ["remote", "get-url", "origin"], ""));
   let slug = basename(repo) || "repository";
   const match = remote.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
   if (match) slug = match[1];
   const dirty = gitValue(repo, ["status", "--porcelain"], "");
   return {
     slug,
+    remote,
     commit_sha: gitValue(repo, ["rev-parse", "HEAD"], "unknown"),
     branch: gitValue(repo, ["rev-parse", "--abbrev-ref", "HEAD"], "unknown"),
     // A push from a dirty tree records a commit sha that does not describe what was scanned.
@@ -102,6 +116,7 @@ function main(argv) {
     process.stdout.write(
       [
         `slug:   ${p.slug}`,
+        `remote: ${p.remote || "(none)"}`,
         `commit: ${p.commit_sha}`,
         `branch: ${p.branch}`,
         `tree:   ${p.working_tree_clean ? "clean" : "DIRTY — a push would record a commit that does not describe what was scanned"}`,

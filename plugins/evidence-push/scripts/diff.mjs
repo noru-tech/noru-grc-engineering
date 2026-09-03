@@ -145,6 +145,8 @@ function main(argv) {
   const manifest = parsed.value;
   const operations = buildOperations(manifest, state.value, opts.repo);
   const plan = writePlan(planPathFor(opts.repo, PIECE), {
+    repo: opts.repo,
+    state: state.value,
     created_at: state.value.fetched_at ?? manifest.source.commit_sha,
     piece: PIECE,
     manifest: ".noru/evidence-push.yml",

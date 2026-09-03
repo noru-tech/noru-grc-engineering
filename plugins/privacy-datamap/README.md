@@ -154,7 +154,8 @@ Least privilege. Start read-only.
 
 | Capability | Scopes |
 |---|---|
-| `:scan` and `:diff` | `read:datamaps` — and nothing else |
+| `:scan` | `read:datamaps` |
+| `:diff` | adds `read:organization` to bind the plan to its target |
 | `:push` | adds `write:datamaps` |
 
 `read:datamaps` is what Noru's API documentation calls "Read the privacy data map"; it covers

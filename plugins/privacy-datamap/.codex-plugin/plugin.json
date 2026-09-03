@@ -30,14 +30,18 @@
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
-      "Read",
-      "Write"
+      "Local read: schemas, models, migrations and API contracts",
+      "Local write: .noru/privacy-datamap.yml, .fides/datamap.yml and machine-only cache files",
+      "Noru read: organization, taxonomy and existing privacy data map",
+      "Noru write: privacy data map only after diff and confirmation",
+      "Fideslang classification with file and line provenance",
+      "Special-category data and unresolved-decision reporting"
     ],
     "websiteURL": "https://noru.tech",
     "defaultPrompt": [
-      "Build a privacy data map for this repository.",
-      "What personal data does this codebase hold, and where?",
-      "Generate a fideslang manifest for this repo."
+      "Build a privacy data map for this repository. Do not push or write to Noru.",
+      "What personal data does this codebase hold, and where? Do not push or write to Noru.",
+      "Generate a Fideslang manifest for this repo. Do not push or write to Noru."
     ]
   }
 }

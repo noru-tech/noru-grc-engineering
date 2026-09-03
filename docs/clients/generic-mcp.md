@@ -80,6 +80,7 @@ description built from the pack key, the workpaper key and a digest of the rende
 | Phase | Tools | Scopes |
 |---|---|---|
 | `:scan` (read) | `getSecurityFindings` with `source: "iac-scan"`, `getOrganizationAssets`, `getOrganizationRisks` | `read:risks`, `read:assets` |
+| `:diff` (read) | the scan tools plus `findOrganization` for the plan binding | adds `read:organization` |
 | `:diff` (read) | `getSecurityFindings` with `source: "iac-scan"` | `read:risks` |
 | `:push` (write) | `createSecurityFinding` | `write:risks` |
 
@@ -93,7 +94,8 @@ on a failure you do not understand even here.
 | Phase | Tools | Scopes |
 |---|---|---|
 | `:scan` | none — the collector reads the repository and opens no socket | — |
-| `:diff` (read) | `getPrivacyDataMap`, `listPrivacyDatasets`, `getPrivacyTaxonomy` | `read:datamaps` |
+| `:scan` (read) | `getPrivacyDataMap`, `listPrivacyDatasets`, `getPrivacyTaxonomy` | `read:datamaps` |
+| `:diff` (read) | the scan tools plus `findOrganization` for the plan binding | adds `read:organization` |
 | `:push` (write) | `ingestDatamap` | `write:datamaps` |
 
 `ingestDatamap` takes the whole map for a source, so the push is one call whether the repository has

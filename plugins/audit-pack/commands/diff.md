@@ -25,11 +25,17 @@ No idempotency key is documented for evidence, so the piece does not assume one:
 Each workpaper lands with a marker in its description built from the pack key, the workpaper key and
 a digest of the rendered workpaper.
 
-Call `getOrganizationEvidence` and write `<repo>/.noru/.cache/noru-state.json`:
+Call `findOrganization` and `getOrganizationEvidence`, then write
+`<repo>/.noru/.cache/noru-state.json`:
 
 ```json
 {
   "fetched_at": "2026-08-27T09:14:00Z",
+  "connection": {
+    "organization": { "id": "...", "name": "..." },
+    "endpoint": "https://api.noru.tech/v1/mcp",
+    "scopes": ["read:organization", "read:frameworks", "read:controls", "read:evidence"]
+  },
   "evidence": [
     {
       "id": "...",

@@ -7,7 +7,7 @@ argument-hint: "[path to repository, defaults to the current directory]"
 # /iac-scan:diff
 
 Show what `/iac-scan:push` would do, before it does anything. No writes. Read scopes only:
-`read:risks`, `read:assets`.
+`read:organization`, `read:risks`, `read:assets`.
 
 ## 1. Validate, and emit the parsed manifest
 
@@ -24,12 +24,17 @@ Only a valid manifest produces the parsed file, so an invalid one cannot reach `
 is not a probe standing in for a missing key — it is how the plan can tell you *what would change*
 rather than only *what would be written*.
 
-Call `getSecurityFindings` with `source: "iac-scan"` and write
+Call `findOrganization`, then call `getSecurityFindings` with `source: "iac-scan"` and write
 `<repo>/.noru/.cache/noru-state.json`:
 
 ```json
 {
   "fetched_at": "2026-08-27T09:14:00Z",
+  "connection": {
+    "organization": { "id": "...", "name": "..." },
+    "endpoint": "https://api.noru.tech/v1/mcp",
+    "scopes": ["read:organization", "read:risks", "read:assets"]
+  },
   "security_findings": [
     {
       "id": "...",

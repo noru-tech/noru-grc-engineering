@@ -360,11 +360,26 @@ def check_item_5(piece, decl, fail, workdir):
 
     # A plan bound to different manifest bytes -> refuse with 1, even with --confirm.
     plan = {
-        "plan_version": 1,
+        "plan_version": 2,
         "created_at": "fixture",
+        "generated_at": "2026-01-01T00:00:00.000Z",
+        "expires_at": "2999-01-01T00:00:00.000Z",
         "piece": piece.name,
+        "piece_version": read_json(piece / ".codex-plugin" / "plugin.json")["version"],
         "manifest": decl["artifact"],
         "manifest_sha256": "0" * 64,
+        "target": {
+            "organization_id": "org_fixture",
+            "organization_name": "Fixture Organization",
+            "mcp_endpoint": "https://api.noru.tech/v1/mcp",
+        },
+        "repository": {
+            "root": str(repo.resolve()),
+            "remote": "s",
+            "branch": "main",
+            "commit_sha": "c" * 40,
+        },
+        "required_scopes": [],
         "provenance": {"slug": "s", "commit_sha": "c" * 40, "branch": "main"},
         "operations": [],
         "summary": {"create": 0, "update": 0, "skip": 0, "total": 0},
@@ -383,6 +398,18 @@ def check_item_5(piece, decl, fail, workdir):
     import hashlib
 
     plan["manifest_sha256"] = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    (repo / ".noru" / ".cache" / "noru-state.json").write_text(
+        json.dumps(
+            {
+                "connection": {
+                    "organization": {"id": "org_fixture", "name": "Fixture Organization"},
+                    "endpoint": "https://api.noru.tech/v1/mcp",
+                    "scopes": ["*"],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     plan_path.write_text(json.dumps(plan), encoding="utf-8")
     result = run(["node", str(push), f"--repo={repo}"])
     if result.returncode != 2:

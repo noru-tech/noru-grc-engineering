@@ -68,9 +68,11 @@ Claude Code, or Codex, or Cursor.
 | `governance-records:push` | adds `write:evidence` |
 | `review-signoff:push` | adds `write:evidence` |
 | `audit-pack:push` | adds `write:evidence` |
-| `iac-scan:scan` and `:diff` | `read:risks`, `read:assets` — and nothing else |
+| `iac-scan:scan` | `read:risks`, `read:assets` |
+| `iac-scan:diff` | adds `read:organization` to bind the plan |
 | `iac-scan:push` | adds `write:risks` |
-| `privacy-datamap:scan` and `:diff` | `read:datamaps` — and nothing else |
+| `privacy-datamap:scan` | `read:datamaps` |
+| `privacy-datamap:diff` | adds `read:organization` to bind the plan |
 | `privacy-datamap:push` | adds `write:datamaps` |
 
 Wildcards (`read:*`, `write:*`) work but are the wrong default. Start read-only: tool visibility is

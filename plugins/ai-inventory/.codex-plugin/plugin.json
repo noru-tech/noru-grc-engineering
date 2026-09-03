@@ -29,6 +29,10 @@
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
+      "Local read: repository source and dependency manifests",
+      "Local write: .noru/ai-inventory.yml and machine-only cache files",
+      "Noru read: organization frameworks, controls, assets, vendors and evidence",
+      "Noru write: assets, vendors and evidence only after diff and confirmation",
       "Repository AI system discovery",
       "EU AI Act Article 5 prohibited-practice screening",
       "EU AI Act Article 50 triggers and missing-disclosure detection",
@@ -37,6 +41,6 @@
       "Idempotent push to Noru assets, vendors and evidence"
     ],
     "websiteURL": "https://noru.tech",
-    "defaultPrompt": "Scan this repository for AI systems and show me what would land in Noru."
+    "defaultPrompt": "Scan this repository for AI systems and show me what would land in Noru. Do not push or write to Noru."
   }
 }

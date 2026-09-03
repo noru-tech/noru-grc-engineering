@@ -29,12 +29,16 @@
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
+      "Local read: minutes and governance documents",
+      "Local write: .noru/governance-records.yml and machine-only cache files",
+      "Noru read: controls and unmet evidence expectations",
+      "Noru write: attributed evidence only after diff and confirmation",
       "Unmet governance expectations from Noru's own catalogue",
       "Structured extraction from minutes and governance documents",
       "Named participants, decisions and owned actions",
       "Attributed records with a review date"
     ],
     "websiteURL": "https://noru.tech",
-    "defaultPrompt": "Show me which governance expectations are unmet and which of my minutes could satisfy them."
+    "defaultPrompt": "Show me which governance expectations are unmet and which of my minutes could satisfy them. Do not push or write to Noru."
   }
 }

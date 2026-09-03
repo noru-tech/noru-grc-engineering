@@ -30,12 +30,16 @@
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
+      "Local read: audit artifacts and population exports",
+      "Local write: .noru/audit-pack.yml and the rendered local pack",
+      "Noru read: framework scope, controls and existing evidence",
+      "Noru write: tested conclusions only after diff and confirmation",
       "Scope and coverage from the organization's own framework mapping",
       "Reproducible sampling seeded from the population's digest",
       "A workpaper per control, with what was inspected and what was concluded",
       "Conclusions that expire from the end of the window, not the signature"
     ],
     "websiteURL": "https://noru.tech",
-    "defaultPrompt": "Build an audit pack for my framework covering the first half of this year."
+    "defaultPrompt": "Assess what is needed to build an audit pack for my framework covering the first half of this year. Do not push or write to Noru."
   }
 }

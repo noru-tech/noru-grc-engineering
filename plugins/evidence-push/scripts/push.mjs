@@ -153,6 +153,13 @@ async function main(argv) {
     return 1;
   }
   const { plan } = loaded;
+  const binding = {
+    target: plan.target,
+    repository: plan.repository,
+    piece_version: plan.piece_version,
+    plan_expires_at: plan.expires_at,
+    required_scopes: plan.required_scopes,
+  };
 
   const fresh = assertPlanFresh(plan, manifestPath);
   if (!fresh.ok) {
@@ -171,9 +178,16 @@ async function main(argv) {
 
   const pending = plan.operations.filter((op) => op.effect === "create");
   const baseUrl = (process.env.NORU_API_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const plannedBaseUrl = new URL(plan.target.mcp_endpoint).origin;
+  if (baseUrl !== plannedBaseUrl) {
+    process.stderr.write(
+      `error: REST endpoint changed (plan ${plannedBaseUrl}, current ${baseUrl}) — re-run :diff\n`
+    );
+    return 1;
+  }
 
   if (pending.length === 0) {
-    const payload = { piece: PIECE, ok: true, uploaded: 0, skipped: plan.operations.length, results: [] };
+    const payload = { piece: PIECE, ...binding, ok: true, uploaded: 0, skipped: plan.operations.length, results: [] };
     if (opts.json) process.stdout.write(`${JSON.stringify(payload, null, opts.quiet ? 0 : 2)}\n`);
     else if (!opts.quiet) {
       process.stdout.write(
@@ -187,6 +201,7 @@ async function main(argv) {
   if (opts.dryRun) {
     const payload = {
       piece: PIECE,
+      ...binding,
       ok: true,
       dry_run: true,
       base_url: baseUrl,
@@ -244,6 +259,7 @@ async function main(argv) {
 
   const payload = {
     piece: PIECE,
+    ...binding,
     ok: failures === 0,
     base_url: baseUrl,
     uploaded: results.filter((r) => r.ok).length,

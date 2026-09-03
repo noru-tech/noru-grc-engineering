@@ -162,6 +162,17 @@ def check_codex_manifests(problems):
             problems.append(
                 f"[{name}] .codex-plugin/plugin.json declares unsupported Codex field '{field}'"
             )
+        interface = data.get("interface") or {}
+        prompts = interface.get("defaultPrompt")
+        prompt_text = " ".join(prompts) if isinstance(prompts, list) else str(prompts or "")
+        if "write to Noru" not in prompt_text:
+            problems.append(
+                f"[{name}] Codex default prompt does not explicitly say not to write to Noru"
+            )
+        capabilities = interface.get("capabilities") or []
+        for prefix in ("Local read:", "Local write:", "Noru read:", "Noru write:"):
+            if not any(isinstance(value, str) and value.startswith(prefix) for value in capabilities):
+                problems.append(f"[{name}] Codex capabilities do not declare '{prefix}'")
 
 
 def check_marketplaces(problems):
@@ -333,6 +344,122 @@ def check_hub_routing(problems):
         problems.append(
             "[noru] the hub skill does not route broad requests through references/routing.json"
         )
+
+    review_path = ROOT / "plugins" / "noru" / "references" / "review-signals.json"
+    review_script = ROOT / "plugins" / "noru" / "scripts" / "review.mjs"
+    review_command = ROOT / "plugins" / "noru" / "commands" / "review.md"
+    if not review_path.is_file():
+        problems.append("[noru] missing references/review-signals.json")
+        return
+    try:
+        review = json.loads(review_path.read_text(encoding="utf-8")).get("pieces")
+    except (json.JSONDecodeError, AttributeError) as exc:
+        problems.append(f"[noru] references/review-signals.json is invalid: {exc}")
+        return
+    if not isinstance(review, dict):
+        problems.append("[noru] references/review-signals.json must contain a 'pieces' object")
+        return
+    review_names = set(review)
+    if review_names != declared:
+        problems.append(
+            "[noru] branch-review signals do not match declared pieces: "
+            f"missing {sorted(declared - review_names)}, unknown {sorted(review_names - declared)}"
+        )
+    for name, rules in review.items():
+        if not isinstance(rules, dict):
+            problems.append(f"[noru] review signals for {name} must be an object")
+            continue
+        count = 0
+        for kind in ("paths", "content"):
+            entries = rules.get(kind)
+            if not isinstance(entries, list):
+                problems.append(f"[noru] review signals for {name}.{kind} must be a list")
+                continue
+            count += len(entries)
+            for index, entry in enumerate(entries):
+                if not isinstance(entry, dict) or not entry.get("pattern") or not entry.get("reason"):
+                    problems.append(
+                        f"[noru] review signals for {name}.{kind}[{index}] need pattern and reason"
+                    )
+        if count == 0:
+            problems.append(f"[noru] review signals for {name} contain no rules")
+    if not review_script.is_file():
+        problems.append("[noru] missing scripts/review.mjs for the branch-review signals")
+    if not review_command.is_file():
+        problems.append("[noru] missing commands/review.md")
+
+    orchestration_path = ROOT / "plugins" / "noru" / "references" / "orchestration.json"
+    status_command = ROOT / "plugins" / "noru" / "commands" / "status.md"
+    if not orchestration_path.is_file():
+        problems.append("[noru] missing references/orchestration.json")
+        return
+    try:
+        orchestration = json.loads(orchestration_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        problems.append(f"[noru] references/orchestration.json is invalid JSON: {exc}")
+        return
+
+    orchestration_pieces = orchestration.get("pieces")
+    if not isinstance(orchestration_pieces, dict):
+        problems.append("[noru] references/orchestration.json must contain a 'pieces' object")
+    else:
+        orchestrated = set(orchestration_pieces)
+        if orchestrated != declared:
+            problems.append(
+                "[noru] orchestration pieces do not match declared pieces: "
+                f"missing {sorted(declared - orchestrated)}, "
+                f"unknown {sorted(orchestrated - declared)}"
+            )
+        for name, entry in orchestration_pieces.items():
+            if not isinstance(entry, dict):
+                problems.append(f"[noru] orchestration entry for {name} must be an object")
+                continue
+            piece_path = ROOT / "plugins" / name / "piece.json"
+            if not piece_path.is_file():
+                continue
+            contract = json.loads(piece_path.read_text(encoding="utf-8"))
+            if entry.get("manifest") != contract.get("artifact"):
+                problems.append(
+                    f"[noru] orchestration manifest for {name} is {entry.get('manifest')}, "
+                    f"piece.json declares {contract.get('artifact')}"
+                )
+            generated = [output.get("path") for output in contract.get("outputs", [])]
+            if entry.get("generated_files", []) != generated:
+                problems.append(
+                    f"[noru] orchestration generated files for {name} are "
+                    f"{entry.get('generated_files', [])}, piece.json declares {generated}"
+                )
+            for phase in ("scan", "diff"):
+                if entry.get(f"{phase}_command") != f"/{name}:{phase}":
+                    problems.append(
+                        f"[noru] orchestration {phase} command for {name} must be /{name}:{phase}"
+                    )
+                tools = entry.get(f"{phase}_read_tools")
+                if not isinstance(tools, list) or not all(isinstance(tool, str) for tool in tools):
+                    problems.append(
+                        f"[noru] orchestration {phase}_read_tools for {name} must be a string list"
+                    )
+
+    sections = orchestration.get("status_sections")
+    if not isinstance(sections, dict) or not sections:
+        problems.append("[noru] orchestration.json must declare status_sections")
+    else:
+        for name, section in sections.items():
+            scope = section.get("scope") if isinstance(section, dict) else None
+            tools = section.get("tools") if isinstance(section, dict) else None
+            if not isinstance(scope, str) or not scope.startswith("read:"):
+                problems.append(f"[noru] status section {name} must declare a read scope")
+            if not (
+                isinstance(tools, list)
+                and tools
+                and all(
+                    isinstance(tool, str) and tool.startswith(("find", "get", "list"))
+                    for tool in tools
+                )
+            ):
+                problems.append(f"[noru] status section {name} must contain read-tool names")
+    if not status_command.is_file():
+        problems.append("[noru] missing commands/status.md")
 
 
 def check_action_version_pins(problems):

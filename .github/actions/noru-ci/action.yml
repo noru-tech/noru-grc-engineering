@@ -1,7 +1,8 @@
 name: "Noru last-mile CI check"
 description: >
-  Run a last-mile piece headless — scan, validate, expiry, and optionally diff and push. The default
-  mode needs no network and no credential, so it works on a fork pull request.
+  Run a last-mile piece headless — scan, validate, expiry, and optionally diff and REST publication.
+  MCP-backed pushes require an authenticated MCP host. The default mode needs no network and no
+  credential, so it works on a fork pull request.
 author: "Noru"
 
 branding:
@@ -29,7 +30,8 @@ inputs:
   steps:
     description: >
       Comma-separated: scan, validate, expiry, policy, diff, push — or 'all'. The default,
-      scan,validate,expiry,policy, is the part that needs no credential.
+      scan,validate,expiry,policy, is the part that needs no credential. For MCP pieces, push
+      reports skipped after diff because this headless runner cannot execute MCP calls.
     required: false
     default: "scan,validate,expiry,policy"
   fail-on:

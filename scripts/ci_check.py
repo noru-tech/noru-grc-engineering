@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one piece headless: scan -> validate -> expiry -> policy -> (diff -> push).
+"""Run one piece headless: scan -> validate -> expiry -> policy -> (diff -> publish preparation).
 
 Standard library only, and by default no network and no credential — that is the whole design
 constraint. A fork pull request has no secrets, so the checks that matter most on a pull request
@@ -15,9 +15,11 @@ have to be computable from the repository alone. Two of them are:
      the committed privacy baseline does not permit. The baseline is a floor pinned from Noru so
      this stays offline; Noru is the truth. See scripts/check_policy.py.
 
-The `diff` and `push` half genuinely needs Noru, so it is opt-in, and when the inputs it needs are
-absent it is reported as skipped rather than failed. A gate that breaks on every fork pull request
-gets deleted in a week.
+The `diff` and publication half genuinely needs Noru, so it is opt-in, and when the inputs it needs
+are absent it is reported as skipped rather than failed. REST-backed pieces can publish from this
+runner. MCP-backed pieces cannot: their push entrypoint emits the reviewed calls, but only an
+authenticated MCP host can execute them. A gate that breaks on every fork pull request gets deleted
+in a week.
 
 This file is driven entirely by `plugins/<piece>/piece.json` — entrypoints, artifact path, exit
 codes. A piece scaffolded tomorrow works here with no change to this file, and there is a test that
@@ -774,8 +776,25 @@ def step_push(report, piece_dir, decl, repo, diff_outcome):
     if diff_outcome != "ok":
         report.step("push", "skipped", detail="the diff step did not produce a plan, so there is nothing to push")
         return "skipped"
-    # Presence only. The value is never read here; the piece's own push entrypoint reads it at the
-    # point of use.
+    transports = {
+        operation.get("transport") for operation in decl.get("push", {}).get("operations", [])
+    }
+    if "mcp" in transports:
+        report.step(
+            "push",
+            "skipped",
+            detail=(
+                "this piece publishes over MCP. Headless CI can create and verify the reviewed "
+                "plan, but it cannot execute MCP calls; run :push in an authenticated MCP host"
+            ),
+        )
+        return "skipped"
+    if transports != {"rest"}:
+        report.step("push", "error", detail=f"unsupported push transport set: {sorted(transports)}")
+        return "tooling"
+
+    # Presence only. The value is never read here; the REST piece's own push entrypoint reads it at
+    # the point of use.
     if not os.environ.get("NORU_API_KEY"):
         report.step(
             "push",

@@ -99,7 +99,15 @@ def diff(piece, repo):
 
 def write_state(repo, payload):
     path = repo / ".noru" / ".cache" / "noru-state.json"
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    state = {
+        "connection": {
+            "organization": {"id": "org_fixture", "name": "Fixture Organization"},
+            "endpoint": "https://api.noru.tech/v1/mcp",
+            "scopes": ["*"],
+        },
+        **payload,
+    }
+    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
 def state_after_ai_inventory(operations):
@@ -1411,6 +1419,154 @@ def test_privacy_datamap(results, tmp):
     )
 
 
+def test_plan_bindings(results, tmp):
+    """A reviewed plan cannot move to another target, checkout, version or point in time."""
+    binding_tmp = pathlib.Path(tmp) / "plan-binding"
+    binding_tmp.mkdir()
+    repo, piece, _decl, manifest = prepare(binding_tmp, "ai-inventory")
+    commands = [
+        ["git", "init", "-b", "main", str(repo)],
+        ["git", "-C", str(repo), "config", "user.email", "fixture@example.com"],
+        ["git", "-C", str(repo), "config", "user.name", "Fixture"],
+        ["git", "-C", str(repo), "add", "."],
+        ["git", "-C", str(repo), "commit", "-m", "fixture"],
+        [
+            "git", "-C", str(repo), "remote", "add", "origin",
+            "https://userinfo-marker@github.com/example/repo.git",
+        ],
+    ]
+    setup = [run(command) for command in commands]
+    if not results.check(
+        "[plan-binding] fixture repository initializes",
+        all(result.returncode == 0 for result in setup),
+        next((result.stderr for result in setup if result.returncode != 0), ""),
+    ):
+        return
+    validate_and_parse(piece, manifest, repo, results, "plan-binding")
+    base_state = {
+        "fetched_at": "2026-08-27T09:14:00Z",
+        "assets": [],
+        "vendors": [],
+        "evidence": [],
+        "ai_framework_ids": [],
+        "ai_controls": [],
+    }
+    write_state(repo, base_state)
+    made = diff(piece, repo)
+    if not results.check("[plan-binding] diff succeeds", made.returncode == 0, made.stderr):
+        return
+    plan = json.loads(made.stdout)
+    results.check(
+        "[plan-binding] plan names its complete trust boundary",
+        all(
+            plan.get(key)
+            for key in (
+                "generated_at",
+                "expires_at",
+                "piece_version",
+                "target",
+                "repository",
+                "required_scopes",
+            )
+        )
+        and plan["target"].get("organization_id")
+        and plan["target"].get("organization_name")
+        and plan["target"].get("mcp_endpoint")
+        and all(plan["repository"].get(key) for key in ("root", "remote", "branch", "commit_sha")),
+        json.dumps(plan, sort_keys=True)[:400],
+    )
+    results.check(
+        "[plan-binding] repository binding never stores remote credentials",
+        plan["repository"]["remote"] == "https://github.com/example/repo.git"
+        and "userinfo-marker" not in json.dumps(plan),
+        plan["repository"]["remote"],
+    )
+
+    push = piece / "scripts" / "push.mjs"
+    write_state(
+        repo,
+        {
+            **base_state,
+            "connection": {
+                "organization": {"id": "org_other", "name": "Other Organization"},
+                "endpoint": "https://api.noru.tech/v1/mcp",
+                "scopes": ["*"],
+            },
+        },
+    )
+    moved = run(["node", str(push), f"--repo={repo}", "--confirm"])
+    results.check(
+        "[plan-binding] changing organization blocks push",
+        moved.returncode == 1 and "organization changed" in moved.stderr,
+        moved.stderr,
+    )
+
+    write_state(repo, base_state)
+    diff(piece, repo)
+    write_state(
+        repo,
+        {
+            **base_state,
+            "connection": {
+                "organization": {"id": "org_fixture", "name": "Fixture Organization"},
+                "endpoint": "https://staging-api.noru.tech/v1/mcp",
+                "scopes": ["*"],
+            },
+        },
+    )
+    moved = run(["node", str(push), f"--repo={repo}", "--confirm"])
+    results.check(
+        "[plan-binding] changing MCP endpoint blocks push",
+        moved.returncode == 1 and "MCP endpoint changed" in moved.stderr,
+        moved.stderr,
+    )
+
+    write_state(repo, base_state)
+    diff(piece, repo)
+    write_state(
+        repo,
+        {
+            **base_state,
+            "connection": {
+                "organization": {"id": "org_fixture", "name": "Fixture Organization"},
+                "endpoint": "https://api.noru.tech/v1/mcp",
+                "scopes": ["read:*"],
+            },
+        },
+    )
+    denied = run(["node", str(push), f"--repo={repo}", "--confirm"])
+    results.check(
+        "[plan-binding] missing planned write scopes blocks push",
+        denied.returncode == 1 and "lacks required scope" in denied.stderr,
+        denied.stderr,
+    )
+
+    write_state(repo, base_state)
+    diff(piece, repo)
+    plan_path = repo / ".noru" / ".cache" / "ai-inventory.plan.json"
+    expired = json.loads(plan_path.read_text(encoding="utf-8"))
+    expired["generated_at"] = "2025-12-31T23:00:00.000Z"
+    expired["expires_at"] = "2026-01-01T00:00:00.000Z"
+    plan_path.write_text(json.dumps(expired), encoding="utf-8")
+    stale = run(["node", str(push), f"--repo={repo}", "--confirm"])
+    results.check(
+        "[plan-binding] expired plan blocks push",
+        stale.returncode == 1 and "expired" in stale.stderr,
+        stale.stderr,
+    )
+
+    diff(piece, repo)
+    changed = json.loads(plan_path.read_text(encoding="utf-8"))
+    changed["repository"]["commit_sha"] = "0" * 40
+    plan_path.write_text(json.dumps(changed), encoding="utf-8")
+    moved = run(["node", str(push), f"--repo={repo}", "--confirm"])
+    results.check(
+        "[plan-binding] changing repository provenance blocks push",
+        moved.returncode == 1 and "repository commit_sha changed" in moved.stderr,
+        moved.stderr,
+    )
+
+
 IDEMPOTENCY_TESTS = {
     "ai-inventory": test_ai_inventory,
     "evidence-push": test_evidence_push,
@@ -1474,6 +1630,7 @@ def main(argv):
             results.check(f"[{name}] has an idempotency test", True)
             covered.append(name)
             test(results, tmp)
+        test_plan_bindings(results, tmp)
         test_loader_independence(results, tmp)
 
     ok = not results.failures

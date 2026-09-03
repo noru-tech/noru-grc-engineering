@@ -31,6 +31,7 @@ Call these Noru MCP tools and write the result to `<repo>/.noru/.cache/noru-stat
 
 | Tool | What you need from it |
 |---|---|
+| `findOrganization` | the stable organization id and display name that bind this plan |
 | `getOrganizationAssets` | existing assets, so an upsert is recognised as an update |
 | `getOrganizationVendors` | existing vendor names, so a provider is not duplicated |
 | `getOrganizationEvidence` | existing evidence, to find this piece's content markers |
@@ -46,6 +47,11 @@ Write the snapshot in this shape:
 ```json
 {
   "fetched_at": "2026-08-27T09:14:00Z",
+  "connection": {
+    "organization": { "id": "...", "name": "..." },
+    "endpoint": "https://api.noru.tech/v1/mcp",
+    "scopes": ["read:organization", "read:frameworks", "read:controls", "read:evidence", "read:assets", "read:vendors"]
+  },
   "assets":  [{ "id": "...", "source": "...", "externalId": "...", "name": "...", "description": "...", "metadata": {} }],
   "vendors": [{ "id": "...", "name": "..." }],
   "evidence":[{ "id": "...", "title": "...", "description": "..." }],

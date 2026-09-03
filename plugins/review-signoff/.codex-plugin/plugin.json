@@ -29,12 +29,16 @@
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
+      "Local read: periodic review exports and reconciliations",
+      "Local write: .noru/review-signoff.yml and machine-only cache files",
+      "Noru read: controls, unmet expectations and expiring evidence",
+      "Noru write: attributed sign-offs only after diff and confirmation",
       "Unmet and expiring reviews from Noru's own catalogue",
       "Digest of the exact output that was reviewed",
       "Exceptions with a disposition and a named owner",
       "A named, dated sign-off with a real expiry in Noru"
     ],
     "websiteURL": "https://noru.tech",
-    "defaultPrompt": "Which review sign-offs have expired or are due, and what do I need to review?"
+    "defaultPrompt": "Which review sign-offs have expired or are due, and what do I need to review? Do not push or write to Noru."
   }
 }

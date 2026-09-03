@@ -121,6 +121,7 @@
   },
   "scopes": {
     "read": [
+      "read:organization",
       "read:datamaps"
     ],
     "write": [

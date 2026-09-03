@@ -19,6 +19,9 @@ This command **writes to the user's compliance system of record**. Scope: `write
    the folder; it does not, and the reason is that Noru is the register.
 4. Check the names once more. These records attribute conclusions to real people, and a conclusion
    filed against the wrong tester is not easy to withdraw.
+5. Call `findOrganization` through the connection that will execute the calls and refresh only
+   `connection` in `.noru/.cache/noru-state.json`. The push blocks if the organization, endpoint,
+   granted scopes, repository state, plugin version or plan lifetime changed after review.
 
 ## 1. Emit the confirmed calls
 

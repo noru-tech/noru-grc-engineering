@@ -110,4 +110,5 @@ make the error go away — that is forging a signature.
 /privacy-datamap:push  # → one ingestDatamap call, after confirmation
 ```
 
-Scopes: `read:datamaps` for `:scan` and `:diff`, plus `write:datamaps` for `:push`. Nothing else.
+Scopes: `read:datamaps` for `:scan`; `:diff` also needs `read:organization` to bind its plan to the
+target; `:push` adds `write:datamaps`.

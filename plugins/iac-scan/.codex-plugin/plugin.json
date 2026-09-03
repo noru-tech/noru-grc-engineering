@@ -29,12 +29,16 @@
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
+      "Local read: infrastructure and CI configuration",
+      "Local write: .noru/iac-scan.yml and machine-only cache files",
+      "Noru read: organization, assets, risks and existing findings",
+      "Noru write: security findings only after diff and confirmation",
       "Terraform, CloudFormation, Kubernetes and pipeline configuration",
       "Findings keyed on the resource, not on the line number",
       "Citations rather than copies of what matched",
       "Closes findings whose rule no longer fires"
     ],
     "websiteURL": "https://noru.tech",
-    "defaultPrompt": "Scan my infrastructure configuration and show me what changed since the last scan."
+    "defaultPrompt": "Scan my infrastructure configuration and show me what changed since the last scan. Do not push or write to Noru."
   }
 }

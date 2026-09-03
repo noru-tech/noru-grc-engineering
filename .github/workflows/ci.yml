@@ -134,6 +134,8 @@ jobs:
         run: python3 scripts/contract_test.py
       - name: CI mode fails on drift and on an expired interpretation
         run: python3 scripts/test_ci_mode.py
+      - name: the hub reviews branch changes without writing
+        run: python3 scripts/test_hub.py
 
   scaffold:
     name: a scaffolded piece satisfies the contract

@@ -33,9 +33,11 @@ intend to push. Two pieces sit outside that set entirely:
 | `ai-inventory:diff` also | `read:assets`, `read:vendors` |
 | `ai-inventory:push` | adds `write:assets`, `write:vendors`, `write:evidence` |
 | `evidence-push:push`, `governance-records:push`, `review-signoff:push`, `audit-pack:push` | adds `write:evidence` |
-| `iac-scan:scan` and `:diff` | `read:risks`, `read:assets` — and nothing else |
+| `iac-scan:scan` | `read:risks`, `read:assets` |
+| `iac-scan:diff` | adds `read:organization` to bind the plan |
 | `iac-scan:push` | adds `write:risks` |
-| `privacy-datamap:scan` and `:diff` | `read:datamaps` — and nothing else |
+| `privacy-datamap:scan` | `read:datamaps` |
+| `privacy-datamap:diff` | adds `read:organization` to bind the plan |
 | `privacy-datamap:push` | adds `write:datamaps` |
 
 ## 2. Run a piece

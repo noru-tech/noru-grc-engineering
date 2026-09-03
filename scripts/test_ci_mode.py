@@ -15,6 +15,7 @@ What it asserts, in one line each:
   * calling it wrong is not a compliance finding                                     -> exit 2
   * a check that cannot run is not a pass                                            -> exit 6
   * no credential means the push half is skipped, not failed                         -> exit 0
+  * an MCP push is never reported as executed by a headless runner                   -> exit 0
   * NORU_API_KEY never reaches a step that does not need it
   * the orchestrator hardcodes no piece name; it reads piece.json
 
@@ -711,6 +712,34 @@ def case_credentials(results, tmp):
     results.check(
         "no credential: the reason says why, not 'error'",
         "NORU_API_KEY" in (push or {}).get("detail", "") or "diff step" in (push or {}).get("detail", ""),
+        push,
+    )
+
+    state_path = repo / ".noru" / ".cache" / "noru-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "connection": {
+                    "organization": {"id": "org_fixture", "name": "Fixture Organization"},
+                    "endpoint": "https://api.noru.tech/v1/mcp",
+                    "scopes": ["*"],
+                },
+                "assets": [],
+                "vendors": [],
+                "evidence": [],
+                "ai_framework_ids": [],
+                "ai_controls": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    code, report = ci(repo, "--steps=all", env={"NORU_API_KEY": "test-value-not-a-real-key"})
+    push = next((s for s in (report or {}).get("steps", []) if s["step"] == "push"), None)
+    results.check(
+        "MCP publication: headless CI never reports emitted calls as executed",
+        code == 0
+        and (push or {}).get("status") == "skipped"
+        and "authenticated MCP host" in (push or {}).get("detail", ""),
         push,
     )
 

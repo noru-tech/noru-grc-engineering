@@ -15,6 +15,7 @@ python3 scripts/test_idempotency.py    # a second push is a no-op, end to end
 python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
 python3 scripts/test_ci_mode.py        # CI mode fails on drift, on an expired claim, and on
                                        # personal data the baseline does not permit
+python3 scripts/test_hub.py            # branch routing, installed subsets and read-only hub contracts
 ```
 
 The repository checks above deliberately have no external dependency. Before publishing the
@@ -27,6 +28,8 @@ claude plugin validate --strict .
 | Property | How it is proven |
 |---|---|
 | Public marketplace metadata is complete | `check_repo.py` rejects `TODO`, `TBD` and `CHANGE_ME` anywhere in either marketplace or either client's plugin manifests, plus unsupported `commands` and `hooks` fields in Codex manifests |
+| Review routing works with an independently installed subset | `test_hub.py` routes a branch containing both AI and schema changes while exposing only `privacy-datamap`; privacy is ready and the still-selected AI review is explicitly unavailable rather than silently skipped |
+| The hub status surface stays read-only | `check_repo.py` and `test_hub.py` require every status capability to declare a `read:*` scope and a `find*`, `get*` or `list*` tool, and require the command's capability-first, no-push and partial-section contracts |
 | Collectors are deterministic | `contract_test.py` runs each collector twice over two copies of `tests/fixture-repo/` and diffs the derived output byte for byte |
 | Collectors are offline | the collector source is scanned for every socket-opening API; a match fails the build |
 | Validators are stdlib-only | every `import` in a validator is checked against an allowed standard-library set |
@@ -41,7 +44,7 @@ claude plugin validate --strict .
 | The collector proposes and never asserts | `test_collectors.py` asserts the skeleton never writes `determination: indicated` and flags every finding it proposes `needs_review: true` |
 | Findings are written enforceable-first | `check_repo.py` compares the vocabulary's category order against the schema's declaration order; a manifest written tier-first must exit `1` |
 | `:push` refuses without `--confirm` | executed: exit `2` |
-| `:push` refuses a stale plan | executed: a plan bound to different manifest bytes exits `1`, even with `--confirm` |
+| `:push` refuses a stale or displaced plan | executed: manifest-byte, expiry, organization and repository-commit changes invalidate a plan, even with `--confirm` |
 | **A second push is a no-op** | `test_idempotency.py` drives scan → validate → diff → push, builds the org snapshot that would exist if every planned write had landed, and asserts the next diff is all `skip` and the next push makes no calls |
 | Asset metadata key order does not break idempotency | the snapshot deliberately reverses the key order, because nothing guarantees a JSON object comes back in the order it was sent |
 | **A plan does not depend on which YAML loader parsed the manifest** | `test_idempotency.py` parses the same manifest bytes with PyYAML and with the bundled fallback — both in one interpreter, the fallback forced by hiding PyYAML behind a stub that raises on import — and asserts for all six pieces that the plan (markers, arguments, effects and reasons) is identical, both writing into an empty organization and writing into one the same plan has already been pushed into. Needs PyYAML to have two loaders to compare, so it reports itself skipped where there is none and the CI matrix runs a leg with it |
@@ -77,7 +80,7 @@ claude plugin validate --strict .
 | Warn-only mode reports and does not fail | the identical findings, `"status": "warn"`, exit `0` |
 | A check that could not run is not a pass | a piece whose queue is missing reports `skipped`, and `--on-missing-prerequisite=fail` exits `6` |
 | CI mode is piece-agnostic | every piece in the marketplace is driven through it green, the orchestrator's source is checked for hardcoded piece names, and CI runs it against a freshly scaffolded piece |
-| No credential reaches a step that does not push | asserted on the helper every step goes through: `NORU_API_KEY` is absent from the child environment except for `:push` |
+| No credential reaches a step that does not perform the REST upload | asserted on the helper every step goes through: `NORU_API_KEY` is absent from child environments except for the REST push entrypoint; MCP publication is skipped for an authenticated host |
 | Missing credential degrades, not errors | with no `NORU_API_KEY` the push step reports `skipped` and the build stays green |
 | The bundled loader produces what PyYAML produces | `test_validators.py` compares the fallback loader against pinned PyYAML output on every machine, and re-checks the pin against PyYAML itself wherever it is importable, so a pinned value cannot go stale unnoticed |
 | Both YAML loaders agree in CI mode | the whole CI-mode suite runs under an interpreter with PyYAML and one without, and the orchestrator invokes each validator with its own interpreter so the loader cannot change mid-run |
@@ -96,6 +99,10 @@ These pieces are **reviewed and internally consistent, not field-tested.** Every
 proven against fixtures on every build; none of it has been exercised against a live organization
 at production scale. Treat a first run as something to check, not something to trust:
 
+- `/noru:review` and `/noru:status` are agent-orchestrated commands. Their deterministic routing,
+  installed-subset handling and read-only capability matrix are executed in tests, but the host's
+  cross-skill invocation and the live MCP report assembly are not simulated here. Exercise the first
+  production run against a read-only key and check each section against the Noru UI.
 - A collector's recall against a large polyglot codebase is unproven. It will miss a provider
   reached through a hand-rolled HTTP client.
 - The Article 50 disclosure states are a *repository* fact. Whether that fact matches the running

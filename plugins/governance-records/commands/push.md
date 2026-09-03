@@ -17,6 +17,9 @@ This command **writes to the user's compliance system of record**. Scope: `write
    is not consent.
 3. Check the names one more time. These records attribute decisions to real people; a record filed
    against the wrong chair is worse than no record, and it is not easy to withdraw.
+4. Call `findOrganization` through the connection that will execute the calls and refresh only
+   `connection` in `.noru/.cache/noru-state.json`. The push blocks if its organization, endpoint,
+   granted scopes, repository state, plugin version or plan lifetime changed.
 
 ## 1. Emit the confirmed calls
 

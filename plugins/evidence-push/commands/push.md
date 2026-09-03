@@ -29,6 +29,9 @@ bearer credential the MCP client does not hold for us.
 
    **Never ask the user to paste a key into this conversation, never write one to a file, and never
    echo one back.** If it is not set, the script says so and stops; that is the correct behaviour.
+4. Call `findOrganization` and refresh only `connection` in `.noru/.cache/noru-state.json`. The
+   command binds the reviewed organization and MCP endpoint, and also refuses a REST host that does
+   not match that endpoint's origin.
 
 ## 1. Dry run first
 
