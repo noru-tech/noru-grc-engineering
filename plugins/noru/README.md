@@ -1,10 +1,28 @@
 # noru
 
-> The hub. Connect, check, and share the repository context every last-mile piece reuses.
+> The hub. Find the relevant last-mile work, connect, check, and share repository context.
 
 This plugin is not a piece — it has no `:scan` / `:diff` / `:push` and produces no manifest. It is
 the thing you install alongside a piece so that "is my connection right, and is this machine ready"
-is one command instead of a support thread.
+is one command instead of a support thread. It also handles the loose first question — "what GRC
+work is relevant here?" — before a user knows which piece to install or run.
+
+## Start with a question
+
+You do not need to know a command or piece name. From a repository, ask:
+
+```text
+Review this repository for local GRC work.
+What has changed here that might affect our compliance records?
+Do we need an AI inventory, infrastructure scan or privacy data map?
+Run the relevant local checks, but do not write anything to Noru.
+```
+
+The hub inspects the tracked repository read-only, identifies relevant and possibly relevant pieces,
+cites the files behind each recommendation, and suggests the smallest useful next step. A broad
+review creates no manifest and writes nothing to Noru. An explicit request to run or scan a piece
+may create its local `.noru/<piece>.yml`; every Noru write still requires a reviewed `:diff` and a
+separate confirmation.
 
 ## Commands
 

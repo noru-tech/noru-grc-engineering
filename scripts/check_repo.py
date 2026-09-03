@@ -10,6 +10,8 @@ What it covers, and why each one is here rather than left to review:
   * **Plugin manifests** — every declared source directory really contains a plugin whose name
     matches, for both clients, and no public metadata contains an unfinished placeholder.
   * **MCP config** — points at Noru's hosted endpoint and carries no credential.
+  * **Hub routing** — every declared piece appears exactly once in the hub's routing catalogue.
+  * **Published examples** — copyable `noru-ci` examples pin the current marketplace version.
   * **Schema / vocabulary sync** — a piece's bundled vocabulary and the contract schema describe the
     same enums. Two sources of truth is one too many, so this makes them one in effect.
   * **Schema evaluability** — no contract schema uses a JSON Schema keyword scripts/jsonschema_mini.py
@@ -261,6 +263,111 @@ def check_pieces_registered(problems, plugin_names):
             )
 
 
+def check_hub_routing(problems):
+    """The broad hub prompt must be able to route to every piece the repository ships."""
+    pieces = sorted(path.parent.name for path in (ROOT / "plugins").glob("*/piece.json"))
+    routing_path = ROOT / "plugins" / "noru" / "references" / "routing.json"
+    skill_path = ROOT / "plugins" / "noru" / "skills" / "noru" / "SKILL.md"
+
+    if not routing_path.is_file():
+        problems.append(
+            "[noru] missing references/routing.json — broad repository prompts have no "
+            "maintained piece catalogue"
+        )
+        return
+
+    try:
+        routing = json.loads(routing_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        problems.append(f"[noru] references/routing.json is invalid JSON: {exc}")
+        return
+
+    rows = routing.get("pieces")
+    if not isinstance(rows, list):
+        problems.append("[noru] references/routing.json must contain a 'pieces' list")
+        return
+
+    names = []
+    for index, row in enumerate(rows):
+        label = f"references/routing.json pieces[{index}]"
+        if not isinstance(row, dict):
+            problems.append(f"[noru] {label} must be an object")
+            continue
+        name = row.get("name")
+        if not isinstance(name, str) or not name:
+            problems.append(f"[noru] {label} has no name")
+        else:
+            names.append(name)
+            label = f"references/routing.json [{name}]"
+        for field in ("summary", "caveat"):
+            if not isinstance(row.get(field), str) or not row[field].strip():
+                problems.append(f"[noru] {label} has no {field}")
+        for field in ("signals", "inspect"):
+            values = row.get(field)
+            if not (
+                isinstance(values, list)
+                and values
+                and all(isinstance(value, str) and value.strip() for value in values)
+            ):
+                problems.append(f"[noru] {label} {field} must be a non-empty list of strings")
+
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        problems.append(f"[noru] routing catalogue repeats pieces: {duplicates}")
+
+    routed = set(names)
+    declared = set(pieces)
+    missing = sorted(declared - routed)
+    unknown = sorted(routed - declared)
+    if missing:
+        problems.append(
+            f"[noru] routing catalogue omits declared pieces: {missing} — add routing signals "
+            "when adding the piece"
+        )
+    if unknown:
+        problems.append(
+            f"[noru] routing catalogue names pieces with no piece.json: {unknown}"
+        )
+
+    if skill_path.is_file() and "references/routing.json" not in skill_path.read_text(encoding="utf-8"):
+        problems.append(
+            "[noru] the hub skill does not route broad requests through references/routing.json"
+        )
+
+
+def check_action_version_pins(problems):
+    """Copyable action examples must not strand users on an older collector release."""
+    marketplace_path = ROOT / ".claude-plugin" / "marketplace.json"
+    if not marketplace_path.is_file():
+        return
+    marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+    entries = {entry.get("name"): entry for entry in marketplace.get("plugins", [])}
+    expected = (entries.get("noru") or {}).get("version")
+    if not expected:
+        return
+
+    paths = [
+        ROOT / "README.md",
+        ROOT / "docs" / "ci-mode.md",
+        ROOT / ".github" / "actions" / "noru-ci" / "README.md",
+    ]
+    pattern = re.compile(r"noru-ci@v([0-9]+\.[0-9]+\.[0-9]+)")
+    found = 0
+    for path in paths:
+        if not path.is_file():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            for match in pattern.finditer(line):
+                found += 1
+                if match.group(1) != expected:
+                    problems.append(
+                        f"{path.relative_to(ROOT)}:{number}: pins noru-ci@v{match.group(1)}, "
+                        f"but the marketplace version is {expected}"
+                    )
+    if not found:
+        problems.append("no copyable noru-ci@v<version> example is documented")
+
+
 
 def check_reference_files_exist(problems):
     """A piece's prose may only point at reference files that are actually there.
@@ -501,6 +608,8 @@ def main(argv):
         check_public_metadata(problems)
         check_codex_manifests(problems)
         check_pieces_registered(problems, plugin_names)
+        check_hub_routing(problems)
+        check_action_version_pins(problems)
         check_reference_files_exist(problems)
         check_yaml_11_booleans(problems)
         check_special_categories(problems)

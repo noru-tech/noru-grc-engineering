@@ -1,7 +1,7 @@
 ---
 name: noru
 version: 0.4.1
-description: Run Noru's last-mile GRC pieces — collect compliance facts locally from a repository, CI or laptop, review them as a committed manifest, and land them in Noru with provenance and idempotency. Use when the user wants to inventory AI systems, upload evidence against a control, connect to Noru over MCP, or author a new last-mile piece.
+description: Review repositories, CI pipelines and local artifacts to identify and run relevant Noru last-mile GRC pieces. Use when the user wants to discover applicable local GRC work, connect or diagnose the suite, run a piece, or author a new one.
 requires:
   bins: ["node", "python3", "git"]
 ---
@@ -29,6 +29,8 @@ collect locally  →  validate against a bundled vocabulary  →  push once, ide
 | `review-signoff` | a periodic review of machine output, and the human decision about it | a named, dated, expiring sign-off as evidence | MCP |
 | `audit-pack` | the local artifacts, the sampling and the workpapers for one framework over one audit window | the tested conclusion for each control, as evidence | MCP |
 | `iac-scan` | compliance-relevant misconfiguration in Terraform, CloudFormation, Kubernetes and pipeline configuration | security findings, keyed and closed by the same call | MCP |
+| `privacy-datamap` | repository schemas, migrations and API contracts, and the personal data they define | a Fides privacy data map | MCP |
+| `change-control` | forge history and settings: who authored, approved, merged and deployed each change | security findings plus the reviewed window as evidence | MCP |
 
 Each has exactly three commands: `:scan`, `:diff`, `:push`. Always in that order.
 
@@ -37,6 +39,28 @@ Two of them read differently from the rest, and the difference is in the piece, 
 again to render the pack once the manifest validates — and the pack itself stays a local deliverable;
 only the tested conclusions are pushed. `iac-scan` lands security findings rather than evidence, and
 its writes are a documented server-side upsert, so filing a finding and closing one are the same call.
+
+## Route a broad repository request
+
+When the user asks what local GRC work is relevant to a repository, or does not
+name a piece, read [`references/routing.json`](../../references/routing.json). Inspect the tracked
+repository read-only and classify every piece as:
+
+- **relevant** — the repository contains a concrete signal the piece can work;
+- **possibly relevant** — the work depends on Noru, forge or user context that local files cannot
+  establish; or
+- **not indicated** — the stated inspection found no signal. Never turn absence from a source-code
+  search into a claim that the compliance work is not applicable.
+
+Cite the file and line for every repository-derived recommendation. Keep live Noru data, local facts
+and recommendations visibly separate. Routing signals select a tool; they are not compliance
+findings and do not establish that a control is effective or ineffective.
+
+A broad review is read-only by default: report the applicable pieces, why, missing context and the
+smallest useful next step. Do not create or edit a manifest unless the user asks to run or scan a
+piece. If the user explicitly asks to run the relevant checks, local scans are in scope; writing to
+Noru is not. Follow the selected piece's skill once a piece is chosen, and retain the reviewed
+`:diff` plus explicit confirmation boundary before every `:push`.
 
 ## The rules that are not negotiable
 

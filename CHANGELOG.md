@@ -6,6 +6,14 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Changed
+
+- The `noru` hub now routes broad, read-only repository reviews across every shipped piece, cites
+  the local signals behind its recommendations, and distinguishes relevant work from work that
+  needs Noru, forge or user context.
+- Repository checks now keep the hub's routing catalogue aligned with every `piece.json` and keep
+  the copyable `noru-ci` action examples pinned to the current marketplace version.
+
 ## 0.4.1 — 2026-09-02
 
 A publication-readiness and collector-correctness patch: both marketplace clients now receive
