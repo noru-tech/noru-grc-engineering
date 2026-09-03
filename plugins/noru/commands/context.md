@@ -12,7 +12,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/context.mjs" --repo=<repo> --output=json
 
 Reports:
 
-- **Provenance** — `slug`, `commit_sha`, `branch`, and whether the working tree is clean. Every push
+- **Provenance** — `slug`, credential-sanitized `remote`, `commit_sha`, `branch`, and whether the
+  working tree is clean. Every push
   from every piece carries these three fields, so this is literally what would be written into Noru
   as the origin of the claim. A dirty tree means the recorded commit does not describe what was
   scanned; say so before anyone pushes.
