@@ -126,11 +126,15 @@ Then configure Noru MCP: [Codex guide](./docs/clients/codex.md).
 
 Also: [Cursor](./docs/clients/cursor.md) · [generic MCP clients](./docs/clients/generic-mcp.md)
 
+For an end-to-end repository rollout, including read-only pull-request checks and the separate
+publication boundary, follow [developer onboarding](./docs/developer-onboarding.md).
+
 ## First run
 
 ```text
 /noru:connect        # confirm the MCP connection and pick least-privilege scopes
 /noru:doctor         # node, python3, git, .gitignore hygiene
+/noru:review         # select relevant checks for this branch; no Noru writes
 /ai-inventory:scan   # → .noru/ai-inventory.yml, reviewed like any other diff
 /ai-inventory:diff   # → the exact plan, reads only
 /ai-inventory:push   # → writes, after you confirm
@@ -168,9 +172,11 @@ A fourth thing fails a build and is not a compliance finding at all: a collector
 schema in a repository that visibly has one (exit `6`). An empty data map and a repository with no
 personal data in it are the same file, and only one of them is good news.
 
-`:diff` and `:push` need a key, so they are an opt-in job that runs only where secrets exist, and
-report as skipped rather than failing when there is none. Exit codes, warn-only adoption, and the
-GitLab and plain-shell recipes: [docs/ci-mode.md](./docs/ci-mode.md).
+`:diff` needs a current read snapshot from Noru. Publication is opt-in and separate: MCP-backed
+pieces execute through an authenticated MCP host, while `evidence-push` uses a key for its REST file
+upload. Headless CI never reports an emitted MCP call list as an executed write. Exit codes,
+warn-only adoption, and the GitLab and plain-shell recipes:
+[docs/ci-mode.md](./docs/ci-mode.md).
 
 Add to `.gitignore`:
 
@@ -202,9 +208,11 @@ Use least-privilege scopes:
 | `governance-records:push` | adds `write:evidence` |
 | `review-signoff:push` | adds `write:evidence` |
 | `audit-pack:push` | adds `write:evidence` |
-| `iac-scan:scan` and `:diff` | `read:risks`, `read:assets` — and nothing else |
+| `iac-scan:scan` | `read:risks`, `read:assets` |
+| `iac-scan:diff` | adds `read:organization` to bind the plan |
 | `iac-scan:push` | adds `write:risks` |
-| `privacy-datamap:scan` and `:diff` | `read:datamaps` — and nothing else |
+| `privacy-datamap:scan` | `read:datamaps` |
+| `privacy-datamap:diff` | adds `read:organization` to bind the plan |
 | `privacy-datamap:push` | adds `write:datamaps` |
 | `change-control:scan` and `:diff` | `read:organization`, `read:controls`, `read:evidence`, `read:risks` |
 | `change-control:push` | adds `write:evidence`, `write:risks` |
@@ -277,6 +285,7 @@ python3 scripts/test_collectors.py    # collectors detect what the pieces claim 
 python3 scripts/test_idempotency.py   # a second push must be a no-op
 python3 scripts/contract_test.py      # every plugin satisfies requirements 1-9
 python3 scripts/test_ci_mode.py       # CI mode really fails on drift and on an expired claim
+python3 scripts/test_hub.py           # branch routing and duplicate-writer warnings stay read-only
 ```
 
 What each of those actually proves — and, more usefully, what is *not* verified — is written down

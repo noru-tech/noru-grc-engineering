@@ -1470,7 +1470,17 @@ def test_datamap_render_is_gated_and_matches_the_push(results, tmp):
     (repo / "db" / "schema.sql").write_text(SQL_FIXTURE, encoding="utf-8")
     run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
     (repo / ".noru" / ".cache" / "noru-state.json").write_text(
-        json.dumps({"fetched_at": "2026-08-27T09:00:00Z"}), encoding="utf-8"
+        json.dumps(
+            {
+                "fetched_at": "2026-08-27T09:00:00Z",
+                "connection": {
+                    "organization": {"id": "org_fixture", "name": "Fixture Organization"},
+                    "endpoint": "https://api.noru.tech/v1/mcp",
+                    "scopes": ["*"],
+                },
+            }
+        ),
+        encoding="utf-8",
     )
     plan = run(
         ["node", str(piece / "scripts" / "diff.mjs"), f"--repo={repo}", "--output=json", "--quiet"]

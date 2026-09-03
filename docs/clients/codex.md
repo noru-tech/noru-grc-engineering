@@ -51,9 +51,11 @@ inlines the value, and do not paste the key into a chat.
 | `governance-records:push` | adds `write:evidence` |
 | `review-signoff:push` | adds `write:evidence` |
 | `audit-pack:push` | adds `write:evidence` |
-| `iac-scan:scan` and `:diff` | `read:risks`, `read:assets` — and nothing else |
+| `iac-scan:scan` | `read:risks`, `read:assets` |
+| `iac-scan:diff` | adds `read:organization` to bind the plan |
 | `iac-scan:push` | adds `write:risks` |
-| `privacy-datamap:scan` and `:diff` | `read:datamaps` — and nothing else |
+| `privacy-datamap:scan` | `read:datamaps` |
+| `privacy-datamap:diff` | adds `read:organization` to bind the plan |
 | `privacy-datamap:push` | adds `write:datamaps` |
 
 ## Headless use

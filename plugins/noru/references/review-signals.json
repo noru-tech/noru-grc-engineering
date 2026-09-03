@@ -1,0 +1,68 @@
+{
+  "pieces": {
+    "ai-inventory": {
+      "paths": [
+        { "pattern": "(^|/)(agents?|prompts?|evals?|models?|retrieval)(/|\\.)", "reason": "AI agent, prompt, model, retrieval or evaluation path changed" },
+        { "pattern": "(^|/)(package(-lock)?\\.json|pyproject\\.toml|requirements[^/]*\\.txt)$", "reason": "a dependency manifest that may add an AI provider changed" }
+      ],
+      "content": [
+        { "pattern": "(@ai-sdk/|openai|anthropic|bedrock|vertexai|langchain|llamaindex|generateText|streamText|chat\\.completions)", "reason": "AI provider or model-call code changed" }
+      ]
+    },
+    "audit-pack": {
+      "paths": [
+        { "pattern": "(^|/)(audit|audits|workpapers?|sampling|populations?)(/|\\.)", "reason": "audit scope, workpaper, sample or population material changed" }
+      ],
+      "content": []
+    },
+    "change-control": {
+      "paths": [
+        { "pattern": "(^|/)(\\.github/workflows|\\.gitlab-ci|deploy|deployment|release)(/|\\.)", "reason": "CI, release or deployment configuration changed" }
+      ],
+      "content": [
+        { "pattern": "(pull_request|workflow_dispatch|environment:|deploy|branch protection)", "reason": "change-approval or deployment behavior changed" }
+      ]
+    },
+    "evidence-push": {
+      "paths": [
+        { "pattern": "(^|/)(evidence|certificates?|reports?)(/|\\.)", "reason": "a local evidence, certificate or report path changed" },
+        { "pattern": "\\.(pdf|png|jpe?g|csv|xlsx)$", "reason": "a file type commonly used as evidence changed" }
+      ],
+      "content": []
+    },
+    "governance-records": {
+      "paths": [
+        { "pattern": "(^|/)(governance|minutes|board|committee|management-review|statement-of-applicability|corrective-actions?)(/|\\.)", "reason": "a governance decision or meeting record changed" }
+      ],
+      "content": [
+        { "pattern": "(meeting minutes|management review|statement of applicability|corrective action)", "reason": "governance-record language changed" }
+      ]
+    },
+    "iac-scan": {
+      "paths": [
+        { "pattern": "\\.(tf|tfvars)$", "reason": "Terraform configuration changed" },
+        { "pattern": "(^|/)(infra|infrastructure|terraform|k8s|kubernetes|helm|cloudformation|\\.github/workflows)(/|\\.)", "reason": "infrastructure, Kubernetes, CloudFormation or CI configuration changed" }
+      ],
+      "content": [
+        { "pattern": "(apiVersion:|AWSTemplateFormatVersion|resource\\s+\"|permissions:|runs-on:)", "reason": "infrastructure or CI resource definition changed" }
+      ]
+    },
+    "privacy-datamap": {
+      "paths": [
+        { "pattern": "(^|/)(migrations?|schema|schemas|models?|db|database)(/|\\.)", "reason": "a schema, model, migration or database path changed" },
+        { "pattern": "(schema\\.prisma|\\.(sql|proto|graphql|gql))$", "reason": "a supported data-contract file changed" }
+      ],
+      "content": [
+        { "pattern": "(CREATE\\s+TABLE|model\\s+\\w+\\s*\\{|message\\s+\\w+\\s*\\{|type\\s+\\w+\\s*\\{|class\\s+\\w+.*(Model|Base))", "reason": "a stored-record or API schema definition changed" }
+      ]
+    },
+    "review-signoff": {
+      "paths": [
+        { "pattern": "(^|/)(reviews?|access-review|firewall-review|vendor-review|hardening-review)(/|\\.)", "reason": "a periodic review input or reconciliation changed" }
+      ],
+      "content": [
+        { "pattern": "(reviewer|reviewed_at|review outcome|exception owner)", "reason": "periodic-review attribution or outcome changed" }
+      ]
+    }
+  }
+}

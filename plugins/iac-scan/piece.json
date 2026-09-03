@@ -108,7 +108,7 @@
     "requires_confirmation": true
   },
   "scopes": {
-    "read": ["read:risks", "read:assets"],
+    "read": ["read:organization", "read:risks", "read:assets"],
     "write": ["write:risks"]
   },
   "queue": {

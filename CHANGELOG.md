@@ -6,7 +6,23 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Added
+
+- `/noru:review` performs deterministic, read-only branch triage across all shipped pieces, cites
+  the signals behind every selection, keeps skipped pieces visible, and can run selected local
+  checks without ever invoking a push.
+- The developer onboarding path now separates credential-free pull-request checks from reviewed,
+  protected publication and calls out the current MCP/headless execution boundary.
+- `/noru:doctor` warns when tracked code or workflows indicate multiple possible privacy data-map
+  publishers, reporting only signal type and `file:line`.
+
 ### Changed
+
+- Diff plans are short-lived and bound to the target organization, MCP endpoint, repository
+  provenance, piece version and required scopes as well as the exact manifest bytes. Push refreshes
+  the connection identity and refuses a plan that has moved contexts.
+- Codex marketplace metadata now names local and Noru read/write effects explicitly, and every
+  default prompt states that it must not write to Noru.
 
 - The `noru` hub now routes broad, read-only repository reviews across every shipped piece, cites
   the local signals behind its recommendations, and distinguishes relevant work from work that

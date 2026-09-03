@@ -13,9 +13,19 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_manifest.py" .noru/change-contro
 node "${CLAUDE_PLUGIN_ROOT}/scripts/diff.mjs" --repo=<repo>
 ```
 
-Before running it, write `.noru/.cache/noru-state.json` from the piece's read tools —
-`getOrganizationEvidence` and `getSecurityFindings` — so the plan compares against what Noru
-actually holds rather than assuming an empty organization.
+Before running it, write `.noru/.cache/noru-state.json` from `findOrganization`,
+`getOrganizationEvidence` and `getSecurityFindings` so the plan compares against what Noru
+actually holds rather than assuming an empty organization. Include this connection binding:
+
+```json
+{
+  "connection": {
+    "organization": { "id": "...", "name": "..." },
+    "endpoint": "https://api.noru.tech/v1/mcp",
+    "scopes": ["read:organization", "read:controls", "read:evidence", "read:risks"]
+  }
+}
+```
 
 ## What the plan will show
 

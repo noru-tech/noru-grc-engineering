@@ -14,6 +14,7 @@ Then read what Noru already holds and write it to `<repo>/.noru/.cache/noru-stat
 
 | Tool | What it gives you | Where it goes |
 |---|---|---|
+| `findOrganization` | the stable organization id and display name | `connection.organization` |
 | `getPrivacyDataMap` | the organization's current map | `datamap` |
 | `listPrivacyDatasets` | the datasets already recorded for this source | `datasets` |
 | `getPrivacyTaxonomy` | the taxonomy Noru itself holds | `taxonomy` |
@@ -21,6 +22,11 @@ Then read what Noru already holds and write it to `<repo>/.noru/.cache/noru-stat
 ```json
 {
   "fetched_at": "<ISO timestamp>",
+  "connection": {
+    "organization": { "id": "...", "name": "..." },
+    "endpoint": "https://api.noru.tech/v1/mcp",
+    "scopes": ["read:organization", "read:datamaps"]
+  },
   "datamap": { "dataset": [], "system": [] },
   "datasets": [],
   "taxonomy": []

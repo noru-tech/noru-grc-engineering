@@ -56,11 +56,13 @@ Cite the file and line for every repository-derived recommendation. Keep live No
 and recommendations visibly separate. Routing signals select a tool; they are not compliance
 findings and do not establish that a control is effective or ineffective.
 
-A broad review is read-only by default: report the applicable pieces, why, missing context and the
-smallest useful next step. Do not create or edit a manifest unless the user asks to run or scan a
-piece. If the user explicitly asks to run the relevant checks, local scans are in scope; writing to
-Noru is not. Follow the selected piece's skill once a piece is chosen, and retain the reviewed
-`:diff` plus explicit confirmation boundary before every `:push`.
+A broad review is read-only by default. Use `/noru:review` (and its deterministic selector in
+`scripts/review.mjs`) when the user asks about the current branch: report every selected and skipped
+piece with reasons, run requested local checks independently so one failure does not hide another,
+and end with the fact that nothing was written to Noru. Do not create or edit a manifest unless the
+user asks to run or scan a piece. If the user explicitly asks to run the relevant checks, local scans
+are in scope; writing to Noru is not. Follow the selected piece's skill once a piece is chosen, and
+retain the reviewed `:diff` plus explicit confirmation boundary before every `:push`.
 
 ## The rules that are not negotiable
 
@@ -99,7 +101,8 @@ for a decision they did not make.
 
 1. `/noru:connect` — confirm the MCP connection, the organization, and the least-privilege scopes.
 2. `/noru:doctor` — confirm node, python3, git, and that `.noru/.cache/` is gitignored.
-3. `/<piece>:scan` → review the manifest → `/<piece>:diff` → `/<piece>:push`.
+3. `/noru:review` — select relevant branch checks without writing to Noru.
+4. `/<piece>:scan` → review the manifest → `/<piece>:diff` → `/<piece>:push`.
 
 Commit `.noru/<piece>.yml`: it is the reviewable artifact, and reviewing it in a pull request is the
 point. Keep `.noru/.cache/` out of git — it holds machine state and snapshots of the organization's

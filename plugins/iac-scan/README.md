@@ -136,7 +136,7 @@ Least privilege. Start read-only.
 | Capability | Scopes |
 |---|---|
 | `:scan` | `read:risks`, `read:assets` |
-| `:diff` | the same |
+| `:diff` | adds `read:organization` to bind the plan to its target |
 | `:push` | adds `write:risks` |
 
 Security findings live under the risk scopes: the published scope table describes `write:risks` as

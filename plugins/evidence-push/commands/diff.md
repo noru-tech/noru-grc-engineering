@@ -24,11 +24,17 @@ No idempotency key is documented for `POST /v1/evidence/upload`, so the piece do
 it probes instead. Each upload's description carries a marker containing the artifact's content
 digest, and the diff looks for that marker in evidence already in the org.
 
-Call `getOrganizationEvidence` and write `<repo>/.noru/.cache/noru-state.json`:
+Call `findOrganization` and `getOrganizationEvidence`, then write
+`<repo>/.noru/.cache/noru-state.json`:
 
 ```json
 {
   "fetched_at": "2026-08-27T09:14:00Z",
+  "connection": {
+    "organization": { "id": "...", "name": "..." },
+    "endpoint": "https://api.noru.tech/v1/mcp",
+    "scopes": ["read:organization", "read:controls", "read:evidence"]
+  },
   "evidence": [{ "id": "...", "title": "...", "description": "..." }]
 }
 ```

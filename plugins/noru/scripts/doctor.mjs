@@ -11,7 +11,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const USAGE = "usage: doctor.mjs [--repo=<path>] [--output=json|text] [--quiet]\n";
@@ -48,11 +48,57 @@ function gitignoreCovers(repo, pattern) {
     .some((line) => line.trim() === pattern);
 }
 
+const MAX_INSPECTED_BYTES = 1024 * 1024;
+const TEXT_EXTENSIONS = new Set([
+  ".js", ".cjs", ".mjs", ".ts", ".tsx", ".py", ".rb", ".go", ".sh", ".yaml", ".yml", ".json",
+]);
+
+function trackedFiles(repo) {
+  const output = tryRun("git", ["-C", repo, "ls-files", "-z"]);
+  return output === null ? [] : output.split("\0").filter(Boolean);
+}
+
+export function detectPrivacyWriters(repo) {
+  const signals = [];
+  for (const relative of trackedFiles(repo)) {
+    if (!TEXT_EXTENSIONS.has(extname(relative).toLowerCase())) continue;
+    const path = join(repo, relative);
+    let text;
+    try {
+      text = readFileSync(path, "utf8");
+    } catch {
+      continue;
+    }
+    if (Buffer.byteLength(text) > MAX_INSPECTED_BYTES || text.includes("\0")) continue;
+
+    text.split("\n").forEach((line, index) => {
+      const kinds = [];
+      if (
+        /\/v1\/privacy\/datamaps\b/.test(line) &&
+        /\b(fetch|curl|axios|request|post)\b/i.test(line)
+      ) {
+        kinds.push("REST datamap write");
+      }
+      if (/\bingestDatamap\s*\(/.test(line)) kinds.push("MCP datamap write");
+      if (/\.fides\/datamap\.ya?ml/.test(line) && /\.github\/workflows\//.test(relative)) {
+        kinds.push("workflow watches generated datamap");
+      }
+      for (const kind of kinds) signals.push({ path: relative, line: index + 1, kind });
+    });
+  }
+
+  const writers = [...new Set(signals.map((signal) => signal.path))];
+  return { signals, writers, duplicate: writers.length > 1 };
+}
+
 export function runChecks(repo) {
   const nodeMajor = Number(process.versions.node.split(".")[0]);
   const python = tryRun("python3", ["--version"]);
   const git = tryRun("git", ["--version"]);
   const inGitRepo = tryRun("git", ["-C", repo, "rev-parse", "--is-inside-work-tree"]) === "true";
+  const privacyWriters = inGitRepo
+    ? detectPrivacyWriters(repo)
+    : { signals: [], writers: [], duplicate: false };
 
   return [
     {
@@ -110,6 +156,23 @@ export function runChecks(repo) {
       hint:
         "Only the evidence-push upload needs it, because file upload is REST-only. Everything else " +
         "goes over MCP, where the client owns authentication (OAuth where supported).",
+    },
+    {
+      id: "privacy-writers",
+      required: false,
+      ok: !privacyWriters.duplicate,
+      detail: privacyWriters.duplicate
+        ? `${privacyWriters.writers.length} possible datamap writers: ${privacyWriters.signals
+            .map((signal) => `${signal.path}:${signal.line} (${signal.kind})`)
+            .join(", ")}`
+        : privacyWriters.writers.length === 1
+          ? `one possible datamap writer: ${privacyWriters.signals
+              .map((signal) => `${signal.path}:${signal.line} (${signal.kind})`)
+              .join(", ")}`
+          : "no repository-defined datamap writer found",
+      hint:
+        "More than one automation path may write the same privacy data map. Choose one authoritative " +
+        "push path; keep the others read-only or disable them. Only file and line references are reported.",
     },
   ];
 }

@@ -29,8 +29,9 @@ separate confirmation.
 | Command | Writes anything? | What it does |
 |---|---|---|
 | `/noru:connect` | no | Confirms the Noru MCP connection, reports the organization and enabled frameworks, and explains least-privilege scopes for the piece you want to run |
-| `/noru:doctor` | no | Checks node, python3, git, whether this is a git work tree, and whether `.noru/.cache/` is gitignored |
+| `/noru:doctor` | no | Checks node, python3, git, cache hygiene, and warns about possible competing privacy data-map publishers |
 | `/noru:context` | no | Prints the provenance a push would carry, and every `.noru/*.yml` in the repository with its sha256 |
+| `/noru:review` | local scans only when requested | Compares the branch with a base ref, explains why each piece is selected or skipped, and runs selected local checks independently; it never pushes |
 
 ## Scopes
 
@@ -40,7 +41,8 @@ works; the rest is local.
 | Capability | Scopes |
 |---|---|
 | `/noru:connect` | `read:organization`, `read:frameworks` |
-| `/noru:doctor`, `/noru:context` | none — they make no Noru call |
+| `/noru:doctor`, `/noru:context`, review selection | none — they make no Noru call |
+| checks selected by `/noru:review` | the selected pieces' read scopes; never write scopes |
 
 Scopes for the pieces themselves are in each piece's own README.
 
@@ -69,3 +71,6 @@ Never edit a vendored copy in a piece: CI fails on the drift, and the next `--fi
 
 An installed plugin cannot import across plugin boundaries, which is why the file is copied rather
 than shared. The duplication is deliberate; the drift check is what makes it safe.
+
+The full installation, pull-request and protected-publication path is in
+[developer onboarding](../../docs/developer-onboarding.md).

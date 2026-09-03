@@ -25,12 +25,16 @@
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
+      "Local read: repository, forge export and deployment configuration",
+      "Local write: .noru/change-control.yml and machine-only cache files",
+      "Noru read: controls, evidence, risks and existing findings",
+      "Noru write: findings and evidence only after diff and confirmation",
       "GitHub and GitLab change-history export",
       "Author, approver, merger and deployer separation checks",
       "Branch-protection and bypass observations",
       "Owned exceptions and window evidence in Noru"
     ],
     "websiteURL": "https://noru.tech",
-    "defaultPrompt": "Review this repository's change controls for the last 90 days and show me what would land in Noru."
+    "defaultPrompt": "Review this repository's change controls for the last 90 days and show me what would land in Noru. Do not push or write to Noru."
   }
 }

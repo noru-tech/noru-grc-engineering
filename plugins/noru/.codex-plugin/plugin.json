@@ -27,9 +27,14 @@
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
+      "Local read: repository, branch diff, manifests and toolchain",
+      "Local write: none during triage or branch review",
+      "Noru read: organization and enabled-framework connection checks",
+      "Noru write: none",
       "Noru MCP connection check",
       "Least-privilege scope reporting",
       "Read-only repository triage",
+      "Read-only branch review with explicit piece selection",
       "GRC piece routing",
       "Repository provenance",
       "Shared diff and plan helpers"

@@ -29,12 +29,16 @@
     "developerName": "Noru",
     "category": "Productivity",
     "capabilities": [
+      "Local read: user-selected evidence artifacts",
+      "Local write: .noru/evidence-push.yml and machine-only cache files",
+      "Noru read: controls and unmet evidence expectations",
+      "Noru write: file evidence only after diff and confirmation",
       "Unmet evidence expectations from Noru's own catalogue",
       "Local artifact matching and validation",
       "Multipart upload with control mappings",
       "Attributed, expiring sign-off per artifact"
     ],
     "websiteURL": "https://noru.tech",
-    "defaultPrompt": "Show me which evidence expectations are unmet and what I have locally that could satisfy them."
+    "defaultPrompt": "Show me which evidence expectations are unmet and what I have locally that could satisfy them. Do not upload or write to Noru."
   }
 }

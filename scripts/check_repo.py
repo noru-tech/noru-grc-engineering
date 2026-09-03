@@ -162,6 +162,17 @@ def check_codex_manifests(problems):
             problems.append(
                 f"[{name}] .codex-plugin/plugin.json declares unsupported Codex field '{field}'"
             )
+        interface = data.get("interface") or {}
+        prompts = interface.get("defaultPrompt")
+        prompt_text = " ".join(prompts) if isinstance(prompts, list) else str(prompts or "")
+        if "write to Noru" not in prompt_text:
+            problems.append(
+                f"[{name}] Codex default prompt does not explicitly say not to write to Noru"
+            )
+        capabilities = interface.get("capabilities") or []
+        for prefix in ("Local read:", "Local write:", "Noru read:", "Noru write:"):
+            if not any(isinstance(value, str) and value.startswith(prefix) for value in capabilities):
+                problems.append(f"[{name}] Codex capabilities do not declare '{prefix}'")
 
 
 def check_marketplaces(problems):
@@ -333,6 +344,49 @@ def check_hub_routing(problems):
         problems.append(
             "[noru] the hub skill does not route broad requests through references/routing.json"
         )
+
+    review_path = ROOT / "plugins" / "noru" / "references" / "review-signals.json"
+    review_script = ROOT / "plugins" / "noru" / "scripts" / "review.mjs"
+    review_command = ROOT / "plugins" / "noru" / "commands" / "review.md"
+    if not review_path.is_file():
+        problems.append("[noru] missing references/review-signals.json")
+        return
+    try:
+        review = json.loads(review_path.read_text(encoding="utf-8")).get("pieces")
+    except (json.JSONDecodeError, AttributeError) as exc:
+        problems.append(f"[noru] references/review-signals.json is invalid: {exc}")
+        return
+    if not isinstance(review, dict):
+        problems.append("[noru] references/review-signals.json must contain a 'pieces' object")
+        return
+    review_names = set(review)
+    if review_names != declared:
+        problems.append(
+            "[noru] branch-review signals do not match declared pieces: "
+            f"missing {sorted(declared - review_names)}, unknown {sorted(review_names - declared)}"
+        )
+    for name, rules in review.items():
+        if not isinstance(rules, dict):
+            problems.append(f"[noru] review signals for {name} must be an object")
+            continue
+        count = 0
+        for kind in ("paths", "content"):
+            entries = rules.get(kind)
+            if not isinstance(entries, list):
+                problems.append(f"[noru] review signals for {name}.{kind} must be a list")
+                continue
+            count += len(entries)
+            for index, entry in enumerate(entries):
+                if not isinstance(entry, dict) or not entry.get("pattern") or not entry.get("reason"):
+                    problems.append(
+                        f"[noru] review signals for {name}.{kind}[{index}] need pattern and reason"
+                    )
+        if count == 0:
+            problems.append(f"[noru] review signals for {name} contain no rules")
+    if not review_script.is_file():
+        problems.append("[noru] missing scripts/review.mjs for the branch-review signals")
+    if not review_command.is_file():
+        problems.append("[noru] missing commands/review.md")
 
 
 def check_action_version_pins(problems):

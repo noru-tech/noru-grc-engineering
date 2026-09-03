@@ -18,6 +18,9 @@ This command **writes to the user's compliance system of record**. Scope: `write
    result is not consent.
 3. Check the severities one more time. A finding filed at the wrong severity is a queue somebody
    works in the wrong order.
+4. Call `findOrganization` through the connection that will execute the calls and refresh only
+   `connection` in `.noru/.cache/noru-state.json`. The push blocks if its organization, endpoint,
+   granted scopes, repository state, plugin version or plan lifetime changed.
 
 ## 1. Emit the confirmed calls
 

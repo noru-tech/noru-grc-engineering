@@ -17,6 +17,9 @@ This command **writes to the user's compliance system of record**. Scope: `write
    is not consent.
 3. Confirm the owner is the person who actually did the review. This step records a named
    attestation against someone; getting that wrong is not a formatting mistake.
+4. Call `findOrganization` through the connection that will execute the calls and refresh only
+   `connection` in `.noru/.cache/noru-state.json`. The push blocks if its organization, endpoint,
+   granted scopes, repository state, plugin version or plan lifetime changed.
 
 ## 1. Emit the confirmed calls
 

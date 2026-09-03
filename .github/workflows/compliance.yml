@@ -115,20 +115,8 @@ jobs:
 
   # The write half. Deliberately absent, and this comment is the documentation of why.
   #
-  # `:push` needs NORU_API_KEY, and this repository has no Noru organization to push to — it is the
-  # toolkit, not a customer. A customer's version of this file adds one more job, off the pull
-  # request path and behind an environment so a human can require an approval on the write:
-  #
-  #   land-it:
-  #     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-  #     environment: compliance
-  #     steps:
-  #       - uses: ./.github/actions/noru-ci
-  #         env:
-  #           NORU_API_KEY: ${{ secrets.NORU_API_KEY }}
-  #         with:
-  #           piece: change-control
-  #           steps: all
-  #           state: .noru/.cache/noru-state.json
-  #
-  # Never on pull_request_target. The full recipe is in docs/ci-mode.md.
+  # This repository has no Noru organization to publish to — it is the toolkit, not a customer.
+  # A customer's publication path is separate, off the pull-request event and behind a protected
+  # environment. REST-backed evidence-push can publish from that job with NORU_API_KEY; MCP-backed
+  # pieces must execute their reviewed calls in an authenticated MCP host and are reported skipped
+  # by headless CI. Never use pull_request_target. The exact recipe is in docs/ci-mode.md.

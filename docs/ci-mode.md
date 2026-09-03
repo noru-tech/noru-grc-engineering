@@ -354,16 +354,18 @@ identical, and `scripts/test_validators.py` holds the fallback to what PyYAML pr
 buys is a named failure instead of a silent switch — and the loaders are not yet interchangeable on
 everything, so see the Known gaps in [verification.md](./verification.md).
 
-## The push half, and why it is a separate job
+## The publication half, and why it is separate
 
-`:diff` compares the manifest against the organization, and `:push` writes to it. Neither is
-possible without a credential, so both are opt-in and both degrade rather than fail:
+`:diff` compares the manifest against a current organization snapshot. It is opt-in because a fork
+pull request cannot safely fetch that state. What happens after the diff depends on transport:
 
-- with no `NORU_API_KEY` in the environment, the `push` step reports
-  `skipped: NORU_API_KEY is not present…` and the build stays green. The offline checks above it
-  still ran and still gate.
 - with no state snapshot, the `diff` step reports `skipped` for the same reason. `:diff` needs to
-  know what is already in Noru, and reading that needs a read-scoped connection.
+  know what is already in Noru, and reading that needs an authenticated, read-scoped connection.
+- MCP-backed pieces emit an ordered, reviewed call list, but this headless runner has no MCP host to
+  execute it. Their `push` step reports `skipped` and names the authenticated-client handoff; it
+  never reports those calls as written.
+- `evidence-push` is REST-backed. With no `NORU_API_KEY`, its `push` step reports skipped and the
+  build stays green; with a protected secret and a current state snapshot, it can upload.
 
 ```yaml
   land-it:
@@ -386,7 +388,7 @@ possible without a credential, so both are opt-in and both degrade rather than f
           state: .noru/.cache/noru-state.json
 ```
 
-Rules this obeys, and that a reviewer should check it still obeys:
+Rules this REST example obeys, and that a reviewer should check it still obeys:
 
 - the key is passed in `env:` from a secret and **never** as a `with:` input, so it does not travel
   through the action's inputs
@@ -396,10 +398,14 @@ Rules this obeys, and that a reviewer should check it still obeys:
 - every step that does not push runs with `NORU_API_KEY` **removed** from its child environment
 - everything captured from a child process is passed through the same redaction the plugins use
   before it can reach a log, the report or a job summary
-- `:push` still refuses to act without `--confirm` and a plan generated from the manifest bytes
-  currently on disk. Putting `steps: all` in a workflow is that confirmation, given once, in a file
-  that goes through review — which is why it belongs on a protected branch with an environment, not
-  on `pull_request`
+- `:push` still refuses to act without `--confirm` and a fresh plan bound to the manifest, target
+  organization, repository, plugin version and required scopes. Putting `steps: all` in this REST
+  workflow is that confirmation, given once in a reviewed file — which is why it belongs on a
+  protected branch with an environment, not on `pull_request`
+
+For an MCP-backed piece, generate and review the diff in the authenticated client and run its
+`:push` there. Do not copy the REST example and treat a successful CI process as proof that the MCP
+calls ran; the CI report explicitly marks that handoff `skipped`.
 
 ## A whole pipeline, end to end
 
