@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const SCRIPTS = dirname(dirname(fileURLToPath(import.meta.url)));
 const PROFILE = join(dirname(SCRIPTS), "references", "github-ruleset-profile.json");
 const PLAN_REL = ".noru/.cache/repo-enforcement-github-plan.json";
-const VERSION = "0.6.0";
+const VERSION = "0.7.0";
 const CHECK = "Noru GRC / validate";
 const TOKEN = /\b(?:gh[pousr]_[A-Za-z0-9]{8,}|Bearer\s+[A-Za-z0-9._~+/=-]{8,})/gi;
 

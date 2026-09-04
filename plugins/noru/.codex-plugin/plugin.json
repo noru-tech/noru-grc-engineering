@@ -1,6 +1,6 @@
 {
   "name": "noru",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Run consolidated repository reviews and read-only Noru status across independently installed GRC pieces.",
   "author": {
     "name": "Noru",

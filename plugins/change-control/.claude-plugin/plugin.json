@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "change-control",
   "displayName": "Noru Change Control",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Review forge change history and branch protection, identify segregation-of-duties exceptions, and land owned findings and window evidence in Noru.",
   "author": {
     "name": "Noru",
