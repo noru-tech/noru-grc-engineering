@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "ai-inventory",
   "displayName": "Noru AI Inventory",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Scan a repository for the AI systems, model providers and oversight points it actually contains, review the manifest in a PR, and land it in Noru.",
   "author": {
     "name": "Noru",

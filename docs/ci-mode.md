@@ -292,7 +292,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.5.0
+      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.6.0
         with:
           piece: ai-inventory
           mode: warn        # switch to gate once the report is quiet
@@ -378,7 +378,7 @@ pull request cannot safely fetch that state. What happens after the diff depends
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.5.0
+      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.6.0
         env:
           NORU_API_KEY: ${{ secrets.NORU_API_KEY }}
         with:
