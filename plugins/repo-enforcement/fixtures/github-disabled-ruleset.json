@@ -1,0 +1,25 @@
+{
+  "host": "github.com",
+  "organization": { "login": "example", "id": 100 },
+  "repository": { "full_name": "example/service", "id": 200, "default_branch": "main" },
+  "repository_commit": "0000000000000000000000000000000000000000",
+  "teams": [],
+  "check_runs": [
+    { "name": "Noru GRC / validate", "app_id": 15368, "conclusion": "success" }
+  ],
+  "workflow": { "present": true, "immutable_pin": true, "action_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+  "codeowners": { "present": true, "protects_self": true },
+  "rulesets": [
+    {
+      "id": 300,
+      "name": "Noru GRC — governed development",
+      "source_type": "Repository",
+      "target": "branch",
+      "enforcement": "disabled",
+      "updated_at": "2026-09-01T00:00:00Z",
+      "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+      "bypass_actors": [ { "actor_id": 1, "actor_type": "Team", "bypass_mode": "always" } ],
+      "rules": []
+    }
+  ]
+}

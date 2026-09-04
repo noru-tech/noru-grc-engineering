@@ -306,7 +306,7 @@
       "description": "Headless operation. (Requirement 7)",
       "type": "object",
       "additionalProperties": false,
-      "required": ["output_json", "quiet", "exit_codes"],
+      "required": ["output_json", "quiet", "validate", "drift_check", "watch_paths", "exit_codes"],
       "properties": {
         "output_json": {
           "description": "Every entrypoint supports --output=json.",
@@ -315,6 +315,21 @@
         "quiet": {
           "description": "Every entrypoint supports --quiet.",
           "const": true
+        },
+        "validate": {
+          "$ref": "#/$defs/ciInvocation",
+          "description": "Trusted offline invocation for validating the committed manifest. Arguments use {manifest}, {repo}, and {as_of} placeholders resolved by the released runner."
+        },
+        "drift_check": {
+          "$ref": "#/$defs/ciInvocation",
+          "description": "Trusted offline invocation for comparing the committed manifest with current repository facts."
+        },
+        "watch_paths": {
+          "description": "Paths relevant to routing and review explanation. The enforcement runner still validates the whole repository on every PR and never uses these as workflow path filters.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
         },
         "exit_codes": {
           "type": "object",
@@ -331,6 +346,19 @@
     }
   },
   "$defs": {
+    "ciInvocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "entrypoint", "arguments"],
+      "properties": {
+        "runtime": { "enum": ["node", "python3"] },
+        "entrypoint": { "$ref": "#/$defs/pluginRelativePath" },
+        "arguments": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
     "pluginRelativePath": {
       "type": "string",
       "pattern": "^[A-Za-z0-9._/-]+$",

@@ -140,6 +140,9 @@
   "ci": {
     "output_json": true,
     "quiet": true,
+    "validate": { "runtime": "python3", "entrypoint": "scripts/validate_manifest.py", "arguments": ["{manifest}", "--output=json", "--quiet"] },
+    "drift_check": { "runtime": "node", "entrypoint": "scripts/collect.mjs", "arguments": ["--repo={repo}", "--check", "--output=json", "--quiet"] },
+    "watch_paths": [".noru/review-signoff.yml", "reviews/**", "evidence/**"],
     "exit_codes": {
       "0": "success",
       "1": "drift, validation failure, an expired sign-off under --as-of, missing prerequisite input, or a stale plan",

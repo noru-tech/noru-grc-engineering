@@ -1,0 +1,251 @@
+{
+  "generated_from": "plugins/*/piece.json",
+  "pieces": [
+    {
+      "artifact": ".noru/ai-inventory.yml",
+      "drift_check": {
+        "arguments": [
+          "--repo={repo}",
+          "--check",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/collect.mjs",
+        "runtime": "node"
+      },
+      "generated_outputs": [],
+      "name": "ai-inventory",
+      "validate": {
+        "arguments": [
+          "{manifest}",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/validate_manifest.py",
+        "runtime": "python3"
+      },
+      "watch_paths": [
+        "**/*"
+      ]
+    },
+    {
+      "artifact": ".noru/audit-pack.yml",
+      "drift_check": {
+        "arguments": [
+          "--repo={repo}",
+          "--check",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/collect.mjs",
+        "runtime": "node"
+      },
+      "generated_outputs": [
+        ".noru/audit-pack/"
+      ],
+      "name": "audit-pack",
+      "validate": {
+        "arguments": [
+          "{manifest}",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/validate_manifest.py",
+        "runtime": "python3"
+      },
+      "watch_paths": [
+        ".noru/audit-pack.yml",
+        ".noru/audit-pack/**",
+        "audit/**",
+        "evidence/**"
+      ]
+    },
+    {
+      "artifact": ".noru/change-control.yml",
+      "drift_check": {
+        "arguments": [
+          "--repo={repo}",
+          "--check",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/collect.mjs",
+        "runtime": "node"
+      },
+      "generated_outputs": [],
+      "name": "change-control",
+      "validate": {
+        "arguments": [
+          "{manifest}",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/validate_manifest.py",
+        "runtime": "python3"
+      },
+      "watch_paths": [
+        ".github/**",
+        ".gitlab-ci.yml",
+        "**/Dockerfile",
+        ".noru/change-control.yml"
+      ]
+    },
+    {
+      "artifact": ".noru/evidence-push.yml",
+      "drift_check": {
+        "arguments": [
+          "--repo={repo}",
+          "--check",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/collect.mjs",
+        "runtime": "node"
+      },
+      "generated_outputs": [],
+      "name": "evidence-push",
+      "validate": {
+        "arguments": [
+          "{manifest}",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/validate_manifest.py",
+        "runtime": "python3"
+      },
+      "watch_paths": [
+        ".noru/evidence-push.yml",
+        ".noru/artifacts/**",
+        "evidence/**",
+        "audit/**"
+      ]
+    },
+    {
+      "artifact": ".noru/governance-records.yml",
+      "drift_check": {
+        "arguments": [
+          "--repo={repo}",
+          "--check",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/collect.mjs",
+        "runtime": "node"
+      },
+      "generated_outputs": [],
+      "name": "governance-records",
+      "validate": {
+        "arguments": [
+          "{manifest}",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/validate_manifest.py",
+        "runtime": "python3"
+      },
+      "watch_paths": [
+        ".noru/governance-records.yml",
+        "governance/**",
+        "minutes/**",
+        "audit/**"
+      ]
+    },
+    {
+      "artifact": ".noru/iac-scan.yml",
+      "drift_check": {
+        "arguments": [
+          "--repo={repo}",
+          "--check",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/collect.mjs",
+        "runtime": "node"
+      },
+      "generated_outputs": [],
+      "name": "iac-scan",
+      "validate": {
+        "arguments": [
+          "{manifest}",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/validate_manifest.py",
+        "runtime": "python3"
+      },
+      "watch_paths": [
+        "**/*.tf",
+        "**/*.tf.json",
+        "**/*.yaml",
+        "**/*.yml",
+        ".github/**",
+        ".noru/iac-scan.yml"
+      ]
+    },
+    {
+      "artifact": ".noru/privacy-datamap.yml",
+      "drift_check": {
+        "arguments": [
+          "--repo={repo}",
+          "--check",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/collect.mjs",
+        "runtime": "node"
+      },
+      "generated_outputs": [
+        ".fides/datamap.yml"
+      ],
+      "name": "privacy-datamap",
+      "validate": {
+        "arguments": [
+          "{manifest}",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/validate_manifest.py",
+        "runtime": "python3"
+      },
+      "watch_paths": [
+        "**/*.sql",
+        "**/*.prisma",
+        "**/*.py",
+        "**/*.proto",
+        "**/*.graphql",
+        "**/*.gql",
+        ".noru/privacy-datamap.yml"
+      ]
+    },
+    {
+      "artifact": ".noru/review-signoff.yml",
+      "drift_check": {
+        "arguments": [
+          "--repo={repo}",
+          "--check",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/collect.mjs",
+        "runtime": "node"
+      },
+      "generated_outputs": [],
+      "name": "review-signoff",
+      "validate": {
+        "arguments": [
+          "{manifest}",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/validate_manifest.py",
+        "runtime": "python3"
+      },
+      "watch_paths": [
+        ".noru/review-signoff.yml",
+        "reviews/**",
+        "evidence/**"
+      ]
+    }
+  ],
+  "version": 1
+}

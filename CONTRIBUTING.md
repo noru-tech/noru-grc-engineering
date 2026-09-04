@@ -114,6 +114,7 @@ python3 scripts/test_collectors.py     # collectors detect what the pieces claim
 python3 scripts/test_idempotency.py    # a second push is a no-op
 python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
 python3 scripts/test_ci_mode.py        # CI mode fails on drift and on an expired interpretation
+python3 scripts/test_repo_enforcement.py # enforcement ratchet, action and GitHub adapter safety
 git diff --check
 ```
 

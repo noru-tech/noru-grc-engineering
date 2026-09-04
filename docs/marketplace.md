@@ -5,6 +5,11 @@ Every piece is independently installable. Each declares the same logical hosted 
 repository gate compares the parsed server declarations structurally so configuration
 drift cannot silently create a different endpoint or authentication expectation.
 
+`repo-enforcement` is separately installable but is a utility, not a piece. It has no Noru MCP
+server and cannot publish a compliance claim. Its local capability creates reviewable repository
+files; its optional GitHub capability reads rules and, only after a fresh plan and explicit
+confirmation, creates or updates one dedicated repository ruleset.
+
 ## What is visible before installation
 
 Each Codex manifest's `interface.capabilities` names four boundaries explicitly:
@@ -29,6 +34,8 @@ do not support a field. It declares:
 - exact read and write scopes;
 - every write operation and whether its transport is MCP or REST;
 - provenance and confirmation requirements.
+- generic CI validator, drift-check, and watch-path declarations consumed by the released
+  whole-repository enforcement registry.
 
 Collectors require Node.js 18 or newer. Validators require Python 3 and use only the standard
 library, with optional PyYAML parity coverage in the repository matrix. Seven pieces publish over

@@ -37,6 +37,7 @@ directory, no flat-file risk register, no second source of truth to reconcile be
 | [`iac-scan`](./plugins/iac-scan/) | compliance-relevant misconfiguration in Terraform, CloudFormation, Kubernetes and pipeline configuration | security findings, keyed and closed by the same call |
 | [`change-control`](./plugins/change-control/) | who wrote, approved, merged and deployed each change over one window, and the branch protection that was supposed to keep those apart | a finding per separation that did not hold, plus the window as evidence |
 | [`noru`](./plugins/noru/) | repository signals and shared provenance | the hub: route, `connect`, `doctor`, `context` |
+| [`repo-enforcement`](./plugins/repo-enforcement/) | all configured GRC manifests, exact legacy-debt acceptances, CODEOWNERS, and effective GitHub rules | no Noru record; this optional utility makes the offline checks and review rules mandatory |
 
 Every piece is the same three moves, and exactly three commands:
 
@@ -45,6 +46,11 @@ Every piece is the same three moves, and exactly three commands:
 /<piece>:diff   show what would change in Noru — reads only, writes nothing
 /<piece>:push   land it, once, idempotently, with provenance
 ```
+
+`repo-enforcement` is intentionally not a piece. It wraps the pieces in an offline whole-repository
+check and a dedicated GitHub ruleset, while leaving every Noru write behind the existing reviewed
+`diff -> explicit confirmation -> push` boundary. See
+[`docs/repository-enforcement.md`](./docs/repository-enforcement.md).
 
 ### What each piece is for
 
@@ -271,6 +277,7 @@ noru-grc-engineering/
 │   ├── audit-pack/                     # :scan :diff :push  (MCP)
 │   ├── iac-scan/                       # :scan :diff :push  (MCP)
 │   ├── privacy-datamap/                # :scan :diff :push  (MCP)
+│   ├── repo-enforcement/                # optional merge-boundary utility; no Noru write
 │   └── change-control/                 # :scan :diff :push  (MCP) + credentialed forge exporters
 ├── .github/actions/noru-ci/            # the CI-mode action: scan, validate, expiry, diff, push
 ├── .github/actions/noru-review/        # branch routing + structurally read-only consolidated CI
@@ -292,6 +299,7 @@ python3 scripts/test_collectors.py    # collectors detect what the pieces claim 
 python3 scripts/test_idempotency.py   # a second push must be a no-op
 python3 scripts/contract_test.py      # every plugin satisfies requirements 1-9
 python3 scripts/test_ci_mode.py       # CI mode really fails on drift and on an expired claim
+python3 scripts/test_repo_enforcement.py # ratchets, setup plans, action and GitHub ruleset safety
 python3 scripts/test_ci_review.py     # one fork-safe branch report, with no diff or push route
 python3 scripts/test_hub.py           # branch routing and duplicate-writer warnings stay read-only
 ```

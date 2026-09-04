@@ -120,5 +120,22 @@
       ],
       "caveat": "An export is not a sign-off; require the named human decision, review date, scope and expiry."
     }
+  ],
+  "utilities": [
+    {
+      "name": "repo-enforcement",
+      "summary": "Install and verify GitHub merge enforcement for the repository-wide GRC workflow.",
+      "signals": [
+        "A request to make GRC or compliance checks mandatory before merge",
+        "A request to configure branch protection, rulesets, CODEOWNERS, or controlled debt adoption",
+        "A request to detect weakening of repository governance"
+      ],
+      "inspect": [
+        ".noru/enforcement.yml and its ratchet baseline",
+        "The always-running Noru GRC workflow and CODEOWNERS",
+        "Effective repository and inherited organisation rulesets"
+      ],
+      "caveat": "This utility administers GitHub enforcement and never writes a compliance claim to Noru; ruleset apply requires a fresh plan and separate confirmation."
+    }
   ]
 }

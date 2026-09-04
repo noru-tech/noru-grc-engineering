@@ -206,6 +206,9 @@
   "ci": {
     "output_json": true,
     "quiet": true,
+    "validate": { "runtime": "python3", "entrypoint": "scripts/validate_manifest.py", "arguments": ["{manifest}", "--output=json", "--quiet"] },
+    "drift_check": { "runtime": "node", "entrypoint": "scripts/collect.mjs", "arguments": ["--repo={repo}", "--check", "--output=json", "--quiet"] },
+    "watch_paths": ["**/*"],
     "exit_codes": {
       "0": "success",
       "1": "drift, validation failure, or missing prerequisite input",

@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/plugins/repo-enforcement/references/enforcement-policy.schema.json",
+  "title": "Noru repository enforcement policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "adoption", "pieces", "reviews", "ownership", "exceptions", "github"],
+  "properties": {
+    "version": { "const": 1 },
+    "adoption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["strict", "ratchet"] },
+        "baseline": { "type": "string", "pattern": "^\\.noru/[A-Za-z0-9._/-]+\\.json$" }
+      }
+    },
+    "pieces": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/piece" },
+      "minProperties": 1
+    },
+    "reviews": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_approvals", "dismiss_stale_approvals", "require_last_push_approval", "require_code_owner_review", "require_thread_resolution"],
+      "properties": {
+        "minimum_approvals": { "type": "integer", "minimum": 1 },
+        "dismiss_stale_approvals": { "const": true },
+        "require_last_push_approval": { "const": true },
+        "require_code_owner_review": { "const": true },
+        "require_thread_resolution": { "const": true }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grc_reviewers", "privacy_reviewers", "security_reviewers", "break_glass"],
+      "properties": {
+        "grc_reviewers": { "$ref": "#/$defs/team" },
+        "privacy_reviewers": { "$ref": "#/$defs/team" },
+        "security_reviewers": { "$ref": "#/$defs/team" },
+        "break_glass": { "$ref": "#/$defs/team" }
+      }
+    },
+    "exceptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maximum_days", "require_named_owner", "require_rationale"],
+      "properties": {
+        "maximum_days": { "type": "integer", "minimum": 1, "maximum": 365 },
+        "require_named_owner": { "const": true },
+        "require_rationale": { "const": true }
+      }
+    },
+    "github": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "scope", "ruleset_name", "required_check", "action_sha"],
+      "properties": {
+        "target": { "const": "default_branch" },
+        "scope": { "enum": ["repository", "organization"] },
+        "ruleset_name": { "type": "string", "minLength": 1 },
+        "required_check": { "const": "Noru GRC / validate" },
+        "action_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "enforcement": { "enum": ["evaluate", "active"] }
+      }
+    }
+  },
+  "$defs": {
+    "team": { "type": "string", "pattern": "^@[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "piece": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "fail_on": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    }
+  }
+}

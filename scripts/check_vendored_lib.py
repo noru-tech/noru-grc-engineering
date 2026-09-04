@@ -175,6 +175,15 @@ def main(argv):
             if problem:
                 problems.append(problem)
 
+    # repo-enforcement is intentionally not a last-mile piece, but its standalone policy parser
+    # has the same no-install promise as piece validators and therefore vendors the same loader.
+    enforcement = ROOT / "plugins" / "repo-enforcement" / "scripts" / "enforce.py"
+    if enforcement.is_file():
+        checked += 1
+        problem = sync_python(enforcement, py_block, fix)
+        if problem:
+            problems.append(problem)
+
     ok = not problems
     if output_json:
         sys.stdout.write(

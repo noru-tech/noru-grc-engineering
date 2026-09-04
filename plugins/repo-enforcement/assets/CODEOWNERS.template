@@ -1,0 +1,6 @@
+# BEGIN NORU GRC ENFORCEMENT
+/.noru/ __GRC_REVIEWERS__
+/.github/CODEOWNERS __GRC_REVIEWERS__
+/.github/workflows/noru-*.yml __GRC_REVIEWERS__
+/.github/actions/ __SECURITY_REVIEWERS__
+# END NORU GRC ENFORCEMENT
