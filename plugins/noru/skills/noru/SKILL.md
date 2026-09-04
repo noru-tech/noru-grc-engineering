@@ -56,6 +56,11 @@ Cite the file and line for every repository-derived recommendation. Keep live No
 and recommendations visibly separate. Routing signals select a tool; they are not compliance
 findings and do not establish that a control is effective or ineffective.
 
+The routing catalogue also declares optional utilities. Route requests to enforce the workflow,
+configure merge blockers, manage ratcheted debt, or detect GitHub ruleset drift to the independently
+installed `repo-enforcement:repo-enforcement` skill. Do not grant the read-only hub GitHub
+administration capability and do not model that utility as a `scan/diff/push` piece.
+
 A broad review is read-only against Noru. Use `/noru:review` (and its deterministic selector in
 `scripts/review.mjs`) when the user asks about the current branch: discover the independently
 installed piece skills, report every selected and skipped piece with reasons, run selected scans and

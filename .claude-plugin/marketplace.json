@@ -195,6 +195,26 @@
         "name": "Noru",
         "email": "support@noru.tech"
       }
+    },
+    {
+      "name": "repo-enforcement",
+      "source": "./plugins/repo-enforcement",
+      "description": "Install, plan, apply, and verify enforceable GitHub merge gates for the GRC Engineering workflow without granting the Noru hub administration rights.",
+      "version": "0.6.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "github",
+        "rulesets",
+        "branch-protection",
+        "grc"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
     }
   ]
 }

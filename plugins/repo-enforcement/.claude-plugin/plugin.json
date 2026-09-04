@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "repo-enforcement",
+  "displayName": "Noru Repository Enforcement",
+  "version": "0.6.0",
+  "description": "Install, plan, apply, and verify enforceable repository-level GRC merge gates.",
+  "author": { "name": "Noru", "email": "support@noru.tech" },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": ["noru", "compliance", "github", "rulesets", "branch-protection", "grc"]
+}

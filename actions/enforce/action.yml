@@ -1,0 +1,36 @@
+name: "Noru GRC repository enforcement"
+description: "Validate every configured GRC piece offline and enforce strict or ratcheted repository policy."
+author: "Noru"
+
+inputs:
+  repo:
+    description: "Repository to validate."
+    required: false
+    default: "."
+  policy:
+    description: "Committed enforcement policy path."
+    required: false
+    default: ".noru/enforcement.yml"
+  as-of:
+    description: "Explicit UTC date used for expiry checks (YYYY-MM-DD)."
+    required: true
+  report-path:
+    description: "JSON report path."
+    required: false
+    default: ""
+
+outputs:
+  report:
+    description: "Path to the normalized JSON report."
+  new-violations:
+    description: "Number of violations not accepted by the exact ratchet baseline."
+  baselined-violations:
+    description: "Number of current violations matched by a live baseline entry."
+
+runs:
+  using: "node24"
+  main: "dist/enforce.js"
+
+branding:
+  icon: "shield"
+  color: "purple"

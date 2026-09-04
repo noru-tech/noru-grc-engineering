@@ -1,0 +1,22 @@
+name: Noru GRC
+
+"on":
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - id: clock
+        shell: bash
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - uses: noru-tech/noru-grc-engineering/actions/enforce@__NORU_ENFORCE_SHA__
+        with:
+          as-of: ${{ steps.clock.outputs.date }}

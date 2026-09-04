@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/plugins/repo-enforcement/references/enforcement-baseline.schema.json",
+  "title": "Noru repository enforcement ratchet baseline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "policy_digest", "violations"],
+  "properties": {
+    "version": { "const": 1 },
+    "policy_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "violations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/violation" }
+    }
+  },
+  "$defs": {
+    "violation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["piece", "rule", "subject", "fingerprint", "owner", "decided_at", "expires_at", "rationale"],
+      "properties": {
+        "piece": { "type": "string", "minLength": 1 },
+        "rule": { "type": "string", "minLength": 1 },
+        "subject": { "type": "string", "minLength": 1 },
+        "fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "owner": { "type": "string", "minLength": 3 },
+        "decided_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "expires_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "rationale": { "type": "string", "minLength": 10 }
+      }
+    }
+  }
+}

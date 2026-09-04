@@ -67,10 +67,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
       - name: marketplace manifests, schema sync, secret hygiene
         run: python3 scripts/check_repo.py
       - name: vendored libraries have not drifted
         run: python3 scripts/check_vendored_lib.py
+      - name: repository enforcement safety model
+        run: python3 scripts/test_repo_enforcement.py
 
   tests:
     name: tests (node ${{ matrix.node }}, python ${{ matrix.python }}, ${{ matrix.yaml }})

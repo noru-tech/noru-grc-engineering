@@ -9,7 +9,8 @@ What it covers, and why each one is here rather than left to review:
     plugins at the same paths. They are two files nobody edits together, so they drift.
   * **Plugin manifests** — every declared source directory really contains a plugin whose name
     matches, for both clients, and no public metadata contains an unfinished placeholder.
-  * **MCP config** — points at Noru's hosted endpoint and carries no credential.
+  * **MCP config** — when a plugin declares Noru access, it points at the hosted endpoint and
+    carries no credential. Local-only utility plugins do not acquire an unnecessary connection.
   * **Supported workflows** — the copyable PR review stays fork-safe and structurally read-only.
   * **Hub routing** — every declared piece appears exactly once in the hub's routing catalogue.
   * **Published examples** — copyable `noru-ci` examples pin the current marketplace version.
@@ -30,6 +31,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from jsonschema_mini import unsupported_keywords  # noqa: E402
+from generate_enforcement_registry import rendered as rendered_enforcement_registry  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MCP_URL = "https://api.noru.tech/v1/mcp"
@@ -227,12 +229,14 @@ def check_marketplaces(problems):
                     f"[{name}] Codex marketplace points at {codex_path_value}, Claude at {source}"
                 )
 
+        client_manifests = {}
         for client, rel in (("Claude Code", ".claude-plugin"), ("Codex", ".codex-plugin")):
             manifest = directory / rel / "plugin.json"
             if not manifest.is_file():
                 problems.append(f"[{name}] missing {rel}/plugin.json ({client})")
                 continue
             data = json.loads(manifest.read_text(encoding="utf-8"))
+            client_manifests[client] = data
             if data.get("name") != name:
                 problems.append(
                     f"[{name}] {rel}/plugin.json declares name '{data.get('name')}'"
@@ -247,7 +251,8 @@ def check_marketplaces(problems):
 
         mcp = directory / ".mcp.json"
         if not mcp.is_file():
-            problems.append(f"[{name}] has no independent .mcp.json declaration")
+            if "mcpServers" in client_manifests.get("Codex", {}):
+                problems.append(f"[{name}] declares MCP capability but has no .mcp.json")
             continue
         config = json.loads(mcp.read_text(encoding="utf-8"))
         server = (config.get("mcpServers") or {}).get("noru", {})
@@ -351,6 +356,31 @@ def check_hub_routing(problems):
     if unknown:
         problems.append(
             f"[noru] routing catalogue names pieces with no piece.json: {unknown}"
+        )
+
+    utilities = routing.get("utilities") or []
+    utility_names = []
+    for index, row in enumerate(utilities):
+        label = f"references/routing.json utilities[{index}]"
+        if not isinstance(row, dict) or not isinstance(row.get("name"), str):
+            problems.append(f"[noru] {label} must name a utility")
+            continue
+        utility_names.append(row["name"])
+        for field in ("summary", "caveat"):
+            if not isinstance(row.get(field), str) or not row[field].strip():
+                problems.append(f"[noru] {label} has no {field}")
+        for field in ("signals", "inspect"):
+            if not isinstance(row.get(field), list) or not row[field]:
+                problems.append(f"[noru] {label} {field} must be a non-empty list")
+    expected_utilities = sorted(
+        path.parent.parent.name
+        for path in (ROOT / "plugins").glob("*/.codex-plugin/plugin.json")
+        if not (path.parent.parent / "piece.json").is_file()
+        and path.parent.parent.name != "noru"
+    )
+    if sorted(utility_names) != expected_utilities:
+        problems.append(
+            f"[noru] routed utilities are {sorted(utility_names)}, expected {expected_utilities}"
         )
 
     if skill_path.is_file() and "references/routing.json" not in skill_path.read_text(encoding="utf-8"):
@@ -716,6 +746,49 @@ def check_schemas_evaluable(problems):
             )
 
 
+def check_enforcement_registry(problems):
+    path = ROOT / "actions" / "enforce" / "registry.json"
+    if not path.is_file():
+        problems.append("actions/enforce/registry.json is missing")
+        return
+    if path.read_text(encoding="utf-8") != rendered_enforcement_registry():
+        problems.append(
+            "actions/enforce/registry.json has drifted from piece.json declarations — run "
+            "python3 scripts/generate_enforcement_registry.py"
+        )
+
+
+def check_enforcement_action(problems):
+    """The copyable merge gate must remain whole-repository, pinned, and credential-free."""
+    action = ROOT / "actions" / "enforce" / "action.yml"
+    runtime = ROOT / "actions" / "enforce" / "dist" / "enforce.js"
+    workflow = ROOT / "plugins" / "repo-enforcement" / "assets" / "github" / "noru-grc.yml"
+    for path in (action, runtime, workflow):
+        if not path.is_file():
+            problems.append(f"missing repository enforcement component {path.relative_to(ROOT)}")
+    if not all(path.is_file() for path in (action, runtime, workflow)):
+        return
+    action_text = action.read_text(encoding="utf-8")
+    runtime_text = runtime.read_text(encoding="utf-8")
+    workflow_text = workflow.read_text(encoding="utf-8")
+    if 'using: "node24"' not in action_text:
+        problems.append("actions/enforce must use the supported node24 JavaScript action runtime")
+    if "pull_request:" not in workflow_text or re.search(r"^\s+paths(?:-ignore)?:", workflow_text, re.M):
+        problems.append("repository enforcement workflow must run on every pull request without path filters")
+    if "permissions:\n  contents: read" not in workflow_text:
+        problems.append("repository enforcement workflow must request only contents: read")
+    if "secrets." in workflow_text or "NORU_API_KEY" in workflow_text:
+        problems.append("repository enforcement workflow must not receive Noru or repository secrets")
+    if not re.search(r"actions/checkout@[0-9a-f]{40}\b", workflow_text):
+        problems.append("repository enforcement workflow must pin checkout to a full commit SHA")
+    if "actions/enforce@__NORU_ENFORCE_SHA__" not in workflow_text:
+        problems.append("repository enforcement workflow must expose only the full action-SHA placeholder")
+    if '"--steps=scan,validate,expiry"' not in (ROOT / "plugins" / "repo-enforcement" / "scripts" / "enforce.py").read_text(encoding="utf-8"):
+        problems.append("repository enforcement must hard-code offline-only aggregate validation steps")
+    if "TOKEN|SECRET|PASSWORD|API_KEY|AUTHORIZATION" not in runtime_text:
+        problems.append("actions/enforce must remove credential-like environment variables")
+
+
 def check_secrets(problems):
     for path in sorted(ROOT.rglob("*")):
         if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
@@ -788,6 +861,8 @@ def main(argv):
         check_special_categories(problems)
         check_vocab_sync(problems)
         check_schemas_evaluable(problems)
+        check_enforcement_registry(problems)
+        check_enforcement_action(problems)
         check_skills(problems, plugin_names)
         check_secrets(problems)
     except Exception as exc:  # noqa: BLE001

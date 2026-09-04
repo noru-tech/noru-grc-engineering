@@ -527,6 +527,35 @@ def check_item_7(piece, decl, fail, workdir):
         if not decl["ci"]["exit_codes"].get(code):
             fail.add(piece.name, 7, f"exit code {code} is not documented in piece.json")
 
+    ci = decl["ci"]
+    expected = {
+        "validate": decl["validator"]["entrypoint"],
+        "drift_check": decl["collector"]["entrypoint"],
+    }
+    for name, expected_entrypoint in expected.items():
+        invocation = ci.get(name) or {}
+        entrypoint = invocation.get("entrypoint")
+        if entrypoint != expected_entrypoint:
+            fail.add(
+                piece.name,
+                7,
+                f"ci.{name}.entrypoint is {entrypoint}, expected trusted {expected_entrypoint}",
+            )
+        if entrypoint and not (piece / entrypoint).is_file():
+            fail.add(piece.name, 7, f"ci.{name} entrypoint {entrypoint} does not exist")
+        arguments = invocation.get("arguments") or []
+        if "--output=json" not in arguments or "--quiet" not in arguments:
+            fail.add(piece.name, 7, f"ci.{name} is not declared as JSON/no-TTY")
+    if "{manifest}" not in (ci.get("validate") or {}).get("arguments", []):
+        fail.add(piece.name, 7, "ci.validate does not receive the committed manifest")
+    if not any(
+        "{repo}" in argument
+        for argument in (ci.get("drift_check") or {}).get("arguments", [])
+    ):
+        fail.add(piece.name, 7, "ci.drift_check does not receive the target repository")
+    if not ci.get("watch_paths"):
+        fail.add(piece.name, 7, "ci.watch_paths is empty")
+
 
 def check_item_8(piece, decl, fail):
     """Unattributed claims are an ERROR. Proven by an invalid fixture, not by reading the code."""

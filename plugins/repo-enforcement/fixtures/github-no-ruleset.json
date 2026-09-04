@@ -1,0 +1,19 @@
+{
+  "host": "github.com",
+  "organization": { "login": "example", "id": 100 },
+  "repository": { "full_name": "example/service", "id": 200, "default_branch": "main" },
+  "repository_commit": "0000000000000000000000000000000000000000",
+  "permissions": { "admin": true, "push": true, "pull": true },
+  "teams": [
+    { "organization": "example", "slug": "grc-reviewers" },
+    { "organization": "example", "slug": "privacy-reviewers" },
+    { "organization": "example", "slug": "security-reviewers" },
+    { "organization": "example", "slug": "security-admins" }
+  ],
+  "check_runs": [
+    { "name": "Noru GRC / validate", "app_id": 15368, "conclusion": "success" }
+  ],
+  "workflow": { "present": true, "immutable_pin": true, "action_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+  "codeowners": { "present": true, "protects_self": true },
+  "rulesets": []
+}
