@@ -151,7 +151,7 @@ The same pieces run headless, so the record stays true between audits instead of
 before one:
 
 ```yaml
-- uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.5.0
+- uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.6.0
   with:
     base-ref: ${{ github.event.pull_request.base.sha }}
     mode: warn      # switch to gate once the report is quiet

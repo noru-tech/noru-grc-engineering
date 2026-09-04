@@ -26,7 +26,7 @@ import { join, relative, sep, basename } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const PIECE = "ai-inventory";
-export const VERSION = "0.5.0";
+export const VERSION = "0.6.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 // Directories that are in the repository but are not the repository: a checked-in vendor/ or dist/

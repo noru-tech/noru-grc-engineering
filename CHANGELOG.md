@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.6.0 — 2026-09-04
+
 ### Added
 
 - `privacy-datamap` now records accepted machine observations in a committed lock and reconciles
