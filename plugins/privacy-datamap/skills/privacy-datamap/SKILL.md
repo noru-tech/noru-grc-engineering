@@ -1,6 +1,6 @@
 ---
 name: privacy-datamap
-version: 0.6.0
+version: 0.7.0
 description: Build a privacy data map (Fides/Fideslang dataset + system manifest) for this repository by reading its schemas and classifying the personal data in them, then land it in Noru. Use when the user wants a data map, a RoPA, a record of processing, a fideslang manifest, or to work out what personal data a codebase actually holds and where.
 requires:
   bins: ["node", "python3", "git"]

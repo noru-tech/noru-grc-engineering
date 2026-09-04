@@ -27,7 +27,7 @@ import { basename, join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const PIECE = "change-control";
-export const VERSION = "0.6.0";
+export const VERSION = "0.7.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 const EVENTS_REL = ".noru/.cache/change-events.json";

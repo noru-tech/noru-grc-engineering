@@ -63,7 +63,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.6.0
+      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.7.0
         with:
           base-ref: ${{ github.event.pull_request.base.sha }}
           mode: warn

@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "evidence-push",
   "displayName": "Noru Evidence Push",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Work Noru's own evidence queue: see which catalogue expectations are unmet, stage local artifacts against them, and upload with control mappings.",
   "author": {
     "name": "Noru",

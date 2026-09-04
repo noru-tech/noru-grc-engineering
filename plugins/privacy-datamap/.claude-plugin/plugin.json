@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "privacy-datamap",
   "displayName": "Privacy Datamap",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Read the schemas a repository actually contains — ORM models, migrations, SQL DDL, API contracts — classify the personal data in them against the Fideslang taxonomy, and land the data map in Noru with a citation for every field and a named owner for every judgement.",
   "author": {
     "name": "Noru",

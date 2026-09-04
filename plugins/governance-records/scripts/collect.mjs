@@ -28,7 +28,7 @@ import { basename, extname, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const PIECE = "governance-records";
-export const VERSION = "0.6.0";
+export const VERSION = "0.7.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));

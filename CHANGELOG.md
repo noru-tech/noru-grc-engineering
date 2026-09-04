@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.7.0 — 2026-09-04
+
 ### Added
 
 - `repo-enforcement` turns the suite's committed review artifacts into an optional GitHub merge
