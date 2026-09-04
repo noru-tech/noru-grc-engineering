@@ -387,6 +387,8 @@ USAGE = """usage:
   enforce.py validate --repo=<path> --as-of=YYYY-MM-DD [--suite-root=<path>]
   enforce.py baseline propose --repo=<path> --as-of=YYYY-MM-DD [--suite-root=<path>]
   enforce.py baseline check --repo=<path> --as-of=YYYY-MM-DD [--suite-root=<path>]
+  enforce.py baseline worklist --repo=<path> --as-of=YYYY-MM-DD [--suite-root=<path>]
+  enforce.py baseline inspect --repo=<path> --as-of=YYYY-MM-DD --fingerprint=sha256:<hex>
   enforce.py policy --repo=<path>
 Common: [--policy=<path>] [--registry=<path>] [--output=json|text] [--quiet]
 """
@@ -517,8 +519,8 @@ def parse_args(argv):
     index = 1
     subcommand = None
     if command == "baseline":
-        if len(argv) < 2 or argv[1] not in {"propose", "check"}:
-            raise ValueError("baseline requires propose or check")
+        if len(argv) < 2 or argv[1] not in {"propose", "check", "worklist", "inspect"}:
+            raise ValueError("baseline requires propose, check, worklist, or inspect")
         subcommand = argv[1]
         index = 2
     elif command not in {"validate", "policy"}:
@@ -531,6 +533,7 @@ def parse_args(argv):
         "policy": None,
         "registry": DEFAULT_REGISTRY,
         "as_of": None,
+        "fingerprint": None,
         "json": False,
         "quiet": False,
     }
@@ -545,6 +548,8 @@ def parse_args(argv):
             opts["registry"] = pathlib.Path(arg.split("=", 1)[1]).resolve()
         elif arg.startswith("--as-of="):
             opts["as_of"] = parse_date(arg.split("=", 1)[1], "--as-of")
+        elif arg.startswith("--fingerprint="):
+            opts["fingerprint"] = arg.split("=", 1)[1]
         elif arg == "--output=json":
             opts["json"] = True
         elif arg == "--output=text":
@@ -558,6 +563,10 @@ def parse_args(argv):
     opts["policy"] = opts["policy"] or opts["repo"] / ".noru" / "enforcement.yml"
     if command != "policy" and opts["as_of"] is None:
         raise ValueError("--as-of=YYYY-MM-DD is required for deterministic enforcement")
+    if subcommand == "inspect" and not re.fullmatch(
+        r"sha256:[0-9a-f]{64}", opts["fingerprint"] or ""
+    ):
+        raise ValueError("baseline inspect requires --fingerprint=sha256:<64 lowercase hex>")
     return opts
 
 
@@ -609,6 +618,7 @@ def violation_from_finding(piece, finding):
         or "repository"
     )
     normalized = normalize_value({**finding, "kind": rule})
+    evidence_refs = finding.get("refs") or ([finding["ref"]] if finding.get("ref") else [])
     identity = {"piece": piece, "rule": rule, "subject": subject, "violation": normalized}
     return {
         "piece": piece,
@@ -616,6 +626,7 @@ def violation_from_finding(piece, finding):
         "subject": subject,
         "fingerprint": "sha256:" + digest(identity),
         "message": redact(finding.get("message", "")),
+        "evidence_refs": [redact(value) for value in evidence_refs],
         "details": normalized,
         "baselineable": rule not in NEVER_BASELINE,
     }
@@ -849,7 +860,144 @@ def proposal(opts, policy, report):
     return {"ok": True, "candidate": str(path.relative_to(opts["repo"])), **candidate}
 
 
+def review_command(piece):
+    return f"/{piece}:scan" if piece != "repo-enforcement" else "/repo-enforcement:verify"
+
+
+def work_item(status, as_of, violation=None, acceptance=None):
+    violation = violation or {}
+    acceptance = acceptance or {}
+    piece = violation.get("piece") or acceptance.get("piece") or "repo-enforcement"
+    expires_at = acceptance.get("expires_at")
+    days_remaining = None
+    if expires_at:
+        try:
+            days_remaining = (parse_date(expires_at, "expires_at") - as_of).days
+        except ValueError:
+            pass
+    urgency = "blocking" if status in {"expired", "unbaselined"} else (
+        "cleanup" if status == "stale" else
+        "due_soon" if days_remaining is not None and days_remaining <= 7 else
+        "scheduled"
+    )
+    next_actions = {
+        "accepted": "Resolve the underlying review, then remove the stale baseline entry in the same reviewed PR.",
+        "expired": "Resolve now; the temporary acceptance has expired and cannot permit merge.",
+        "stale": "Verify why the violation disappeared, then remove this unused baseline entry in the same reviewed PR.",
+        "unbaselined": "Resolve before merge; this new or mutated violation is not accepted by the baseline.",
+    }
+    return {
+        "status": status,
+        "urgency": urgency,
+        "piece": piece,
+        "rule": violation.get("rule") or acceptance.get("rule") or "unknown",
+        "subject": violation.get("subject") or acceptance.get("subject") or "repository",
+        "fingerprint": violation.get("fingerprint") or acceptance.get("fingerprint"),
+        "owner": acceptance.get("owner"),
+        "decided_at": acceptance.get("decided_at"),
+        "expires_at": expires_at,
+        "days_remaining": days_remaining,
+        "message": violation.get("message", ""),
+        "evidence_refs": violation.get("evidence_refs", []),
+        "details": violation.get("details", {}),
+        "review_command": review_command(piece),
+        "inspect_command": (
+            "/repo-enforcement:work "
+            + (violation.get("fingerprint") or acceptance.get("fingerprint") or "")
+        ),
+        "next_action": next_actions[status],
+    }
+
+
+def make_worklist(opts, report):
+    items = []
+    for row in report["baselined_violations"]:
+        items.append(work_item("accepted", opts["as_of"], row, row.get("acceptance")))
+    for row in report["expired_exceptions"]:
+        items.append(work_item("expired", opts["as_of"], row.get("current_violation"), row))
+    for row in report["stale_baseline_entries"]:
+        items.append(work_item("stale", opts["as_of"], acceptance=row))
+    for row in report["new_violations"]:
+        items.append(work_item("unbaselined", opts["as_of"], violation=row))
+    priority = {"blocking": 0, "cleanup": 1, "due_soon": 2, "scheduled": 3}
+    items.sort(
+        key=lambda row: (
+            priority[row["urgency"]],
+            row["expires_at"] or "9999-12-31",
+            row["piece"],
+            row["rule"],
+            row["subject"],
+        )
+    )
+    by_piece = {}
+    by_owner = {}
+    for row in items:
+        by_piece[row["piece"]] = by_piece.get(row["piece"], 0) + 1
+        if row["owner"]:
+            by_owner[row["owner"]] = by_owner.get(row["owner"], 0) + 1
+    return {
+        "ok": report["ok"],
+        "repository": report["repository"],
+        "policy_digest": report["policy_digest"],
+        "as_of": opts["as_of"].isoformat(),
+        "summary": {
+            "baseline_debt": sum(row["status"] in {"accepted", "expired"} for row in items),
+            "active": sum(row["status"] == "accepted" for row in items),
+            "expired": sum(row["status"] == "expired" for row in items),
+            "stale_cleanup": sum(row["status"] == "stale" for row in items),
+            "unbaselined_blockers": sum(row["status"] == "unbaselined" for row in items),
+            "due_within_7_days": sum(row["urgency"] == "due_soon" for row in items),
+            "by_piece": dict(sorted(by_piece.items())),
+            "by_owner": dict(sorted(by_owner.items())),
+        },
+        "items": items,
+    }
+
+
+def inspect_work_item(opts, report):
+    worklist = make_worklist(opts, report)
+    matches = [
+        row for row in worklist["items"] if row["fingerprint"] == opts["fingerprint"]
+    ]
+    if not matches:
+        return {
+            "ok": False,
+            "found": False,
+            "fingerprint": opts["fingerprint"],
+            "message": "No current violation or baseline entry has this fingerprint.",
+        }
+    return {
+        "ok": True,
+        "found": True,
+        "item": matches[0],
+        "workflow": [
+            "Run the owning piece review command and resolve the underlying judgement.",
+            "Re-run baseline check and confirm the old violation has disappeared.",
+            "Review why the baseline entry became stale before removing it in the same PR.",
+            "After merge, run the owning piece diff and explicitly confirm any Noru push.",
+        ],
+    }
+
+
 def render_text(payload):
+    if "summary" in payload and "items" in payload:
+        summary = payload["summary"]
+        lines = [
+            f"Baseline debt: {summary['baseline_debt']}",
+            f"Expired: {summary['expired']} | due within 7 days: {summary['due_within_7_days']} | "
+            f"stale cleanup: {summary['stale_cleanup']} | new blockers: {summary['unbaselined_blockers']}",
+        ]
+        for index, row in enumerate(payload["items"], start=1):
+            owner = f" | owner: {row['owner']}" if row["owner"] else ""
+            expiry = f" | expires: {row['expires_at']}" if row["expires_at"] else ""
+            lines.extend(
+                [
+                    f"{index}. [{row['urgency']}] {row['piece']} / {row['rule']}",
+                    f"   {row['subject']}{owner}{expiry}",
+                    f"   Next: {row['review_command']} then {row['inspect_command']}",
+                ]
+            )
+        return "\n".join(lines)
     if "new_violations" not in payload:
         return json.dumps(payload, indent=2, sort_keys=True)
     lines = [
@@ -883,6 +1031,12 @@ def main(argv):
             if opts["command"] == "baseline" and opts["subcommand"] == "propose":
                 payload = proposal(opts, policy, report)
                 exit_code = 0
+            elif opts["command"] == "baseline" and opts["subcommand"] == "worklist":
+                payload = make_worklist(opts, report)
+                exit_code = 0 if payload["ok"] else 1
+            elif opts["command"] == "baseline" and opts["subcommand"] == "inspect":
+                payload = inspect_work_item(opts, report)
+                exit_code = 0 if payload["ok"] else 1
             else:
                 payload = report
                 exit_code = 0 if report["ok"] else 1

@@ -26,6 +26,15 @@ entry needs a named person, rationale, decision date, and expiry. New, mutated, 
 resolved, or reintroduced debt fails. Invalid records, tooling failures, credential exposure,
 expired exceptions, stale plans, and GitHub/workflow drift cannot be baselined.
 
+Use `/repo-enforcement:status` for the derived worklist. It groups current debt by owning piece and
+named person and sorts blockers, stale cleanup, entries due within seven days, and scheduled debt.
+`/repo-enforcement:work <fingerprint>` inspects one exact item, routes it to the owning piece, and
+prepares the reviewable manifest/lock/baseline change. When remediation makes the old fingerprint
+disappear, its baseline entry deliberately becomes stale and must be reviewed and removed in the
+same PR. This catches both accidental reintroduction and a detector that merely stopped reporting.
+After merge, Noru publication is still shown as separate work through the piece's diff and confirmed
+push.
+
 The pull-request workflow runs on every PR with no path filter. It has only `contents: read`, carries
 no Noru or GitHub administration credential, passes the current UTC date explicitly, and invokes the
 released action at the exact SHA recorded in policy. The action runs every configured piece

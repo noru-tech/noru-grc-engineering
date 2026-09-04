@@ -100,6 +100,7 @@ def policy_validation_tests(results, repo):
             for row in payload["new_violations"] if row["baselineable"]
         ],
     }
+    accepted["violations"][0]["expires_at"] = "2026-09-10"
     baseline = repo / ".noru" / "enforcement-baseline.json"
     baseline.write_text(json.dumps(accepted, indent=2) + "\n", encoding="utf-8")
     second = run([
@@ -109,6 +110,65 @@ def policy_validation_tests(results, repo):
     ])
     second_payload = json.loads(second.stdout)
     results.check("exact live debt is accepted by the ratchet", second.returncode == 0 and not second_payload["new_violations"] and len(second_payload["baselined_violations"]) == len(accepted["violations"]), second_payload)
+
+    before_worklist = baseline.read_bytes()
+    worklist = run([
+        sys.executable, str(ENFORCE), "baseline", "worklist", f"--repo={repo}",
+        f"--suite-root={ROOT}", f"--registry={REGISTRY}", "--as-of=2026-09-04",
+        "--output=json", "--quiet",
+    ])
+    worklist_payload = json.loads(worklist.stdout)
+    results.check(
+        "worklist groups accepted debt by piece and named owner",
+        worklist.returncode == 0
+        and worklist_payload["summary"]["baseline_debt"] == len(accepted["violations"])
+        and worklist_payload["summary"]["by_owner"] == {"Dana Okafor": len(accepted["violations"])},
+        worklist_payload,
+    )
+    results.check(
+        "worklist prioritizes baseline entries nearing expiry",
+        worklist_payload["summary"]["due_within_7_days"] == 1
+        and worklist_payload["items"][0]["urgency"] == "due_soon",
+        worklist_payload,
+    )
+    worklist_text = run([
+        sys.executable, str(ENFORCE), "baseline", "worklist", f"--repo={repo}",
+        f"--suite-root={ROOT}", f"--registry={REGISTRY}", "--as-of=2026-09-04",
+        "--output=text",
+    ])
+    results.check(
+        "worklist text is concise and gives the next exact work command",
+        worklist_text.returncode == 0 and "Baseline debt: 2" in worklist_text.stdout
+        and "/repo-enforcement:work sha256:" in worklist_text.stdout,
+        worklist_text.stderr or worklist_text.stdout,
+    )
+    selected = worklist_payload["items"][0]
+    inspected = run([
+        sys.executable, str(ENFORCE), "baseline", "inspect", f"--repo={repo}",
+        f"--suite-root={ROOT}", f"--registry={REGISTRY}", "--as-of=2026-09-04",
+        f"--fingerprint={selected['fingerprint']}", "--output=json", "--quiet",
+    ])
+    inspected_payload = json.loads(inspected.stdout)
+    results.check(
+        "inspect returns one exact item and its piece review route",
+        inspected.returncode == 0 and inspected_payload["found"]
+        and inspected_payload["item"]["review_command"].startswith("/ai-inventory:"),
+        inspected_payload,
+    )
+    unknown = run([
+        sys.executable, str(ENFORCE), "baseline", "inspect", f"--repo={repo}",
+        f"--suite-root={ROOT}", f"--registry={REGISTRY}", "--as-of=2026-09-04",
+        "--fingerprint=sha256:" + "0" * 64, "--output=json", "--quiet",
+    ])
+    results.check(
+        "inspect fails explicitly for an unknown fingerprint",
+        unknown.returncode == 1 and json.loads(unknown.stdout)["found"] is False,
+        unknown.stderr or unknown.stdout,
+    )
+    results.check(
+        "worklist and inspect do not modify the accepted baseline",
+        baseline.read_bytes() == before_worklist,
+    )
 
     accepted["violations"][0]["fingerprint"] = "sha256:" + "f" * 64
     baseline.write_text(json.dumps(accepted, indent=2) + "\n", encoding="utf-8")

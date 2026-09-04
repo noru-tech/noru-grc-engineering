@@ -18,6 +18,10 @@ one version number; the release workflow fails if they disagree.
 - Read-only verification detects disabled or weakened rulesets, bypass actors, rebound check
   integrations, missing or changed workflow pins, absent CODEOWNERS protection, and inherited
   organization policy. GitHub administration remains separate from Noru publication.
+- The ratchet baseline now has a derived worklist grouped by owner and piece plus exact-item
+  inspection. The guided work command routes remediation through the owning piece, requires the
+  stale acceptance to be removed in the same reviewed PR, and keeps post-merge Noru publication
+  separate.
 
 ## 0.6.0 — 2026-09-04
 

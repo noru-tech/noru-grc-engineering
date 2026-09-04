@@ -21,6 +21,10 @@ piece's reviewed `diff -> explicit confirmation -> push` flow.
   `../../scripts/github-apply.mjs --confirm`; never reuse a stale plan.
 - **Status or verify:** use the read-only GitHub scripts and run the offline enforcement validator
   with an explicit `--as-of` date.
+- **Burn down baseline debt:** run `../../scripts/enforce.py baseline worklist` to prioritize current
+  items. For one exact fingerprint, run `baseline inspect`, read
+  `../../references/baseline-workflow.md`, and route to the returned piece review command. Verify
+  the violation disappeared for the intended reason before proposing removal of its stale entry.
 
 ## Invariants
 
@@ -31,6 +35,8 @@ piece's reviewed `diff -> explicit confirmation -> push` flow.
   named human accountable for interpretations, exceptions, or risk decisions.
 - Ratchet candidates are proposals. Populate owner, rationale, dates, and expiry from an accountable
   human before committing a baseline.
+- Worklist and inspect are derived, read-only views. Do not add manually maintained workflow status
+  to the baseline, approve a classification, or remove an entry merely because detection stopped.
 - Ruleset apply is repository-scope in this release. Organisation rulesets are inspect/verify and a
   documented rollout path; do not pretend an organisation mutation occurred.
 - No deletion operation is planned. The utility owns a dedicated ruleset and leaves unrelated rules
