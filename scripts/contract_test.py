@@ -173,9 +173,11 @@ def check_item_2(piece, decl, fail, workdir):
     # Determinism: same repository state must produce byte-identical derived output. Two copies of
     # the same fixture repo, so nothing either run writes can influence the other.
     digests = []
+    targets = []
     for i in (0, 1):
         target = workdir / f"{piece.name}-determinism-{i}"
         shutil.copytree(FIXTURE_REPO, target)
+        targets.append(target)
         result = run(["node", str(collector), f"--repo={target}", "--output=json", "--quiet"])
         if result.returncode not in (0, 1):
             fail.add(
@@ -196,6 +198,49 @@ def check_item_2(piece, decl, fail, workdir):
             "collector is not deterministic: two runs over identical repository state produced "
             "different derived output",
         )
+
+    reconcile_decl = decl.get("reconciler")
+    if reconcile_decl:
+        reconciler = piece / reconcile_decl["entrypoint"]
+        if not reconciler.is_file():
+            fail.add(piece.name, 2, f"reconciler {reconcile_decl['entrypoint']} does not exist")
+        else:
+            reconcile_source = reconciler.read_text(encoding="utf-8")
+            for token in NETWORK_TOKENS:
+                if token in reconcile_source:
+                    fail.add(
+                        piece.name,
+                        2,
+                        f"reconciler uses '{token}' — reconciliation must be offline",
+                    )
+            executable = "node" if reconcile_decl.get("runtime") == "node" else "python3"
+            outputs = []
+            for target in targets:
+                result = run(
+                    [
+                        executable,
+                        str(reconciler),
+                        f"--repo={target}",
+                        "--output=json",
+                        "--quiet",
+                    ]
+                )
+                if result.returncode != 0:
+                    fail.add(
+                        piece.name,
+                        2,
+                        f"reconciler exited {result.returncode} on the fixture repo: "
+                        f"{(result.stderr or result.stdout).strip()[:300]}",
+                    )
+                    break
+                outputs.append(result.stdout)
+            if len(outputs) == 2 and outputs[0] != outputs[1]:
+                fail.add(
+                    piece.name,
+                    2,
+                    "reconciler is not deterministic: identical observations produced different "
+                    "actions",
+                )
 
     # A declared output is a deliverable a human is handed, so the one thing that can be checked
     # from here is that the declaration and the documentation agree. An output nobody documents is

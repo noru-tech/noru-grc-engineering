@@ -27,6 +27,12 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
 - [`iac-scan.schema.json`](./iac-scan.schema.json) — the `.noru/iac-scan.yml` artifact
 - [`change-control.schema.json`](./change-control.schema.json) — the `.noru/change-control.yml`
   artifact
+- [`privacy-datamap.schema.json`](./privacy-datamap.schema.json) — the accepted
+  `.noru/privacy-datamap.yml` decisions
+- [`privacy-datamap-lock.schema.json`](./privacy-datamap-lock.schema.json) — the accepted structural
+  observation paired with that manifest
+- [`privacy-datamap-proposals.schema.json`](./privacy-datamap-proposals.schema.json) — the
+  non-authoritative, cache-only work queue selected for agent analysis
 - [`privacy-baseline.schema.json`](./privacy-baseline.schema.json) — `.noru/privacy-baseline.yml`,
   the agreed privacy taxonomy the CI policy gate is judged against. Not a piece artifact: a floor
   pinned from Noru so the gate can run with no credential
@@ -36,7 +42,7 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
 | # | Requirement | Enforced by |
 |---|---|---|
 | 1 | `.claude-plugin/plugin.json` + one skill + three commands: `:scan`, `:diff`, `:push` | `contract_test.py::check_item_1` — manifest parses, `piece.json.skill` and all three `commands` exist on disk, command frontmatter names match |
-| 2 | A **collector** producing a typed, human-reviewable, git-committable manifest at `.noru/<piece>.yml`. Deterministic. No network. | `check_item_2` — `artifact` matches `^\.noru/`, collector source contains no socket-opening API, and the collector is run twice on a fixture repo and its derived output diffed byte for byte. Any path declared in the optional `outputs[]` must appear in the piece README and must not be the manifest itself |
+| 2 | A **collector** producing a typed, human-reviewable, git-committable manifest at `.noru/<piece>.yml`. Deterministic. No network. A piece may also declare an offline deterministic reconciler for comparing current facts with an accepted local baseline. | `check_item_2` — `artifact` matches `^\.noru/`, collector source contains no socket-opening API, and the collector is run twice on a fixture repo and its derived output diffed byte for byte. A declared reconciler is also run twice and its actions compared. Any path declared in the optional `outputs[]` must appear in the piece README and must not be the manifest itself |
 | 3 | A **validator**: stdlib only, no installs, no network, bundled vocabulary, "did you mean …?" hints, exit codes `0` valid / `1` invalid / `2` usage | `check_item_3` — the validator is executed against every declared fixture: valid → 0, each invalid → 1 *and* the expected message, no argument → 2. Imports are checked against the stdlib list |
 | 4 | A **push** that is *one* idempotent operation carrying `slug` + `commitSha` + `branch` — never an unkeyed fan-out of 50 creates | `check_item_4` — every declared operation has an idempotency key, `verified_at` cites the public documentation the behaviour was read from, `client_probe` operations must record what is undocumented, and `keyed_upsert` mode must describe the single operation it would collapse into |
 | 5 | **`:diff` before `:push`** — show what would change in Noru; writes need explicit confirmation | `check_item_5` — the push entrypoint is executed three ways and each refusal is a different exit code: no plan at all → `1`, a plan bound to different manifest bytes → `1` even with `--confirm`, a fresh plan with no `--confirm` → `2`. `1` says the plan is missing or stale and `:diff` has to run again; `2` says a human has not agreed to this one |

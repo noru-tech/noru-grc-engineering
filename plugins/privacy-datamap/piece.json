@@ -18,6 +18,12 @@
       ".noru/.cache/privacy-datamap-queue.json"
     ]
   },
+  "reconciler": {
+    "entrypoint": "scripts/reconcile.py",
+    "runtime": "python3-stdlib",
+    "deterministic": true,
+    "network": false
+  },
   "validator": {
     "entrypoint": "scripts/validate_manifest.py",
     "runtime": "python3-stdlib",

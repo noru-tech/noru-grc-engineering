@@ -12,6 +12,11 @@
 | `/privacy-datamap:diff` | no | Reads current state, prints the exact plan |
 | `/privacy-datamap:push` | **yes** | Executes the confirmed plan |
 
+`scan` now has two deterministic local phases. `collect.mjs` observes the repository; then
+`reconcile.py` compares those observations with the last accepted lock. The reconciler emits the
+small set of new or materially changed ambiguous fields that need agent analysis. It never calls a
+model itself, and unchanged fields are never reclassified.
+
 ## What it reads
 
 | Format | Files | What it takes |
@@ -97,6 +102,32 @@ A manifest carrying any `needs_review: true` **cannot be pushed**. That is the m
 lint: a confidently wrong data category is worse than a gap, because the gap gets reviewed and the
 wrong answer gets signed.
 
+## Incremental reconciliation
+
+The first completed review is sealed in `.noru/privacy-datamap.lock.json`. The lock contains stable
+field identities, normalized structural fingerprints and citations. It contains no classifications
+or model output: accepted meaning stays in `.noru/privacy-datamap.yml`.
+
+On later scans `scripts/reconcile.py` compares every current field with that observation:
+
+| Result | What happens |
+|---|---|
+| same semantic fingerprint and citation | carry the accepted decision forward |
+| same fingerprint, different line | refresh evidence; no agent |
+| new or structurally changed exact-table field | classify deterministically; re-sign the collection |
+| new or structurally changed ambiguous field | add only that field to the agent proposal queue |
+| removed field | remove it from the candidate; re-sign the collection |
+
+The reconciler writes `.noru/.cache/privacy-datamap.reconciliation.json`,
+`.noru/.cache/privacy-datamap.proposals.json` and
+`.noru/.cache/privacy-datamap.candidate.yml`. They are working files and must not be committed. The
+candidate never overwrites the accepted manifest. After the candidate has been resolved and
+reviewed, `reconcile.py --seal` refuses to write the lock unless the manifest is valid and matches
+the current observations.
+
+A valid manifest from a release before locks existed enters migration mode. Its decisions are
+carried forward and its first lock is seeded without sending every field back through an agent.
+
 The claim unit is the **collection**, not the field. One person signs for "these are the categories
 in this table"; per-field attribution would mean five hundred interpretation blocks on a
 five-hundred-column schema, which is a form nobody fills in. Field-level uncertainty still shows,
@@ -144,9 +175,10 @@ deterministic and the staleness check happens where it belongs, in CI or before 
 ## Accuracy
 
 The validator guarantees every key it emits is a **real** Fideslang key. It cannot guarantee the
-judgement is **right**. Classification is a model inference over a lookup table; review the
-`needs_review` items and spot-check the rest before treating the output as authoritative. This
-accelerates a data map. It does not replace privacy review.
+judgement is **right**. Exact-name classifications are deterministic table lookups; classifications
+proposed for ambiguous names may use agent inference over the repository context. Review those
+proposals and spot-check the deterministic matches before treating the output as authoritative.
+This accelerates a data map. It does not replace accountable privacy sign-off.
 
 ## Scopes
 
@@ -163,11 +195,16 @@ Least privilege. Start read-only.
 tools this piece reads. `write:datamaps` is documented as "Push fideslang privacy manifests
 (`.fides/datamap.yml`) from CI" — which is this piece, stated by the API itself.
 
-## Artifact
+## Artifacts
 
 `.noru/privacy-datamap.yml`, schema at [`contract/privacy-datamap.schema.json`](../../contract/privacy-datamap.schema.json).
 
 Commit it — it is the reviewable artifact. Keep `.noru/.cache/` out of git.
+
+`.noru/privacy-datamap.lock.json`, schema at
+[`contract/privacy-datamap-lock.schema.json`](../../contract/privacy-datamap-lock.schema.json), is
+the machine-generated observation that was accepted with the manifest. Commit it too; never edit it
+by hand.
 
 ## What it renders
 
@@ -219,7 +256,9 @@ not, that is a bug — `scripts/test_idempotency.py` asserts it.
 
 ```bash
 node    plugins/privacy-datamap/scripts/collect.mjs --repo=. --output=json
+python3 plugins/privacy-datamap/scripts/reconcile.py --repo=. --output=json
 python3 plugins/privacy-datamap/scripts/validate_manifest.py .noru/privacy-datamap.yml
+python3 plugins/privacy-datamap/scripts/reconcile.py --repo=. --seal
 node    plugins/privacy-datamap/scripts/diff.mjs --repo=.
 node    plugins/privacy-datamap/scripts/push.mjs --repo=. --confirm
 ```

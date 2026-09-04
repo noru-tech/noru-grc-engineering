@@ -6,6 +6,15 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Added
+
+- `privacy-datamap` now records accepted machine observations in a committed lock and reconciles
+  later scans per field. Unchanged classifications carry forward, line movement is citation-only,
+  exact additions remain deterministic, and only new or materially changed ambiguous fields enter
+  the non-authoritative agent proposal queue.
+- Pre-lock privacy manifests have an explicit migration path, and CI drift reports include the same
+  granular reconciliation counts used by the agent workflow without invoking a model.
+
 ## 0.5.0 — 2026-09-03
 
 ### Added
