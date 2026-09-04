@@ -144,10 +144,10 @@ reviews:
   require_thread_resolution: true
 
 ownership:
-  grc_reviewers: ${opts.grc}
-  privacy_reviewers: ${opts.privacy}
-  security_reviewers: ${opts.security}
-  break_glass: ${opts.breakGlass}
+  grc_reviewers: "${opts.grc}"
+  privacy_reviewers: "${opts.privacy}"
+  security_reviewers: "${opts.security}"
+  break_glass: "${opts.breakGlass}"
 
 exceptions:
   maximum_days: ${opts.maximumDays}
