@@ -452,6 +452,62 @@ def step_scan(report, piece_dir, decl, repo, manifest_path, on_missing_prereq):
     if coverage_outcome == "tooling":
         return "tooling"
 
+    # A piece may declare a second, finer deterministic comparison. The collector still owns the
+    # global freshness gate; a reconciler explains drift per entity so CI and an agent see the same
+    # bounded queue. It is deliberately a local process, never a model call.
+    reconciliation = None
+    reconcile_decl = decl.get("reconciler")
+    reconciler = piece_dir / reconcile_decl["entrypoint"] if reconcile_decl else None
+    if reconciler is not None:
+        if not reconciler.is_file():
+            report.step(
+                "scan", "error", detail=f"reconciler entrypoint {reconciler} does not exist"
+            )
+            return "tooling"
+        executable = "node" if reconcile_decl.get("runtime") == "node" else PYTHON
+        reconciled, reconcile_failure = run(
+            [executable, str(reconciler), f"--repo={repo}", "--output=json", "--quiet"]
+        )
+        if reconcile_failure:
+            report.step("scan", "error", detail=redact(reconcile_failure))
+            return "tooling"
+        if reconciled.returncode != 0:
+            report.step(
+                "scan",
+                "error",
+                detail=first_error_line(reconciled) or f"reconciler exit {reconciled.returncode}",
+            )
+            return "tooling"
+        reconciliation = parse_child_json(reconciled)
+        if not isinstance(reconciliation, dict):
+            report.step("scan", "error", detail="reconciler did not return a JSON object")
+            return "tooling"
+
+    if (
+        completed.returncode == 0
+        and reconciliation is not None
+        and reconciliation.get("drift") is True
+    ):
+        explanation = {
+            "reconciliation": {
+                "mode": reconciliation.get("mode"),
+                "counts": reconciliation.get("counts"),
+                "proposal_required": reconciliation.get("proposal_required"),
+                "collection_review_required": reconciliation.get(
+                    "collection_review_required"
+                ),
+            }
+        }
+        report.step("scan", "fail", derived_digest=(summary or {}).get("derived_digest"))
+        report.find(
+            "drift",
+            "the accepted observation lock no longer matches the repository or manifest",
+            manifest=decl["artifact"],
+            derived_digest=(summary or {}).get("derived_digest"),
+            explanation=explanation,
+        )
+        return "finding"
+
     if completed.returncode == 0:
         report.step("scan", "pass", derived_digest=(summary or {}).get("derived_digest"))
         return "ok"
@@ -459,6 +515,15 @@ def step_scan(report, piece_dir, decl, repo, manifest_path, on_missing_prereq):
     if completed.returncode == 1 and summary is not None and summary.get("drift") is True:
         derived_rel = summary.get("derived_facts") or f".noru/.cache/{decl['piece']}.derived.json"
         explanation = explain_drift(repo, manifest_path, repo / derived_rel)
+        if reconciliation is not None:
+            explanation["reconciliation"] = {
+                "mode": reconciliation.get("mode"),
+                "counts": reconciliation.get("counts"),
+                "proposal_required": reconciliation.get("proposal_required"),
+                "collection_review_required": reconciliation.get(
+                    "collection_review_required"
+                ),
+            }
         report.step("scan", "fail", derived_digest=summary.get("derived_digest"))
         report.find("drift", drift_message(manifest_path, decl), manifest=decl["artifact"],
                     derived_digest=summary.get("derived_digest"), explanation=explanation)

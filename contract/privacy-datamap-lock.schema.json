@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/privacy-datamap-lock.schema.json",
+  "title": "Noru privacy data-map accepted observation lock",
+  "description": "Machine-generated structural observations accepted with .noru/privacy-datamap.yml. It records what was reviewed, never what the data means.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "piece", "source", "taxonomy_digest", "accepted_manifest_sha256", "collections", "entities"],
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "piece": { "const": "privacy-datamap" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "derived_digest"],
+      "properties": {
+        "slug": { "type": "string", "minLength": 1 },
+        "derived_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "taxonomy_digest": { "$ref": "#/$defs/digest" },
+    "accepted_manifest_sha256": { "$ref": "#/$defs/digest" },
+    "collections": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/observation" }
+    },
+    "entities": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/entity" }
+    }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "ref": { "type": "string", "pattern": "^[^:\\s][^:]*:[0-9]+$" },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["semantic_digest", "refs"],
+      "properties": {
+        "semantic_digest": { "$ref": "#/$defs/digest" },
+        "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "shape", "semantic_digest", "refs"],
+      "properties": {
+        "kind": { "const": "field" },
+        "shape": { "type": "string" },
+        "semantic_digest": { "$ref": "#/$defs/digest" },
+        "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } }
+      }
+    }
+  }
+}

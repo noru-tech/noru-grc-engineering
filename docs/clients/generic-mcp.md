@@ -125,6 +125,11 @@ display form through a manifest is how ids drift.
 9. verify   re-run 4-5; every operation must now be "skip"
 ```
 
+For `privacy-datamap`, step 1 also runs `scripts/reconcile.py`. It compares the scan with the
+accepted lock and selects only unresolved additions or material changes for agent analysis. After
+step 3 succeeds, run `reconcile.py --seal`; commit the resulting
+`.noru/privacy-datamap.lock.json` with the manifest. Neither command opens a network connection.
+
 Steps 5 and 6 are not optional and not reorderable. `push.mjs` exits `2` without `--confirm` and
 exits `1` if the manifest changed after the plan was written.
 

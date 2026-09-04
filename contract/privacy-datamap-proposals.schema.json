@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/privacy-datamap-proposals.schema.json",
+  "title": "Noru privacy data-map non-authoritative agent proposal queue",
+  "description": "Cache-only work selected by the deterministic reconciler. Entries are suggestions and cannot update the accepted manifest or lock by themselves.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "piece", "observation_digest", "proposals"],
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "piece": { "const": "privacy-datamap" },
+    "observation_digest": { "$ref": "#/$defs/digest" },
+    "proposals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/proposal" }
+    }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_id", "dataset", "collection", "field", "shape", "refs", "observation_digest", "reason", "proposed_categories", "rationale", "confidence", "status"],
+      "properties": {
+        "entity_id": { "type": "string", "minLength": 3 },
+        "dataset": { "type": "string" },
+        "collection": { "type": "string", "minLength": 1 },
+        "field": { "type": "string", "minLength": 1 },
+        "shape": { "type": "string" },
+        "refs": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[^:\\s][^:]*:[0-9]+$" } },
+        "observation_digest": { "$ref": "#/$defs/digest" },
+        "reason": { "enum": ["new field", "materially changed field"] },
+        "proposed_categories": { "type": "array", "items": { "type": "string" } },
+        "rationale": { "type": "string" },
+        "confidence": { "type": ["string", "null"] },
+        "status": { "enum": ["requested", "proposed", "rejected", "accepted"] }
+      }
+    }
+  }
+}

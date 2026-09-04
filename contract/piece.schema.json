@@ -111,6 +111,18 @@
         }
       }
     },
+    "reconciler": {
+      "description": "Optional deterministic, offline comparison between current derived facts and an accepted local baseline. It may write cache-only candidates and work queues, but never the accepted manifest or a remote system unless an explicit sealing mode validates both first.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entrypoint", "runtime", "deterministic", "network"],
+      "properties": {
+        "entrypoint": { "$ref": "#/$defs/pluginRelativePath" },
+        "runtime": { "enum": ["node", "python3-stdlib"] },
+        "deterministic": { "const": true },
+        "network": { "const": false }
+      }
+    },
     "validator": {
       "description": "The self-contained validator. (Requirement 3)",
       "type": "object",

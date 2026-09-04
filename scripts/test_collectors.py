@@ -39,6 +39,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from jsonschema_mini import validate as validate_json_schema  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 AI_INVENTORY = ROOT / "plugins" / "ai-inventory"
 COLLECTOR = AI_INVENTORY / "scripts" / "collect.mjs"
@@ -1373,6 +1376,211 @@ def test_datamap_never_overwrites_a_reviewed_manifest(results, tmp):
     )
 
 
+def accepted_datamap_text(digest):
+    names = ["id", "email", "password_hash", "weird_column", "created_at"]
+    structure = hashlib.sha256("\n".join(sorted(names)).encode("utf-8")).hexdigest()
+    return f"""version: 0.5.0
+piece: privacy-datamap
+source:
+  slug: fixture/privacy-map
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: privacy-datamap@0.5.0
+  derived_digest: {digest}
+dataset:
+  - fides_key: db_schema
+    name: db/schema.sql
+    collections:
+      - name: accounts
+        refs:
+          - "db/schema.sql:1"
+        structure_digest: {structure}
+        interpretation:
+          owner: Dana Okafor
+          decided_at: "2026-08-20"
+          expires_at: "2027-08-20"
+          rationale: Reviewed the account schema and its application semantics.
+        fields:
+          - name: id
+            data_categories: []
+            refs: ["db/schema.sql:2"]
+          - name: email
+            data_categories: [user.contact.email]
+            refs: ["db/schema.sql:3"]
+          - name: password_hash
+            data_categories: [user.authorization.password]
+            refs: ["db/schema.sql:4"]
+          - name: weird_column
+            data_categories: []
+            refs: ["db/schema.sql:5"]
+          - name: created_at
+            data_categories: []
+            refs: ["db/schema.sql:6"]
+system:
+  - fides_key: repository
+    name: repository
+    system_type: Application
+    dataset_references: [db_schema]
+    privacy_declarations:
+      - name: Operate customer accounts
+        data_use: essential.service
+        data_subjects: [customer]
+        data_categories: [user.contact.email, user.authorization.password]
+        refs: ["db/schema.sql:1"]
+        interpretation:
+          owner: Dana Okafor
+          decided_at: "2026-08-20"
+          expires_at: "2027-08-20"
+          rationale: Account data is used to provide authentication and service access.
+"""
+
+
+def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
+    """The agent queue is selected by facts, not by a fresh model pass over the repository."""
+    repo = write_files(pathlib.Path(tmp) / "privacy-reconcile", {"db/schema.sql": SQL_FIXTURE})
+    summary, _derived = datamap_scan(repo)
+    reconcile = PRIVACY_DATAMAP / "scripts" / "reconcile.py"
+
+    bootstrap = run(
+        ["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"]
+    )
+    if not results.check(
+        "[privacy-datamap] a first scan enters bootstrap mode",
+        bootstrap.returncode == 0 and json.loads(bootstrap.stdout)["mode"] == "bootstrap",
+        (bootstrap.stderr or bootstrap.stdout)[:300],
+    ):
+        return
+    bootstrap_payload = json.loads(bootstrap.stdout)
+    results.check(
+        "[privacy-datamap] bootstrap sends only ambiguous fields to the agent",
+        [row["field"] for row in bootstrap_payload["proposal_required"]] == ["weird_column"],
+        bootstrap_payload["proposal_required"],
+    )
+
+    manifest = repo / ".noru" / "privacy-datamap.yml"
+    scan_state = json.loads(
+        (repo / ".noru" / ".cache" / "privacy-datamap.scan.json").read_text(encoding="utf-8")
+    )
+    manifest.write_text(
+        accepted_datamap_text(scan_state["legacy_derived_digest"]), encoding="utf-8"
+    )
+    migrated = run(
+        ["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"]
+    )
+    migrated_payload = json.loads(migrated.stdout)
+    results.check(
+        "[privacy-datamap] a reviewed pre-lock manifest migrates without agent reclassification",
+        migrated.returncode == 0
+        and migrated_payload["mode"] == "migration"
+        and migrated_payload["counts"]["proposal_required"] == 0,
+        migrated_payload,
+    )
+
+    manifest.write_text(accepted_datamap_text(summary["derived_digest"]), encoding="utf-8")
+    datamap_scan(repo)
+    sealed = run(
+        ["python3", str(reconcile), f"--repo={repo}", "--seal", "--output=json", "--quiet"]
+    )
+    results.check(
+        "[privacy-datamap] a current valid manifest can seal the accepted observation lock",
+        sealed.returncode == 0 and (repo / ".noru" / "privacy-datamap.lock.json").is_file(),
+        (sealed.stderr or sealed.stdout)[:300],
+    )
+    lock_document = json.loads(
+        (repo / ".noru" / "privacy-datamap.lock.json").read_text(encoding="utf-8")
+    )
+    lock_schema = json.loads(
+        (ROOT / "contract" / "privacy-datamap-lock.schema.json").read_text(encoding="utf-8")
+    )
+    results.check(
+        "[privacy-datamap] the sealed lock satisfies its public contract",
+        validate_json_schema(lock_document, lock_schema, lock_schema) == [],
+        validate_json_schema(lock_document, lock_schema, lock_schema),
+    )
+
+    unchanged = run(
+        ["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"]
+    )
+    unchanged_payload = json.loads(unchanged.stdout)
+    results.check(
+        "[privacy-datamap] an unchanged accepted repository schedules no agent work",
+        unchanged.returncode == 0
+        and unchanged_payload["counts"]["unchanged"] == 5
+        and unchanged_payload["counts"]["proposal_required"] == 0,
+        unchanged_payload["counts"],
+    )
+
+    # Moving every declaration down a line changes citations and the global freshness digest, but
+    # not the meaning-bearing shape. No model should be asked to reconsider the fields.
+    (repo / "db" / "schema.sql").write_text("\n" + SQL_FIXTURE, encoding="utf-8")
+    datamap_scan(repo)
+    citation = run(
+        ["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"]
+    )
+    citation_payload = json.loads(citation.stdout)
+    results.check(
+        "[privacy-datamap] line movement is citation-only and invokes no agent",
+        citation.returncode == 0
+        and citation_payload["counts"]["citation_only"] == 5
+        and citation_payload["counts"]["proposal_required"] == 0,
+        citation_payload["counts"],
+    )
+
+    materially_changed = SQL_FIXTURE.replace("weird_column  TEXT,", "weird_column  JSON,")
+    (repo / "db" / "schema.sql").write_text(materially_changed, encoding="utf-8")
+    datamap_scan(repo)
+    material = run(
+        ["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"]
+    )
+    material_payload = json.loads(material.stdout)
+    results.check(
+        "[privacy-datamap] a changed ambiguous field alone returns to the agent",
+        material.returncode == 0
+        and material_payload["counts"]["materially_changed"] == 1
+        and [row["field"] for row in material_payload["proposal_required"]]
+        == ["weird_column"],
+        material_payload,
+    )
+
+    changed = SQL_FIXTURE.replace(
+        "weird_column  TEXT,",
+        "weird_column  TEXT,\n    phone_number TEXT,\n    profile_notes TEXT,",
+    )
+    (repo / "db" / "schema.sql").write_text(changed, encoding="utf-8")
+    datamap_scan(repo)
+    delta = run(
+        ["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"]
+    )
+    delta_payload = json.loads(delta.stdout)
+    results.check(
+        "[privacy-datamap] an exact addition is deterministic and an ambiguous addition alone reaches the agent",
+        delta.returncode == 0
+        and delta_payload["counts"]["deterministically_classified"] == 1
+        and [row["field"] for row in delta_payload["proposal_required"]] == ["profile_notes"],
+        delta_payload,
+    )
+    results.check(
+        "[privacy-datamap] a structural delta invalidates only its collection sign-off",
+        delta_payload["collection_review_required"] == ["db_schema/accounts"],
+        delta_payload["collection_review_required"],
+    )
+    proposals_document = json.loads(
+        (repo / ".noru" / ".cache" / "privacy-datamap.proposals.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    proposals_schema = json.loads(
+        (ROOT / "contract" / "privacy-datamap-proposals.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    results.check(
+        "[privacy-datamap] the bounded agent queue satisfies its public contract",
+        validate_json_schema(proposals_document, proposals_schema, proposals_schema) == [],
+        validate_json_schema(proposals_document, proposals_schema, proposals_schema),
+    )
+
+
 
 def test_datamap_digest_agrees_across_languages(results, tmp):
     """collect.mjs stamps structure_digest; validate_manifest.py recomputes it. Two implementations
@@ -2061,6 +2269,7 @@ def main(argv):
             test_datamap_citations_point_at_the_real_line(results, tmp)
             test_datamap_surfaces_special_category_data(results, tmp)
             test_datamap_never_overwrites_a_reviewed_manifest(results, tmp)
+            test_datamap_reconciles_only_the_privacy_delta(results, tmp)
             test_datamap_digest_agrees_across_languages(results, tmp)
             test_datamap_render_is_gated_and_matches_the_push(results, tmp)
             test_digest_ignores_the_collectors_own_version(results, tmp)

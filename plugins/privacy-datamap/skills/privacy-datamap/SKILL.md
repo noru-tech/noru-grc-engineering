@@ -45,6 +45,22 @@ Everything else is a judgement, and the collector marks it `needs_review: true` 
 **A manifest with any `needs_review: true` cannot be pushed.** That is the mechanism. Your job is to
 help the user resolve those flags, not to clear them so the push works.
 
+## Reconcile before you reason
+
+After every collector run, run `scripts/reconcile.py --repo=<repo> --output=json`. The reconciler,
+not the agent, decides what needs semantic analysis:
+
+- `carry_forward` — preserve the accepted classification. Never reinterpret it.
+- `refresh_evidence` — update the citation only. Never invoke a model for line movement.
+- an exact-table `add` or `material_change` — the classification is deterministic, although the
+  changed collection still needs a new sign-off.
+- `proposal_required` — and only these entries — are the agent's work queue.
+
+On a first scan the mode is `bootstrap`. A valid manifest created before locks existed is
+`migration` and must seed its first lock without reclassification. Later scans are `maintenance`.
+Agent suggestions live in `.noru/.cache/privacy-datamap.proposals.json`; they are not decisions and
+cannot update the accepted manifest or lock by themselves.
+
 When you resolve one, read `references/classification-guide.md` and use the surrounding context —
 the table's name, the other columns, what the service does. If you genuinely cannot tell, say so and
 ask. A confidently wrong data category is worse than a gap, because the gap gets reviewed and the
@@ -80,10 +96,13 @@ under `special_category_refs`. **Always surface that list explicitly in your rep
 section. It carries the most risk in the map, it gets half the review horizon, and it is the thing a
 reviewer must not have to go looking for.
 
-## Two files, and they are not interchangeable
+## Three committed files, and they are not interchangeable
 
 - `.noru/privacy-datamap.yml` — the **manifest**. Citations, interpretation blocks, review flags.
   Commit it; reviewing it in a pull request is the point.
+- `.noru/privacy-datamap.lock.json` — the **accepted observation**. Generated only after a current
+  manifest validates. It records stable structural fingerprints and citations, never business
+  meaning or agent reasoning. Commit it and do not edit it by hand.
 - `.fides/datamap.yml` — the **export**, in Ethyca's own format, for `fides push` and anything else
   that reads a Fides manifest. Regenerated on every scan that finds a validated manifest.
 
@@ -105,7 +124,8 @@ make the error go away — that is forging a signature.
 ```
 /noru:connect          # confirm the MCP connection and the scopes
 /privacy-datamap:scan  # → .noru/privacy-datamap.yml, full of needs_review
-                       # ... resolve the flags with the user, get the interpretations signed ...
+                       # → reconcile; analyse only proposal_required
+                       # ... resolve the affected flags, validate and seal the lock ...
 /privacy-datamap:diff  # → the exact plan, reads only
 /privacy-datamap:push  # → one ingestDatamap call, after confirmation
 ```

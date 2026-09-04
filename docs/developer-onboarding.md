@@ -33,9 +33,11 @@ explicitly after the branch review, run its scan directly:
 ```
 
 Commit `.noru/<piece>.yml`; never commit `.noru/.cache/`. For `privacy-datamap`, also review and
-commit `.fides/datamap.yml`: it is the Fideslang export, while `.noru/privacy-datamap.yml` carries
-the owners, citations, and decisions used by the gate. Resolve every `needs_review` item with a
-named owner and rationale rather than accepting classifier output as a compliance conclusion.
+commit `.noru/privacy-datamap.lock.json` and `.fides/datamap.yml`: the lock pins the machine-observed
+structure accepted with the review, the Fides file is the ecosystem export, and
+`.noru/privacy-datamap.yml` carries the owners, citations, and decisions used by the gate. Resolve
+every `needs_review` item with a named owner and rationale rather than accepting classifier output
+as a compliance conclusion.
 
 ## 3. Add a credential-free pull-request check
 

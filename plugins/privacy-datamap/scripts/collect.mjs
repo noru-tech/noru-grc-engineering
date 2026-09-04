@@ -183,10 +183,41 @@ export function repoProvenance(repo) {
 }
 
 // --------------------------------------------------------------------------------------------- //
-// Parsers. Each returns collections: [{ name, line, fields: [{ name, line }] }].
+// Parsers. Each returns collections: [{ name, line, fields: [{ name, line, shape }] }].
 //
 // These read *structure*, never meaning. That a column called `email` exists on line 12 is a parse
 // and the collector will stand behind it; what `email` means is a judgement and lives below.
+
+export function normalizeShape(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/,$/, "")
+    .replace(/\s+/g, " ");
+}
+
+export function normalizeSqlShape(value) {
+  const input = normalizeShape(value);
+  let out = "";
+  let quote = null;
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (quote !== null) {
+      out += ch;
+      if (ch === quote && input[i + 1] === quote) {
+        out += input[i + 1];
+        i += 1;
+      } else if (ch === quote) {
+        quote = null;
+      }
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += ch;
+    } else {
+      out += ch.toLowerCase();
+    }
+  }
+  return out;
+}
 
 const SQL_SKIP = /^(primary|foreign|unique|constraint|key|index|check|partition|using|with|like|exclude)\b/i;
 const SQL_CREATE = /create\s+table\s+(?:if\s+not\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s*\(/i;
@@ -214,7 +245,15 @@ export function parseSqlDdl(text) {
       if (j > i && depthBefore >= 1) {
         const body = line.trim().replace(/^[`"[]/, "");
         const first = body.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
-        if (first && !SQL_SKIP.test(body)) fields.push({ name: first[1], line: j + 1 });
+        if (first && !SQL_SKIP.test(body)) {
+          fields.push({
+            name: first[1],
+            line: j + 1,
+            // SQL type and constraint keywords are case-insensitive. Formatting them differently
+            // must not turn an unchanged column into a material privacy delta.
+            shape: normalizeSqlShape(body.slice(first[0].length)),
+          });
+        }
       }
       if (j > i && depth <= 0) {
         i = j;
@@ -236,8 +275,10 @@ export function parsePrisma(text) {
     for (let j = i + 1; j < lines.length && !/^\s*\}/.test(lines[j]); j += 1) {
       const body = lines[j].replace(/\/\/.*$/, "").trim();
       if (body === "" || body.startsWith("@@")) continue;
-      const field = body.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+[A-Za-z_[]/);
-      if (field) fields.push({ name: field[1], line: j + 1 });
+      const field = body.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$/);
+      if (field) {
+        fields.push({ name: field[1], line: j + 1, shape: normalizeShape(field[2]) });
+      }
     }
     if (fields.length > 0) out.push({ name: match[1], line: i + 1, fields });
   }
@@ -259,7 +300,10 @@ export function parsePythonOrm(text) {
     const fields = [];
     for (let j = i + 1; j < lines.length && !/^\S/.test(lines[j]); j += 1) {
       const field = lines[j].match(PY_COLUMN);
-      if (field) fields.push({ name: field[1], line: j + 1 });
+      if (field) {
+        const declaration = lines[j].replace(/\s+#.*$/, "").trim().split("=").slice(1).join("=");
+        fields.push({ name: field[1], line: j + 1, shape: normalizeShape(declaration) });
+      }
     }
     if (fields.length > 0) out.push({ name: match[1], line: i + 1, fields });
   }
@@ -276,9 +320,15 @@ export function parseProto(text) {
     for (let j = i + 1; j < lines.length && !/^\s*\}/.test(lines[j]); j += 1) {
       const body = lines[j].replace(/\/\/.*$/, "").trim();
       const field = body.match(
-        /^(?:repeated\s+|optional\s+|required\s+)?[A-Za-z_][A-Za-z0-9_.<>, ]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\d+\s*;/
+        /^(?:(repeated|optional|required)\s+)?([A-Za-z_][A-Za-z0-9_.<>, ]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\d+)\s*;/
       );
-      if (field) fields.push({ name: field[1], line: j + 1 });
+      if (field) {
+        fields.push({
+          name: field[3],
+          line: j + 1,
+          shape: normalizeShape(`${field[1] ?? ""} ${field[2]} = ${field[4]}`),
+        });
+      }
     }
     if (fields.length > 0) out.push({ name: match[1], line: i + 1, fields });
   }
@@ -294,8 +344,10 @@ export function parseGraphql(text) {
     const fields = [];
     for (let j = i + 1; j < lines.length && !/^\s*\}/.test(lines[j]); j += 1) {
       const body = lines[j].replace(/#.*$/, "").trim();
-      const field = body.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\))?\s*:\s*[A-Za-z[]/);
-      if (field) fields.push({ name: field[1], line: j + 1 });
+      const field = body.match(
+        /^([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\))?\s*:\s*([A-Za-z_][A-Za-z0-9_\[\]!]*)/
+      );
+      if (field) fields.push({ name: field[1], line: j + 1, shape: normalizeShape(field[2]) });
     }
     if (fields.length > 0) out.push({ name: match[1], line: i + 1, fields });
   }
@@ -423,6 +475,14 @@ export function fidesKeyFor(path) {
   return key === "" ? "repository" : key;
 }
 
+function canonicalDigest(value) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+export function fieldEntityId(datasetKey, collectionName, fieldName) {
+  return `${datasetKey}/${collectionName}/${fieldName}`;
+}
+
 // --------------------------------------------------------------------------------------------- //
 // Systems. A service is a directory that declares itself one; the repository root is the fallback,
 // because a repository with no package manifest anywhere is still one deployable thing.
@@ -468,21 +528,45 @@ export function collectFacts(repo) {
     parsedFiles.add(rel);
     parsedByKind[parser.kind] = (parsedByKind[parser.kind] ?? 0) + 1;
 
-    const collections = parsed.map((collection) => ({
-      name: collection.name,
-      ref: `${rel}:${collection.line}`,
-      fields: collection.fields.map((field) => {
+    const datasetKey = fidesKeyFor(rel);
+    const collections = parsed.map((collection) => {
+      const fields = collection.fields.map((field) => {
         const verdict = classifyField(field.name, TABLE);
         fieldCount += 1;
         if (verdict.needs_review) needsReview += 1;
         else if (verdict.data_categories.length > 0) classified += 1;
         if (verdict.special_category) specialRefs.push(`${rel}:${field.line}`);
-        return { name: field.name, ref: `${rel}:${field.line}`, ...verdict };
-      }),
-    }));
+        const identity = fieldEntityId(datasetKey, collection.name, field.name);
+        const semantic = {
+          dataset: datasetKey,
+          collection: collection.name,
+          field: field.name,
+          shape: field.shape ?? "",
+        };
+        return {
+          name: field.name,
+          ref: `${rel}:${field.line}`,
+          shape: field.shape ?? "",
+          entity_id: identity,
+          semantic_digest: canonicalDigest(semantic),
+          ...verdict,
+        };
+      });
+      return {
+        name: collection.name,
+        ref: `${rel}:${collection.line}`,
+        entity_id: `${datasetKey}/${collection.name}`,
+        semantic_digest: canonicalDigest(
+          fields.map((field) => ({ name: field.name, shape: field.shape })).sort((a, b) =>
+            a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+          )
+        ),
+        fields,
+      };
+    });
 
     datasets.push({
-      fides_key: fidesKeyFor(rel),
+      fides_key: datasetKey,
       name: rel,
       source_kind: parser.kind,
       ref: `${rel}:1`,
@@ -575,6 +659,27 @@ export function digestOf(derived) {
   void generated_by;
   void coverage;
   return createHash("sha256").update(JSON.stringify(facts, null, 0)).digest("hex");
+}
+
+/**
+ * The digest emitted before per-entity reconciliation existed. It is retained only as a migration
+ * bridge: an already reviewed 0.5.x manifest can prove that it describes the current repository
+ * and seed its first lock without sending every field back through an agent.
+ */
+export function legacyDigestOf(derived) {
+  const legacy = JSON.parse(JSON.stringify(derived));
+  for (const dataset of legacy.datasets ?? []) {
+    for (const collection of dataset.collections ?? []) {
+      delete collection.entity_id;
+      delete collection.semantic_digest;
+      for (const field of collection.fields ?? []) {
+        delete field.shape;
+        delete field.entity_id;
+        delete field.semantic_digest;
+      }
+    }
+  }
+  return digestOf(legacy);
 }
 
 const PLAIN_SAFE = /^[A-Za-z0-9_][A-Za-z0-9 _./@-]*$/;
@@ -749,8 +854,10 @@ function main(argv) {
   const derived = collectFacts(opts.repo);
   const provenance = repoProvenance(opts.repo);
   const digest = digestOf(derived);
+  const legacyDigest = legacyDigestOf(derived);
   const manifestPath = join(opts.repo, ".noru", "privacy-datamap.yml");
   const derivedPath = join(opts.repo, ".noru", ".cache", "privacy-datamap.derived.json");
+  const scanStatePath = join(opts.repo, ".noru", ".cache", "privacy-datamap.scan.json");
 
   let wroteSkeleton = false;
   let drift = false;
@@ -775,6 +882,16 @@ function main(argv) {
     if (parsed && !opts.check) {
       rendered = relative(opts.repo, renderFides(opts.repo, parsed)).split(sep).join("/");
     }
+    writeFileSync(
+      scanStatePath,
+      `${JSON.stringify({
+        piece: PIECE,
+        derived_digest: digest,
+        legacy_derived_digest: legacyDigest,
+        provenance,
+      }, null, 2)}\n`,
+      "utf8",
+    );
   } catch (error) {
     process.stderr.write(`error: ${error.message}\n`);
     return 2;
@@ -787,6 +904,7 @@ function main(argv) {
     manifest: relative(opts.repo, manifestPath).split(sep).join("/"),
     derived_facts: relative(opts.repo, derivedPath).split(sep).join("/"),
     derived_digest: digest,
+    legacy_derived_digest: legacyDigest,
     drift,
     enumerated_by: derived.coverage.enumerated_by,
     wrote_skeleton: wroteSkeleton,
