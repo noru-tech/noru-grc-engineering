@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const VERSION = "0.7.0";
+const VERSION = "0.7.1";
 const PLAN_REL = ".noru/.cache/repo-enforcement-files.json";
 const ALLOWED_FILES = new Set([
   ".noru/enforcement.yml", ".noru/enforcement-baseline.json",

@@ -1,6 +1,6 @@
 ---
 name: review-signoff
-version: 0.7.0
+version: 0.7.1
 description: Turn a periodic review of machine output into a named, dated, expiring sign-off in Noru — access review reconciliation, firewall or rule review, hardening baseline checks, asset reconciliation, physical access review, vendor security review, backup restore tests, log review. Hashes the export that was reviewed, records what was confirmed and what the exceptions were, and lands the attestation as evidence that expires when the reviewer said it would. Use when the user has done or is about to do a periodic review, needs to evidence an access review, asks what reviews are due or expiring, or wants a review sign-off recorded in Noru.
 requires:
   bins: ["node", "python3", "git"]
