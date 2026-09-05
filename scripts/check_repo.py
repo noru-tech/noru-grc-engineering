@@ -522,9 +522,12 @@ def check_action_version_pins(problems):
         ROOT / "docs" / "developer-onboarding.md",
         ROOT / ".github" / "actions" / "noru-ci" / "README.md",
         ROOT / ".github" / "actions" / "noru-review" / "README.md",
+        ROOT / "actions" / "enforce" / "README.md",
         ROOT / "templates" / "github" / "noru-grc-review.yml",
     ]
-    pattern = re.compile(r"noru-(?:ci|review)@v([0-9]+\.[0-9]+\.[0-9]+)")
+    # Both the in-tree path and the Marketplace distribution form (noru-tech/noru-ci-action@v…),
+    # which scripts/publish_actions.py mirrors from the same tag.
+    pattern = re.compile(r"noru-(?:ci|review|enforce)(?:-action)?@v([0-9]+\.[0-9]+\.[0-9]+)")
     found = 0
     for path in paths:
         if not path.is_file():

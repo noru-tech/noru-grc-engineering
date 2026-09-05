@@ -7,3 +7,8 @@ explicit `as-of` date.
 
 Use the generated workflow from `repo-enforcement`; it pins this action to a full commit SHA and
 keeps the stable check name `Noru GRC / validate`.
+
+On the GitHub Marketplace this action is `noru-tech/noru-enforce-action`, generated from the same
+tag. The managed workflow keeps the in-tree path at a full commit SHA because
+`/repo-enforcement:verify` recognises only that form; the Marketplace name is for hand-written
+workflows.

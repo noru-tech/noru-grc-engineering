@@ -6,6 +6,11 @@ name: release
 # A marketplace release is a version bump in several files at once. This runs the full gate again
 # and then asserts the thing CI cannot know on a normal push: that the tag, the marketplace entries
 # and every plugin manifest all agree on one version.
+#
+# Once that holds, the three GitHub Actions are mirrored into their single-action distribution
+# repositories so the GitHub Marketplace can list them — it lists one action per repository, at the
+# root, and nothing in this repository can satisfy that directly. scripts/publish_actions.py owns the
+# mirroring and is idempotent, so a re-run (workflow_dispatch with the version) republishes safely.
 
 on:
   push:
@@ -13,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to verify, without the leading v (for example 0.1.0)"
+        description: "Version to verify and (re)publish, without the leading v (for example 0.1.0)"
         required: true
         type: string
 
@@ -26,6 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A manual run verifies the tag it names, not whatever main happens to be.
+          ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -43,6 +51,7 @@ jobs:
           python3 scripts/test_ci_review.py
           python3 scripts/test_hub.py
           python3 scripts/test_repo_enforcement.py
+          python3 scripts/publish_actions.py --check
 
       - name: tag, marketplace entries and plugin manifests agree on one version
         env:
@@ -84,3 +93,53 @@ jobs:
               raise SystemExit(1)
           print(f"OK: every manifest and marketplace entry is at {expected}.")
           PY
+
+  publish-actions:
+    name: publish the actions to their Marketplace repositories
+    needs: verify
+    runs-on: ubuntu-latest
+    # Writes go to the three mirror repositories, never to this one, so this job keeps
+    # `contents: read` here and carries a token scoped to the mirrors alone. ACTIONS_PUBLISH_TOKEN
+    # is a fine-grained PAT of a user with two-factor authentication — Contents: read and write on
+    # noru-ci-action, noru-review-action and noru-enforce-action, nothing else. It must be a user
+    # token, not a GitHub App token: the Marketplace lists a release automatically only when the
+    # account that created it can satisfy GitHub's two-factor requirement.
+    environment: marketplace
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: git and gh authenticate to the mirror repositories
+        env:
+          GH_TOKEN: ${{ secrets.ACTIONS_PUBLISH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::ACTIONS_PUBLISH_TOKEN is not set in the 'marketplace' environment."
+            echo "::error::CONTRIBUTING.md, 'Releasing', describes the token and the mirror repositories."
+            exit 1
+          fi
+          gh auth setup-git
+
+      - name: mirror, tag and release every action
+        env:
+          GH_TOKEN: ${{ secrets.ACTIONS_PUBLISH_TOKEN }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION:-${GITHUB_REF_NAME#v}}"
+          python3 scripts/publish_actions.py publish --version="$version"
+
+      - name: what happens next
+        run: |
+          {
+            echo "### Marketplace mirrors"
+            echo
+            echo "Releases created by this job are listed on the GitHub Marketplace automatically"
+            echo "**once each mirror repository has been listed once by hand** (a one-time click on"
+            echo "the mirror's release page). CONTRIBUTING.md, 'Releasing', has the checklist."
+          } >> "$GITHUB_STEP_SUMMARY"
