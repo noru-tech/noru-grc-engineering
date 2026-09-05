@@ -292,13 +292,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.7.0
+      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.7.1
         with:
           piece: ai-inventory
           mode: warn        # switch to gate once the report is quiet
 ```
 
-`uses: noru-tech/noru-ci-action@v0.7.0` — the GitHub Marketplace form — is the same action at the
+`uses: noru-tech/noru-ci-action@v0.7.1` — the GitHub Marketplace form — is the same action at the
 same tag; the Marketplace repository is generated from each release.
 
 This works on a pull request from a fork. It needs no secret, and it will not ask for one.
@@ -381,7 +381,7 @@ pull request cannot safely fetch that state. What happens after the diff depends
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.7.0
+      - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.7.1
         env:
           NORU_API_KEY: ${{ secrets.NORU_API_KEY }}
         with:

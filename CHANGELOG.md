@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.7.1 — 2026-09-05
+
 ### Added
 
 - The three GitHub Actions are published to the GitHub Marketplace as `noru-tech/noru-ci-action`,

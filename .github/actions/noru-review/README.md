@@ -9,14 +9,14 @@ Routes a pull-request diff through the relevant GRC pieces and runs only their l
   with: { fetch-depth: 0 }
 - uses: actions/setup-node@v4
   with: { node-version: "20" }
-- uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.7.0
+- uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.7.1
   with:
     base-ref: ${{ github.event.pull_request.base.sha }}
     mode: warn
 ```
 
 On the GitHub Marketplace this action is `noru-tech/noru-review-action`;
-`uses: noru-tech/noru-review-action@v0.7.0` is the same code at the same tag as the path above.
+`uses: noru-tech/noru-review-action@v0.7.1` is the same code at the same tag as the path above.
 
 Use `pieces: privacy-datamap,ai-inventory` to replace automatic routing with an explicit adopted
 set. Change `mode` to `gate` only after the warning report is understood. Pull requests—including

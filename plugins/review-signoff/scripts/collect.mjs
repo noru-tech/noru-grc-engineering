@@ -29,7 +29,7 @@ import { basename, extname, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const PIECE = "review-signoff";
-export const VERSION = "0.7.0";
+export const VERSION = "0.7.1";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));

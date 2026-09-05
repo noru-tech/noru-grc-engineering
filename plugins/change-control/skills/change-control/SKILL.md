@@ -1,6 +1,6 @@
 ---
 name: change-control
-version: 0.7.0
+version: 0.7.1
 description: Account for who wrote, approved, merged and deployed each change over one window, with every segregation-of-duties violation owned by a named person. Use when the user asks about change management, segregation or separation of duties, "can someone approve their own code", access to production, SOC 2 CC8.1, ISO 27001 A.8.31/A.8.32, or evidence that code review actually happened.
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "governance-records",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "File the records of human decisions in Noru: minutes, ISMS scope, statement of applicability, internal audit plans and reports, findings and corrective action plans, each attributed and dated.",
   "author": {
     "name": "Noru",

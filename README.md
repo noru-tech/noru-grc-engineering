@@ -157,7 +157,7 @@ The same pieces run headless, so the record stays true between audits instead of
 before one:
 
 ```yaml
-- uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.7.0
+- uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.7.1
   with:
     base-ref: ${{ github.event.pull_request.base.sha }}
     mode: warn      # switch to gate once the report is quiet
@@ -168,7 +168,7 @@ permissions and fork-safe defaults. Use the lower-level `noru-ci` action when a 
 run one explicitly adopted piece rather than route a branch diff.
 
 The same actions are on the GitHub Marketplace as `noru-tech/noru-review-action`,
-`noru-tech/noru-ci-action` and `noru-tech/noru-enforce-action`. `uses: noru-tech/noru-review-action@v0.7.0`
+`noru-tech/noru-ci-action` and `noru-tech/noru-enforce-action`. `uses: noru-tech/noru-review-action@v0.7.1`
 and the in-tree path above are the same code at the same tag; the Marketplace repositories are
 generated from each release and never edited by hand.
 

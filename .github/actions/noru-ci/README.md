@@ -11,7 +11,7 @@ Full documentation, the exit-code table and the non-GitHub recipes are in
 - uses: actions/setup-node@v4
   with:
     node-version: "20"
-- uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.7.0
+- uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.7.1
   with:
     piece: ai-inventory
     mode: warn      # switch to gate once the report is quiet
@@ -28,7 +28,7 @@ It installs nothing. `node` and `python3` must already be on the runner; the act
 clear message if either is missing, and prints which YAML loader the runner will use.
 
 On the GitHub Marketplace this action is `noru-tech/noru-ci-action`;
-`uses: noru-tech/noru-ci-action@v0.7.0` is the same code at the same tag as the path above.
+`uses: noru-tech/noru-ci-action@v0.7.1` is the same code at the same tag as the path above.
 
 **Credentials.** Never pass a key as a `with:` input. Put it in the job or step `env:` from a
 secret — `NORU_API_KEY: ${{ secrets.NORU_API_KEY }}` — only in a job that has secrets, and only for
@@ -55,7 +55,7 @@ to inspect. Two ways to read a failing run:
   ```yaml
   - id: gate
     continue-on-error: true
-    uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.7.0
+    uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.7.1
     with: { piece: ai-inventory, repo: . }
   - if: steps.gate.outcome == 'failure'
     run: |
