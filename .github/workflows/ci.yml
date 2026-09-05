@@ -76,6 +76,8 @@ jobs:
         run: python3 scripts/check_vendored_lib.py
       - name: repository enforcement safety model
         run: python3 scripts/test_repo_enforcement.py
+      - name: the Marketplace distribution of every action is complete and runs from its own root
+        run: python3 scripts/publish_actions.py --check
 
   tests:
     name: tests (node ${{ matrix.node }}, python ${{ matrix.python }}, ${{ matrix.yaml }})

@@ -1,10 +1,27 @@
 #!/usr/bin/env node
 const { spawnSync } = require("node:child_process");
-const { appendFileSync, mkdirSync } = require("node:fs");
+const { appendFileSync, existsSync, mkdirSync } = require("node:fs");
 const { dirname, resolve } = require("node:path");
 
 const actionRoot = resolve(__dirname, "..");
-const suiteRoot = resolve(actionRoot, "..", "..");
+// The suite (scripts/, plugins/) sits two levels above this action inside noru-grc-engineering,
+// and at the action root itself in the single-action distribution repository the GitHub
+// Marketplace requires (scripts/publish_actions.py builds that layout). Walk up until it is found
+// rather than hard-coding either, so one runtime serves both checkouts.
+function findSuiteRoot(start) {
+  let dir = start;
+  for (;;) {
+    if (existsSync(resolve(dir, "scripts", "ci_check.py")) && existsSync(resolve(dir, "plugins"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+const suiteRoot = findSuiteRoot(actionRoot);
+if (!suiteRoot) {
+  process.stderr.write(`::error::could not find scripts/ci_check.py and plugins/ above ${actionRoot}\n`);
+  process.exit(2);
+}
 const repo = resolve(process.env.GITHUB_WORKSPACE || process.cwd(), process.env.INPUT_REPO || ".");
 const policy = resolve(repo, process.env.INPUT_POLICY || ".noru/enforcement.yml");
 const report = process.env.INPUT_REPORT_PATH

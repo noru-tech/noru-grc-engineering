@@ -15,6 +15,9 @@ Routes a pull-request diff through the relevant GRC pieces and runs only their l
     mode: warn
 ```
 
+On the GitHub Marketplace this action is `noru-tech/noru-review-action`;
+`uses: noru-tech/noru-review-action@v0.7.0` is the same code at the same tag as the path above.
+
 Use `pieces: privacy-datamap,ai-inventory` to replace automatic routing with an explicit adopted
 set. Change `mode` to `gate` only after the warning report is understood. Pull requests—including
 forks—need only `contents: read`; Noru credentials must never be supplied to this action.

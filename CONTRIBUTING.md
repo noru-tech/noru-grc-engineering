@@ -115,6 +115,7 @@ python3 scripts/test_idempotency.py    # a second push is a no-op
 python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
 python3 scripts/test_ci_mode.py        # CI mode fails on drift and on an expired interpretation
 python3 scripts/test_repo_enforcement.py # enforcement ratchet, action and GitHub adapter safety
+python3 scripts/publish_actions.py --check # each action runs from its Marketplace mirror layout
 git diff --check
 ```
 
@@ -154,6 +155,81 @@ CODEX_HOME="$tmpdir" codex plugin add ai-inventory@noru-grc-engineering
 ```
 
 The temporary `CODEX_HOME` keeps this out of your real configuration.
+
+## Releasing
+
+Every plugin and every action shares one version number, and `scripts/check_repo.py` fails while
+any copy of it disagrees. A release is three steps, and the third one is automatic:
+
+1. **Bump.** Open a `chore: release X.Y.Z` pull request that moves the version everywhere at once:
+   both marketplace manifests, the two `plugin.json` files of every piece, every copyable
+   `@vX.Y.Z` action pin in the docs, and a `## X.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md`.
+2. **Tag.** After the merge, tag that commit and create the GitHub release for this repository:
+
+   ```bash
+   git tag vX.Y.Z <merge-commit> && git push origin vX.Y.Z
+   gh release create vX.Y.Z --title vX.Y.Z --notes "See CHANGELOG.md"
+   ```
+
+3. **Publish.** The tag push runs the `release` workflow. It re-runs the full gate, asserts that the
+   tag, the marketplace entries and every manifest agree, and then mirrors the three GitHub Actions
+   to their Marketplace repositories (below). Nothing else needs a human — except the first time.
+
+### GitHub Marketplace mirrors
+
+The Marketplace lists one action per public repository, and only when `action.yml` is at that
+repository's root. This repository cannot satisfy that, so `scripts/publish_actions.py` mirrors each
+action, together with the toolkit it runs (`scripts/`, `plugins/`, `contract/`), into a
+distribution repository of its own:
+
+| In this repository | Marketplace repository | `uses:` |
+|---|---|---|
+| `.github/actions/noru-ci` | `noru-tech/noru-ci-action` | `noru-tech/noru-ci-action@vX.Y.Z` |
+| `.github/actions/noru-review` | `noru-tech/noru-review-action` | `noru-tech/noru-review-action@vX.Y.Z` |
+| `actions/enforce` | `noru-tech/noru-enforce-action` | `noru-tech/noru-enforce-action@vX.Y.Z` |
+
+Both `uses:` forms — the in-tree path and the mirror — are the same code at the same tag. The
+mirrors are generated: never edit them by hand, the next release overwrites the tree. Each carries a
+`DISTRIBUTION.json` naming the source commit it was built from.
+
+**Republishing** is safe and idempotent. Re-run the `release` workflow with `workflow_dispatch` and
+the version, or from a checkout of the tag:
+
+```bash
+python3 scripts/publish_actions.py publish --version=X.Y.Z            # or --dry-run first
+```
+
+A mirror that already matches gets no commit; an existing `vX.Y.Z` tag is left alone when it points
+at the same tree and is a hard failure when it does not. A released tag is immutable — ship a new
+patch version instead. The floating `vX` tag moves only when the release is the newest of its major
+line. Run `python3 scripts/publish_actions.py build --out=/tmp/mirrors` to inspect what would be
+published without touching anything.
+
+**One-time bootstrap**, per mirror, for whoever administers the `noru-tech` organization:
+
+1. Create the public repository, empty — no README, no license, the first publish supplies both:
+
+   ```bash
+   gh repo create noru-tech/noru-ci-action --public --description "GitHub Marketplace distribution of the noru-ci action from noru-tech/noru-grc-engineering"
+   ```
+
+2. In this repository, create the `marketplace` environment and give it the secret
+   `ACTIONS_PUBLISH_TOKEN`: a fine-grained personal access token of a user with two-factor
+   authentication, scoped to the three mirror repositories with *Contents: read and write* and
+   nothing else. It must be a user token, not a GitHub App token — the Marketplace lists a
+   release automatically only when the account that created it can satisfy the two-factor
+   requirement. Add the release maintainers as required reviewers on that environment if you want
+   a human gate in front of the publish.
+3. Trigger a publish (push a tag, or `workflow_dispatch` the `release` workflow with the current
+   version). The mirror now has the tree, the tag and a GitHub release.
+4. Open that release in the mirror repository, choose *Edit*, tick **Publish this Action to the
+   GitHub Marketplace**, accept the Marketplace Developer Agreement when prompted, pick a primary
+   category (*Continuous integration*; *Security* as the secondary) and *Update release*. GitHub
+   validates the metadata at this point: `name`, `description` and `branding` in `action.yml`, and
+   a `name` no other Marketplace action uses.
+
+After step 4, every release the workflow creates in that mirror is listed automatically. Confirm at
+<https://github.com/marketplace?type=actions&query=noru>.
 
 ## Style
 

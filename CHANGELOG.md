@@ -6,6 +6,19 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Added
+
+- The three GitHub Actions are published to the GitHub Marketplace as `noru-tech/noru-ci-action`,
+  `noru-tech/noru-review-action` and `noru-tech/noru-enforce-action`. The `release` workflow
+  mirrors each action and the toolkit it runs into its distribution repository on every tag, tags
+  and releases it there, and is safe to re-run; `scripts/publish_actions.py --check` proves every
+  action runs from that layout. The in-tree `uses:` paths keep working unchanged.
+
+### Fixed
+
+- `actions/enforce` locates the toolkit by walking up from its own directory instead of assuming
+  it sits two levels below the suite, so the same runtime works from a root-level checkout.
+
 ## 0.7.0 — 2026-09-04
 
 ### Added

@@ -167,6 +167,11 @@ The [supported GitHub template](./templates/github/noru-grc-review.yml) supplies
 permissions and fork-safe defaults. Use the lower-level `noru-ci` action when a repository wants to
 run one explicitly adopted piece rather than route a branch diff.
 
+The same actions are on the GitHub Marketplace as `noru-tech/noru-review-action`,
+`noru-tech/noru-ci-action` and `noru-tech/noru-enforce-action`. `uses: noru-tech/noru-review-action@v0.7.0`
+and the in-tree path above are the same code at the same tag; the Marketplace repositories are
+generated from each release and never edited by hand.
+
 Three things fail a build, and **all of them are computed from the repository, a calendar and a
 committed file** — no network, no credential, so this works on a pull request from a fork:
 
@@ -281,6 +286,7 @@ noru-grc-engineering/
 │   └── change-control/                 # :scan :diff :push  (MCP) + credentialed forge exporters
 ├── .github/actions/noru-ci/            # the CI-mode action: scan, validate, expiry, diff, push
 ├── .github/actions/noru-review/        # branch routing + structurally read-only consolidated CI
+├── actions/enforce/                    # whole-repository merge gate the repo-enforcement plugin installs
 ├── templates/github/                   # copyable, fork-safe pull-request workflow
 ├── scripts/                            # scaffolder, contract test, checks — stdlib/built-ins only
 ├── tests/fixture-repo/                 # the repository the collectors are tested against
@@ -302,6 +308,7 @@ python3 scripts/test_ci_mode.py       # CI mode really fails on drift and on an 
 python3 scripts/test_repo_enforcement.py # ratchets, setup plans, action and GitHub ruleset safety
 python3 scripts/test_ci_review.py     # one fork-safe branch report, with no diff or push route
 python3 scripts/test_hub.py           # branch routing and duplicate-writer warnings stay read-only
+python3 scripts/publish_actions.py --check # each action runs from its GitHub Marketplace mirror
 ```
 
 What each of those actually proves — and, more usefully, what is *not* verified — is written down

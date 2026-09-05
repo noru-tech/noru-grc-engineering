@@ -27,6 +27,9 @@ Two things fail the build, and both are computed locally:
 It installs nothing. `node` and `python3` must already be on the runner; the action fails with a
 clear message if either is missing, and prints which YAML loader the runner will use.
 
+On the GitHub Marketplace this action is `noru-tech/noru-ci-action`;
+`uses: noru-tech/noru-ci-action@v0.7.0` is the same code at the same tag as the path above.
+
 **Credentials.** Never pass a key as a `with:` input. Put it in the job or step `env:` from a
 secret — `NORU_API_KEY: ${{ secrets.NORU_API_KEY }}` — only in a job that has secrets, and only for
 the opt-in `steps: all` push. The action never reads the value; it checks only whether the variable

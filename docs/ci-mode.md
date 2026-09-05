@@ -298,6 +298,9 @@ jobs:
           mode: warn        # switch to gate once the report is quiet
 ```
 
+`uses: noru-tech/noru-ci-action@v0.7.0` — the GitHub Marketplace form — is the same action at the
+same tag; the Marketplace repository is generated from each release.
+
 This works on a pull request from a fork. It needs no secret, and it will not ask for one.
 
 Pin a release tag, never a branch — a compliance gate that changes under you is worse than no gate.
