@@ -1,7 +1,5 @@
 name: "Noru GRC pull-request review"
-description: >
-  Detect the GRC pieces affected by a branch, run their local checks, and produce one read-only
-  report. This action cannot diff or push to Noru.
+description: "Route a pull-request diff to the affected Noru GRC pieces and run their local checks. Read-only; cannot push."
 author: "Noru"
 
 branding:

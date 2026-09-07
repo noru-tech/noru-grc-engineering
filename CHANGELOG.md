@@ -6,6 +6,14 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Fixed
+
+- The `noru-ci` and `noru-review` action descriptions fit the GitHub Marketplace limit of 125
+  characters, which the listing form enforced and the distribution check now enforces first.
+- The enforce action README has a copyable workflow example. The distribution check now
+  requires the usage example in each action's own README, not just in the generated mirror
+  banner, so an action can no longer be published without one.
+
 ## 0.7.2 — 2026-09-07
 
 ### Changed
