@@ -143,7 +143,8 @@ def rewrite_readme(text, action, version):
         f"> `uses: {repo}@v{version}` and",
         f"> `uses: {SOURCE_REPO}/{source}@v{version}`",
         "> are the same code at the same version. The toolkit the action runs (`scripts/`,",
-        "> `plugins/`, `contract/`) is copied verbatim from that tag.",
+        f"> `plugins/`, `contract/`) is copied verbatim from that tag. `@v{version.split('.')[0]}`",
+        f"> follows the newest {version.split('.')[0]}.x release.",
     ]
     if action == "enforce":
         banner += [

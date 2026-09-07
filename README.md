@@ -157,7 +157,7 @@ The same pieces run headless, so the record stays true between audits instead of
 before one:
 
 ```yaml
-- uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.7.1
+- uses: noru-tech/noru-review-action@v0
   with:
     base-ref: ${{ github.event.pull_request.base.sha }}
     mode: warn      # switch to gate once the report is quiet
@@ -167,10 +167,12 @@ The [supported GitHub template](./templates/github/noru-grc-review.yml) supplies
 permissions and fork-safe defaults. Use the lower-level `noru-ci` action when a repository wants to
 run one explicitly adopted piece rather than route a branch diff.
 
-The same actions are on the GitHub Marketplace as `noru-tech/noru-review-action`,
-`noru-tech/noru-ci-action` and `noru-tech/noru-enforce-action`. `uses: noru-tech/noru-review-action@v0.7.1`
-and the in-tree path above are the same code at the same tag; the Marketplace repositories are
-generated from each release and never edited by hand.
+`@v0` follows the newest 0.x release, so a copied example never goes stale; pin a tag from
+[the releases page](https://github.com/noru-tech/noru-grc-engineering/releases) or a commit SHA to
+take changes only when you choose to. The Marketplace repositories (`noru-tech/noru-review-action`,
+`noru-tech/noru-ci-action`, `noru-tech/noru-enforce-action`) are generated from each release of
+this repository and never edited by hand; the path inside this repository at the same tag is the
+same code.
 
 Three things fail a build, and **all of them are computed from the repository, a calendar and a
 committed file** — no network, no credential, so this works on a pull request from a fork:

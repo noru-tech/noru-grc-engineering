@@ -505,8 +505,15 @@ def check_hub_routing(problems):
         problems.append("[noru] missing commands/status.md")
 
 
-def check_action_version_pins(problems):
-    """Copyable action examples must not strand users on an older collector release."""
+def check_action_references(problems):
+    """Copyable action examples must never go stale and must name the Marketplace repositories.
+
+    Every example references noru-tech/noru-<action>-action at the floating major tag, which
+    scripts/publish_actions.py moves to each newest release. An exact version in a doc is a
+    version somebody has to remember to bump; the in-tree path is a form the Marketplace does not
+    list. Prose may still mention either — this looks only at `uses:` lines and at references that
+    carry a version.
+    """
     marketplace_path = ROOT / ".claude-plugin" / "marketplace.json"
     if not marketplace_path.is_file():
         return
@@ -515,6 +522,7 @@ def check_action_version_pins(problems):
     expected = (entries.get("noru") or {}).get("version")
     if not expected:
         return
+    major = f"v{expected.split('.')[0]}"
 
     paths = [
         ROOT / "README.md",
@@ -525,23 +533,28 @@ def check_action_version_pins(problems):
         ROOT / "actions" / "enforce" / "README.md",
         ROOT / "templates" / "github" / "noru-grc-review.yml",
     ]
-    # Both the in-tree path and the Marketplace distribution form (noru-tech/noru-ci-action@v…),
-    # which scripts/publish_actions.py mirrors from the same tag.
-    pattern = re.compile(r"noru-(?:ci|review|enforce)(?:-action)?@v([0-9]+\.[0-9]+\.[0-9]+)")
+    canonical = re.compile(r"noru-tech/noru-(?:ci|review|enforce)-action@([A-Za-z0-9._-]+)")
+    in_tree_use = re.compile(r"^\s*-?\s*uses:\s*noru-tech/noru-grc-engineering/")
     found = 0
     for path in paths:
         if not path.is_file():
             continue
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            for match in pattern.finditer(line):
+            where = f"{path.relative_to(ROOT)}:{number}"
+            if in_tree_use.search(line):
+                problems.append(
+                    f"{where}: copyable example uses the in-tree action path; reference the "
+                    f"Marketplace repository (noru-tech/noru-<action>-action@{major}) instead"
+                )
+            for match in canonical.finditer(line):
                 found += 1
-                if match.group(1) != expected:
+                if match.group(1) != major:
                     problems.append(
-                        f"{path.relative_to(ROOT)}:{number}: pins a Noru action at v{match.group(1)}, "
-                        f"but the marketplace version is {expected}"
+                        f"{where}: references a Noru action at @{match.group(1)}; copyable examples "
+                        f"use the floating {major} tag so they never go stale"
                     )
     if not found:
-        problems.append("no copyable Noru action pinned at v<version> is documented")
+        problems.append(f"no copyable Noru action reference at @{major} is documented")
 
 
 def check_supported_workflows(problems):
@@ -857,7 +870,7 @@ def main(argv):
         check_codex_manifests(problems)
         check_pieces_registered(problems, plugin_names)
         check_hub_routing(problems)
-        check_action_version_pins(problems)
+        check_action_references(problems)
         check_supported_workflows(problems)
         check_reference_files_exist(problems)
         check_yaml_11_booleans(problems)
