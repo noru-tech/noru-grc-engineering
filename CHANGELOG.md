@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.7.4 — 2026-09-07
+
 ### Added
 
 - Each action README is a full Marketplace listing: about, usage, examples, inputs, outputs,
