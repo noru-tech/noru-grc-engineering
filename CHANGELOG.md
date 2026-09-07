@@ -6,6 +6,19 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Changed
+
+- `privacy-datamap` now normalizes file-shaped schema observations into logical current-state
+  datastores, parses common Drizzle table declarations, prefers declarative schemas over migration
+  history, and replays a documented safe SQL migration subset. Unsupported or conflicting
+  structure is reported as coverage instead of becoming a guessed partial dataset.
+- Privacy systems now require runtime or deployment evidence; package manifests alone no longer
+  turn libraries and tooling packages into applications, and repositories without a confident
+  runtime boundary receive one conservative root system.
+- Privacy reconciliation can carry reviewed fields from file-derived identities to unique,
+  evidence-supported logical identities, while surfacing ambiguous matches for review. Normalized
+  key collisions fail before a manifest is written.
+
 ## 0.7.5 — 2026-09-07
 
 ### Changed

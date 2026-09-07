@@ -346,10 +346,6 @@ def run_expiry(path):
 # A repository whose only schema is in a format the collector cannot read. Six formats, so a single
 # regex going stale cannot silently turn this case green.
 BLINDSPOT_FILES = {
-    "src/schema.ts": (
-        'import { pgTable, text } from "drizzle-orm/pg-core"\n'
-        'export const members = pgTable("members", { email: text("email") })\n'
-    ),
     "src/user.model.ts": (
         "import mongoose from \"mongoose\"\n"
         "const UserSchema = new mongoose.Schema({ email: String })\n"
@@ -387,7 +383,7 @@ def case_coverage(results, tmp):
     results.check(
         "coverage: the finding names every format it saw",
         finding is not None
-        and {"mongoose", "typeorm", "activerecord", "gorm", "openapi", "drizzle"}
+        and {"mongoose", "typeorm", "activerecord", "gorm", "openapi"}
         <= set(finding.get("formats") or []),
         (finding or {}).get("formats"),
     )
@@ -456,6 +452,21 @@ def case_coverage(results, tmp):
     )
     code, _ = ci(partial, "--fail-on=coverage", piece="privacy-datamap")
     results.check("coverage: --fail-on=coverage makes a partial map gate", code == 6, f"exit {code}")
+
+    migration_gap = pathlib.Path(tmp) / "coverage-migration-gap"
+    (migration_gap / "db" / "migrations").mkdir(parents=True, exist_ok=True)
+    (migration_gap / "db" / "migrations" / "001.sql").write_text(
+        "CREATE TABLE accounts (\n  id INTEGER,\n  email TEXT\n);\n"
+        "ALTER TABLE accounts ALTER COLUMN email TYPE VARCHAR(320);\n",
+        encoding="utf-8",
+    )
+    code, report = ci(migration_gap, piece="privacy-datamap")
+    finding = next((f for f in (report or {}).get("findings", []) if f["kind"] == "coverage"), None)
+    results.check(
+        "coverage: an unsafe migration-only current state is a broken gate",
+        code == 6 and finding is not None and "sql_migration" in finding.get("formats", []),
+        f"exit {code}, finding {finding}",
+    )
 
 
 def git_init(repo, message):

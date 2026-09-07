@@ -401,20 +401,25 @@ def check_coverage(report, repo, summary, decl):
     if not isinstance(coverage, dict):
         return "ok"
 
-    candidates = coverage.get("unparsed_candidates") or []
+    candidates = [
+        *(coverage.get("unparsed_candidates") or []),
+        *(coverage.get("migration_gaps") or []),
+        *(coverage.get("schema_conflicts") or []),
+    ]
     parsed = coverage.get("files_parsed", 0)
+    safe_datasets = (derived.get("counts") or {}).get("datasets", 0)
     if not candidates:
         return "ok"
 
     formats = sorted({c.get("format") for c in candidates if isinstance(c, dict)})
     shown = [c.get("ref") for c in candidates[:MAX_EXPLAINED_ITEMS] if isinstance(c, dict)]
 
-    if parsed == 0:
-        report.step("scan", "error", detail=f"nothing parsed; {len(candidates)} candidate(s) found")
+    if safe_datasets == 0:
+        report.step("scan", "error", detail=f"no safe dataset normalized; {len(candidates)} gap(s) found")
         report.find(
             "coverage",
-            f"the collector parsed no schema at all, but found {len(candidates)} file(s) that "
-            f"define one in a format it cannot read ({', '.join(formats)}). An empty data map is "
+            f"the collector produced no safe schema, but found {len(candidates)} structural "
+            f"coverage gap(s) ({', '.join(formats)}). An empty data map is "
             "not the same as a repository with no personal data in it, and every check after this "
             "one would have passed on the empty set",
             manifest=decl["artifact"],
@@ -425,7 +430,7 @@ def check_coverage(report, repo, summary, decl):
 
     report.find(
         "coverage",
-        f"{len(candidates)} schema file(s) are in a format this collector cannot read "
+        f"{len(candidates)} structural observation(s) could not be normalized safely "
         f"({', '.join(formats)}), so the data map does not describe them. {parsed} file(s) were "
         "parsed, so the map is partial rather than empty",
         manifest=decl["artifact"],
@@ -493,6 +498,7 @@ def step_scan(report, piece_dir, decl, repo, manifest_path, on_missing_prereq):
                 "mode": reconciliation.get("mode"),
                 "counts": reconciliation.get("counts"),
                 "proposal_required": reconciliation.get("proposal_required"),
+                "identity_ambiguities": reconciliation.get("identity_ambiguities"),
                 "collection_review_required": reconciliation.get(
                     "collection_review_required"
                 ),
@@ -520,6 +526,7 @@ def step_scan(report, piece_dir, decl, repo, manifest_path, on_missing_prereq):
                 "mode": reconciliation.get("mode"),
                 "counts": reconciliation.get("counts"),
                 "proposal_required": reconciliation.get("proposal_required"),
+                "identity_ambiguities": reconciliation.get("identity_ambiguities"),
                 "collection_review_required": reconciliation.get(
                     "collection_review_required"
                 ),
