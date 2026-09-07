@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.8.0 — 2026-09-07
+
 ### Changed
 
 - `privacy-datamap` now normalizes file-shaped schema observations into logical current-state
