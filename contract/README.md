@@ -208,7 +208,8 @@ that ships its own opinion of what evidence a control needs will drift from the 
 moment the framework moves, and it will be wrong quietly.
 
 So: **no catalogue content is vendored into this repository.** No control text, no guidance, no
-evidence-item list. Licensing (the SCF is CC BY-ND) says the same thing the drift argument does.
+evidence-item list. Licensing says the same thing the drift argument does: framework catalogues
+carry terms that forbid redistributing them.
 
 The obvious loophole is test fixtures, so the contract closes it: fixtures live under
 `plugins/<piece>/fixtures/` and may only use the reserved synthetic namespaces `E-ZZ-*` for
@@ -223,8 +224,8 @@ categories, and from a distance that looks like exactly the thing the non-goal p
 
 A **catalogue** is an opinion about what a framework expects of you: control text, guidance, the
 list of evidence a control needs. It is what Noru serves, it moves when the framework moves, and
-vendoring it means being quietly wrong from the day it changes. For the SCF, licensing (CC BY-ND)
-forbids it outright as well.
+vendoring it means being quietly wrong from the day it changes. Where a framework's licence
+forbids redistribution, vendoring is not an option at all.
 
 A **vocabulary** is the set of words a claim is allowed to use. It encodes no expectation of
 anyone; it is what stops a validator accepting `user.contact.emial`. It *has* to be bundled,
