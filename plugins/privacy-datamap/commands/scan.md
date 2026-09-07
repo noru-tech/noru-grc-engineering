@@ -10,9 +10,23 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/collect.mjs" --repo=<repo> --output=json
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --output=json
 ```
 
-The collector reads SQL DDL, Prisma, Django/SQLAlchemy models, protobuf and GraphQL SDL into
-datasets, collections and fields, each carrying the `file:line` it came from. It classifies the field
-names it can resolve by exact lookup and marks everything else `needs_review: true`.
+The collector parses SQL DDL, Drizzle TypeScript, Prisma, Django/SQLAlchemy models, protobuf and
+GraphQL SDL into file-shaped observations, then normalizes them into logical datastores and runtime
+systems. A source file is evidence for a dataset, not automatically a dataset. Every current field
+retains all contributing `file:line` references. It classifies names it can resolve by exact lookup
+and marks everything else `needs_review: true`.
+
+At one datastore boundary, declarative schemas take precedence over historical migrations.
+Migration-only stores replay lexical file order for `CREATE TABLE`, column add/drop/rename, and
+table drop/rename. Read `coverage.unparsed_candidates`, `coverage.migration_gaps` and
+`coverage.schema_conflicts`: unsupported or inconsistent structure is reported there and the
+collector omits that datastore instead of guessing a partial current state.
+
+A package manifest alone is not a system. Runtime evidence is a container/deployment definition,
+Kubernetes workload, server/worker entrypoint, or executable start/deploy script paired with an
+application entrypoint. With no confident boundary, one repository-level system is the fallback.
+The collector never infers processing purpose, use, subjects, or access outside a runtime's own
+directory.
 
 The reconciler compares those observations with `.noru/privacy-datamap.lock.json`, when it exists.
 It is deterministic and model-free. Read its `mode`, `counts`, `proposal_required` and
@@ -23,7 +37,11 @@ It is deterministic and model-free. Read its `mode`, `counts`, `proposal_require
 - `migration` — a valid pre-lock manifest describes this repository. Use the generated candidate
   to refresh its digest, validate it and seal the first lock. Do not reclassify it.
 - `maintenance` — carry forward every `carry_forward` item without reinterpretation. Refresh
-  `refresh_evidence` citations mechanically. Analyse only `proposal_required`.
+  `refresh_evidence` citations mechanically. Preserve `identity_migration` items when the report
+  shows a unique evidence-supported old identity. Analyse only `proposal_required`.
+
+If `identity_ambiguities` is non-empty, surface it to the user. The reconciler deliberately refuses
+to guess between old file-based identities that could both represent the same logical field.
 
 The cache files are deliberately separate:
 

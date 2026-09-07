@@ -24,7 +24,7 @@
       "$ref": "#/$defs/source"
     },
     "dataset": {
-      "description": "One dataset per logical store. Collections are tables or models; fields are columns or attributes.",
+      "description": "One dataset per normalized logical store, independent of how many declarative schema or migration files provide its structural evidence. Collections are current tables or models; fields are current columns or attributes.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/dataset"
@@ -123,6 +123,7 @@
           "pattern": "^[A-Za-z0-9_.<>-]+$"
         },
         "name": {
+          "description": "Human-readable logical datastore boundary, not an individual source filename.",
           "type": "string",
           "minLength": 1
         },
@@ -156,6 +157,7 @@
           "type": "string"
         },
         "refs": {
+          "description": "Every file-and-line reference contributing to this normalized current collection.",
           "type": "array",
           "minItems": 1,
           "items": {
@@ -204,6 +206,7 @@
           }
         },
         "refs": {
+          "description": "Every file-and-line reference contributing to this normalized current field, including supported migration operations retained through rename replay.",
           "type": "array",
           "minItems": 1,
           "items": {

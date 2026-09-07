@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import {
   existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync,
 } from "node:fs";
-import { basename, join, relative, sep } from "node:path";
+import { basename, dirname, extname, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { toFideslang } from "./lib/fides.mjs";
@@ -196,7 +196,7 @@ export function normalizeShape(value) {
 }
 
 export function normalizeSqlShape(value) {
-  const input = normalizeShape(value);
+  const input = normalizeShape(value).replace(/;$/, "");
   let out = "";
   let quote = null;
   for (let i = 0; i < input.length; i += 1) {
@@ -354,8 +354,132 @@ export function parseGraphql(text) {
   return out;
 }
 
+function skipQuoted(text, index) {
+  const quote = text[index];
+  for (let i = index + 1; i < text.length; i += 1) {
+    if (text[i] === "\\") i += 1;
+    else if (text[i] === quote) return i + 1;
+  }
+  return text.length;
+}
+
+function matchingDelimiter(text, start, open, close) {
+  let depth = 0;
+  for (let i = start; i < text.length; i += 1) {
+    if (text[i] === '"' || text[i] === "'" || text[i] === "`") {
+      i = skipQuoted(text, i) - 1;
+    } else if (text.startsWith("//", i)) {
+      const end = text.indexOf("\n", i + 2);
+      i = end < 0 ? text.length : end;
+    } else if (text.startsWith("/*", i)) {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 1;
+    } else if (text[i] === open) {
+      depth += 1;
+    } else if (text[i] === close) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function lineNumberAt(text, index) {
+  return text.slice(0, index).split("\n").length;
+}
+
+function splitTopLevelProperties(text, offset) {
+  const entries = [];
+  let start = 0;
+  let round = 0;
+  let square = 0;
+  let curly = 0;
+  for (let i = 0; i <= text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      i = skipQuoted(text, i) - 1;
+      continue;
+    }
+    if (text.startsWith("//", i)) {
+      const end = text.indexOf("\n", i + 2);
+      i = end < 0 ? text.length : end;
+      continue;
+    }
+    if (text.startsWith("/*", i)) {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 1;
+      continue;
+    }
+    if (ch === "(") round += 1;
+    else if (ch === ")") round -= 1;
+    else if (ch === "[") square += 1;
+    else if (ch === "]") square -= 1;
+    else if (ch === "{") curly += 1;
+    else if (ch === "}") curly -= 1;
+    if ((ch === "," || i === text.length) && round === 0 && square === 0 && curly === 0) {
+      const raw = text.slice(start, i);
+      const leading = raw.search(/\S/);
+      if (leading >= 0) entries.push({ text: raw.slice(leading).trim(), index: offset + start + leading });
+      start = i + 1;
+    }
+  }
+  return entries;
+}
+
+/** Parse common Drizzle table declarations without importing or executing repository code. */
+export function parseDrizzle(text) {
+  const out = [];
+  const call = /\b(pgTable|mysqlTable|sqliteTable)\s*\(/g;
+  for (let match = call.exec(text); match; match = call.exec(text)) {
+    const open = text.indexOf("(", match.index);
+    const close = matchingDelimiter(text, open, "(", ")");
+    if (close < 0) continue;
+    const args = text.slice(open + 1, close);
+    const tableName = args.match(/^\s*(["'])([^"']+)\1\s*,/);
+    if (!tableName) {
+      call.lastIndex = close + 1;
+      continue;
+    }
+    const objectStartInArgs = args.indexOf("{", tableName[0].length);
+    if (objectStartInArgs < 0) {
+      call.lastIndex = close + 1;
+      continue;
+    }
+    const objectStart = open + 1 + objectStartInArgs;
+    const objectEnd = matchingDelimiter(text, objectStart, "{", "}");
+    if (objectEnd < 0 || objectEnd > close) {
+      call.lastIndex = close + 1;
+      continue;
+    }
+    const body = text.slice(objectStart + 1, objectEnd);
+    const fields = [];
+    for (const entry of splitTopLevelProperties(body, objectStart + 1)) {
+      const property = entry.text.match(/^(?:([A-Za-z_$][\w$]*)|["']([^"']+)["'])\s*:\s*([\s\S]+)$/);
+      if (!property) continue;
+      const expression = property[3].trim();
+      if (!/^[A-Za-z_$][\w$.]*\s*\(/.test(expression)) continue;
+      const physical = expression.match(/^[A-Za-z_$][\w$.]*\s*\(\s*(["'])([^"']+)\1/);
+      fields.push({
+        name: physical?.[2] || property[1] || property[2],
+        line: lineNumberAt(text, entry.index),
+        shape: normalizeShape(expression),
+      });
+    }
+    if (fields.length > 0) {
+      out.push({ name: tableName[2], line: lineNumberAt(text, match.index), fields });
+    }
+    call.lastIndex = close + 1;
+  }
+  return out;
+}
+
 const PARSERS = [
   { kind: "sql_ddl", parse: parseSqlDdl, match: (p) => p.endsWith(".sql") },
+  {
+    kind: "drizzle",
+    parse: parseDrizzle,
+    match: (p) => /\.[cm]?[jt]sx?$/.test(p),
+  },
   { kind: "prisma", parse: parsePrisma, match: (p) => p.endsWith(".prisma") },
   { kind: "python_orm", parse: parsePythonOrm, match: (p) => p.endsWith(".py") },
   { kind: "protobuf", parse: parseProto, match: (p) => p.endsWith(".proto") },
@@ -382,10 +506,7 @@ const UNPARSED_MARKERS = [
   { format: "typeorm", exts: [".ts", ".js"], marker: /^\s*@Entity\s*\(/m },
   { format: "mongoose", exts: [".ts", ".js"], marker: /new\s+(?:mongoose\.)?Schema\s*\(/ },
   { format: "sequelize", exts: [".ts", ".js"], marker: /DataTypes\.[A-Z]/ },
-  // `pgTable(` is a table declaration and nothing else, which is what earns it a place on this
-  // list where `z.object(` below is refused one: a Drizzle *Table call is persistence by
-  // definition, not a shape that might happen to be stored.
-  { format: "drizzle", exts: [".ts", ".js"], marker: /\b(?:pg|mysql|sqlite)Table\s*\(/ },
+  { format: "drizzle", exts: [".ts", ".tsx", ".js", ".jsx"], marker: /\b(?:pg|mysql|sqlite)Table\s*\(/ },
   { format: "activerecord", exts: [".rb"], marker: /^\s*create_table\s+[:'"]/m },
   { format: "ecto", exts: [".ex"], marker: /^\s*use\s+Ecto\.Schema\b/m },
   { format: "gorm", exts: [".go"], marker: /`[^`]*\bgorm:"/ },
@@ -410,8 +531,10 @@ const UNPARSED_MARKERS = [
 function findUnparsedCandidates(repo, files, parsedFiles) {
   const out = [];
   for (const rel of files) {
-    if (parsedFiles.has(rel)) continue;
-    const applicable = UNPARSED_MARKERS.filter((m) => m.exts.some((e) => rel.endsWith(e)));
+    const applicable = UNPARSED_MARKERS.filter((marker) =>
+      marker.exts.some((extension) => rel.endsWith(extension))
+      && (!parsedFiles.has(rel) || marker.format === "drizzle")
+    );
     if (applicable.length === 0) continue;
     let text;
     try {
@@ -424,6 +547,10 @@ function findUnparsedCandidates(repo, files, parsedFiles) {
     for (const { format, marker } of applicable) {
       const match = marker.exec(text);
       if (!match) continue;
+      if (format === "drizzle") {
+        const calls = text.match(/\b(?:pg|mysql|sqlite)Table\s*\(/g)?.length ?? 0;
+        if (parseDrizzle(text).length >= calls) continue;
+      }
       // The line the marker sits on, so the report cites a place and not just a filename.
       const line = text.slice(0, match.index).split("\n").length;
       out.push({ format, ref: `${rel}:${line}` });
@@ -467,8 +594,11 @@ export function classifyField(name, table) {
 }
 
 export function fidesKeyFor(path) {
-  const key = path
-    .replace(/\.[A-Za-z0-9]+$/, "")
+  const parts = String(path).split("/");
+  const leaf = parts.at(-1) ?? "";
+  const extension = extname(leaf);
+  if (!leaf.startsWith(".") && extension) parts[parts.length - 1] = leaf.slice(0, -extension.length);
+  const key = parts.join("/")
     .replace(/[^A-Za-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .toLowerCase();
@@ -484,105 +614,445 @@ export function fieldEntityId(datasetKey, collectionName, fieldName) {
 }
 
 // --------------------------------------------------------------------------------------------- //
-// Systems. A service is a directory that declares itself one; the repository root is the fallback,
-// because a repository with no package manifest anywhere is still one deployable thing.
+// Normalization. Parsers produce file-shaped observations; these functions decide which of those
+// observations describe the same logical datastore and what its current tables look like.
 
-const SERVICE_MANIFESTS = new Set([
-  "package.json", "pyproject.toml", "go.mod", "Cargo.toml", "composer.json", "Gemfile",
-  "build.gradle", "pom.xml",
-]);
+const BOUNDARY_DIRS = new Set(["migration", "migrations", "schema", "schemas", "model", "models"]);
 
-export function discoverServices(files) {
-  const roots = new Set();
-  for (const rel of files) {
-    const parts = rel.split("/");
-    if (SERVICE_MANIFESTS.has(parts[parts.length - 1])) roots.add(parts.slice(0, -1).join("/"));
-  }
-  if (roots.size === 0) roots.add("");
-  return [...roots].sort();
+function isMigrationPath(rel) {
+  return rel.split("/").some((part) => /^(?:migration|migrations)$/i.test(part));
 }
 
-export function collectFacts(repo) {
-  const { files, enumeratedBy } = listFiles(repo);
-  const datasets = [];
-  const parsedFiles = new Set();
-  const parsedByKind = {};
+export function datastoreBoundary(rel) {
+  const parts = rel.split("/");
+  const file = parts.pop();
+  const marker = parts.map((part) => BOUNDARY_DIRS.has(part.toLowerCase())).lastIndexOf(true);
+  if (marker >= 0) return parts.slice(0, marker).join("/");
+  if (/^(?:schema|models?)\.[^.]+$/i.test(file ?? "")) return parts.join("/");
+  return parts.join("/");
+}
+
+function refsFor(rel, item) {
+  return [`${rel}:${item.line}`];
+}
+
+function cloneCollections(collections, rel) {
+  return collections.map((collection) => ({
+    name: collection.name,
+    refs: refsFor(rel, collection),
+    fields: collection.fields.map((field) => ({
+      name: field.name,
+      shape: field.shape ?? "",
+      refs: refsFor(rel, field),
+    })),
+  }));
+}
+
+function splitSqlStatements(text) {
+  const out = [];
+  let start = 0;
+  let line = 1;
+  let startLine = 1;
+  let quote = null;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote !== null) {
+      if (ch === quote && text[i + 1] === quote) i += 1;
+      else if (ch === quote) quote = null;
+    } else if (ch === "'" || ch === '"' || ch === "`") {
+      quote = ch;
+    } else if (text.startsWith("--", i)) {
+      const end = text.indexOf("\n", i + 2);
+      i = end < 0 ? text.length : end - 1;
+    } else if (text.startsWith("/*", i)) {
+      const comment = text.indexOf("*/", i + 2);
+      const end = comment < 0 ? text.length : comment + 2;
+      line += text.slice(i, end).split("\n").length - 1;
+      i = end - 1;
+    } else if (ch === ";") {
+      const statement = text.slice(start, i + 1).trim();
+      if (statement) out.push({ text: statement, line: startLine });
+      start = i + 1;
+      startLine = line;
+    }
+    if (ch === "\n") {
+      line += 1;
+      if (text.slice(start, i + 1).trim() === "") startLine = line;
+    }
+  }
+  const tail = text.slice(start).trim();
+  if (tail) out.push({ text: tail, line: startLine });
+  return out;
+}
+
+function migrationOperation(statement, rel) {
+  const compact = statement.text.replace(/--.*$/gm, " ").replace(/\/\*[\s\S]*?\*\//g, " ").trim();
+  const ref = `${rel}:${statement.line}`;
+  if (/^create\s+table\b/i.test(compact)) {
+    const parsed = parseSqlDdl(statement.text).map((collection) => ({
+      name: collection.name,
+      refs: [`${rel}:${statement.line + collection.line - 1}`],
+      fields: collection.fields.map((field) => ({
+        name: field.name,
+        shape: field.shape ?? "",
+        refs: [`${rel}:${statement.line + field.line - 1}`],
+      })),
+    }));
+    return parsed.length === 1
+      ? { kind: "create_table", table: parsed[0], ref }
+      : { kind: "unsupported", ref };
+  }
+  if (/^alter\s+table\b/i.test(compact) && /,\s*(?:add|drop|rename|alter)\b/i.test(compact)) {
+    return { kind: "unsupported", ref };
+  }
+  let match = compact.match(
+    /^alter\s+table\s+(?:if\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+add\s+(?:column\s+)?(?:if\s+not\s+exists\s+)?(?!constraint\b)[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s+([\s\S]+?);?$/i,
+  );
+  if (match) {
+    return {
+      kind: "add_column",
+      table: match[1].split(".").pop(),
+      field: { name: match[2], shape: normalizeSqlShape(match[3]), refs: [ref] },
+      ref,
+    };
+  }
+  match = compact.match(/^alter\s+table\s+(?:if\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+drop\s+(?:column\s+)?(?:if\s+exists\s+)?[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s*;?$/i);
+  if (match) return { kind: "drop_column", table: match[1].split(".").pop(), field: match[2], ref };
+  match = compact.match(/^alter\s+table\s+[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+rename\s+column\s+[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s+to\s+[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s*;?$/i);
+  if (match) return { kind: "rename_column", table: match[1].split(".").pop(), from: match[2], to: match[3], ref };
+  match = compact.match(/^alter\s+table\s+[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+rename\s+to\s+[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s*;?$/i);
+  if (match) return { kind: "rename_table", from: match[1].split(".").pop(), to: match[2], ref };
+  match = compact.match(/^drop\s+table\s+(?:if\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?(?:\s+(?:cascade|restrict))?\s*;?$/i);
+  if (match) return { kind: "drop_table", table: match[1].split(".").pop(), ref };
+  return /^(?:create|alter|drop)\s+(?:table|column)\b/i.test(compact)
+    ? { kind: "unsupported", ref }
+    : { kind: "non_structural", ref };
+}
+
+function replayMigrations(observations) {
+  const tables = new Map();
+  const operations = [];
+  const gaps = [];
+  for (const observation of observations.sort((a, b) => BY_PATH(a.path, b.path))) {
+    for (const statement of splitSqlStatements(observation.text)) {
+      const operation = migrationOperation(statement, observation.path);
+      operations.push(operation);
+      if (operation.kind === "unsupported") {
+        gaps.push({
+          format: "sql_migration",
+          ref: operation.ref,
+          reason: "unsupported structural migration statement",
+        });
+      }
+      else if (operation.kind === "create_table") {
+        if (tables.has(operation.table.name)) gaps.push({ format: "sql_migration", ref: operation.ref, reason: `table '${operation.table.name}' already exists during replay` });
+        else tables.set(operation.table.name, operation.table);
+      } else if (operation.kind === "add_column") {
+        const table = tables.get(operation.table);
+        if (!table || table.fields.some((field) => field.name === operation.field.name)) {
+          gaps.push({
+            format: "sql_migration", ref: operation.ref,
+            reason: "ADD COLUMN could not be applied to the observed state",
+          });
+        }
+        else table.fields.push(operation.field);
+      } else if (operation.kind === "drop_column") {
+        const table = tables.get(operation.table);
+        const index = table?.fields.findIndex((field) => field.name === operation.field) ?? -1;
+        if (!table || index < 0) gaps.push({ format: "sql_migration", ref: operation.ref, reason: "DROP COLUMN could not be applied to the observed state" });
+        else table.fields.splice(index, 1);
+      } else if (operation.kind === "rename_column") {
+        const table = tables.get(operation.table);
+        const field = table?.fields.find((item) => item.name === operation.from);
+        if (!field || table.fields.some((item) => item.name === operation.to)) {
+          gaps.push({
+            format: "sql_migration", ref: operation.ref,
+            reason: "RENAME COLUMN could not be applied to the observed state",
+          });
+        }
+        else { field.name = operation.to; field.refs.push(operation.ref); }
+      } else if (operation.kind === "rename_table") {
+        const table = tables.get(operation.from);
+        if (!table || tables.has(operation.to)) gaps.push({ format: "sql_migration", ref: operation.ref, reason: "RENAME TABLE could not be applied to the observed state" });
+        else {
+          tables.delete(operation.from);
+          table.name = operation.to;
+          table.refs.push(operation.ref);
+          tables.set(operation.to, table);
+        }
+      } else if (operation.kind === "drop_table") {
+        if (!tables.delete(operation.table)) gaps.push({ format: "sql_migration", ref: operation.ref, reason: "DROP TABLE could not be applied to the observed state" });
+      }
+    }
+  }
+  return { collections: gaps.length === 0 ? [...tables.values()] : [], operations, gaps };
+}
+
+function mergeCanonical(observations) {
+  const tables = new Map();
+  const gaps = [];
+  for (const observation of observations) {
+    for (const incoming of observation.collections) {
+      if (!tables.has(incoming.name)) tables.set(incoming.name, { name: incoming.name, refs: [], fields: [] });
+      const table = tables.get(incoming.name);
+      table.refs.push(...incoming.refs);
+      for (const field of incoming.fields) {
+        const previous = table.fields.find((item) => item.name === field.name);
+        if (!previous) table.fields.push({ ...field, refs: [...field.refs] });
+        else if (previous.shape === field.shape) previous.refs.push(...field.refs);
+        else gaps.push({ format: "schema_conflict", ref: field.refs[0], reason: `conflicting declarations for '${incoming.name}.${field.name}'` });
+      }
+    }
+  }
+  return { collections: gaps.length === 0 ? [...tables.values()] : [], gaps };
+}
+
+function normalizedDataset(boundary, collections, sourceKinds) {
+  const datasetKey = fidesKeyFor(boundary || "repository");
   let fieldCount = 0;
   let classified = 0;
   let needsReview = 0;
   const specialRefs = [];
-
-  for (const rel of files) {
-    const parser = PARSERS.find((p) => p.match(rel));
-    if (!parser) continue;
-    let text;
-    try {
-      const raw = readFileSync(join(repo, rel));
-      if (raw.length > MAX_BYTES) continue;
-      text = raw.toString("utf8");
-    } catch {
-      continue;
-    }
-    const parsed = parser.parse(text);
-    if (parsed.length === 0) continue;
-    parsedFiles.add(rel);
-    parsedByKind[parser.kind] = (parsedByKind[parser.kind] ?? 0) + 1;
-
-    const datasetKey = fidesKeyFor(rel);
-    const collections = parsed.map((collection) => {
-      const fields = collection.fields.map((field) => {
+  const normalizedCollections = collections
+    .sort((a, b) => BY_PATH(a.name, b.name))
+    .map((collection) => {
+      const fields = collection.fields.sort((a, b) => BY_PATH(a.name, b.name)).map((field) => {
         const verdict = classifyField(field.name, TABLE);
         fieldCount += 1;
         if (verdict.needs_review) needsReview += 1;
         else if (verdict.data_categories.length > 0) classified += 1;
-        if (verdict.special_category) specialRefs.push(`${rel}:${field.line}`);
-        const identity = fieldEntityId(datasetKey, collection.name, field.name);
-        const semantic = {
-          dataset: datasetKey,
-          collection: collection.name,
-          field: field.name,
-          shape: field.shape ?? "",
-        };
+        if (verdict.special_category) specialRefs.push(...field.refs);
+        const semantic = { dataset: datasetKey, collection: collection.name, field: field.name, shape: field.shape ?? "" };
         return {
           name: field.name,
-          ref: `${rel}:${field.line}`,
+          ref: field.refs[0],
+          refs: [...new Set(field.refs)].sort(BY_PATH),
           shape: field.shape ?? "",
-          entity_id: identity,
+          entity_id: fieldEntityId(datasetKey, collection.name, field.name),
           semantic_digest: canonicalDigest(semantic),
           ...verdict,
         };
       });
       return {
         name: collection.name,
-        ref: `${rel}:${collection.line}`,
+        ref: collection.refs[0],
+        refs: [...new Set(collection.refs)].sort(BY_PATH),
         entity_id: `${datasetKey}/${collection.name}`,
-        semantic_digest: canonicalDigest(
-          fields.map((field) => ({ name: field.name, shape: field.shape })).sort((a, b) =>
-            a.name < b.name ? -1 : a.name > b.name ? 1 : 0
-          )
-        ),
+        semantic_digest: canonicalDigest(fields.map((field) => ({ name: field.name, shape: field.shape }))),
         fields,
       };
     });
-
-    datasets.push({
+  return {
+    dataset: {
       fides_key: datasetKey,
-      name: rel,
-      source_kind: parser.kind,
-      ref: `${rel}:1`,
-      collections,
+      name: boundary || "repository",
+      source_kind: sourceKinds.length === 1 ? sourceKinds[0] : "normalized",
+      source_kinds: sourceKinds,
+      ref: normalizedCollections[0]?.ref ?? `${boundary || "."}:1`,
+      refs: [...new Set(normalizedCollections.flatMap((item) => item.refs))].sort(BY_PATH),
+      collections: normalizedCollections,
+    },
+    counts: { fieldCount, classified, needsReview },
+    specialRefs,
+  };
+}
+
+const DEPLOYMENT_FILES = /^(?:Dockerfile(?:\..+)?|docker-compose\.ya?ml|compose\.ya?ml|serverless\.ya?ml|vercel\.json|fly\.toml|Procfile)$/i;
+const WORKLOAD_MARKER = /^\s*kind:\s*(?:Deployment|StatefulSet|DaemonSet|CronJob|Job)\s*$/m;
+const NON_RUNTIME_DIRS = new Set(["test", "tests", "fixture", "fixtures", "example", "examples"]);
+
+function isNonRuntimePath(rel) {
+  return rel.split("/").slice(0, -1).some((part) => NON_RUNTIME_DIRS.has(part.toLowerCase()));
+}
+
+function entrypointMatch(rel, text) {
+  const patterns = [
+    { exts: /\.[cm]?[jt]sx?$/, marker: /\b(?:listen\s*\(|createServer\s*\(|serve\s*\(|new\s+Worker\s*\()/ },
+    { exts: /\.py$/, marker: /\b(?:uvicorn\.run\s*\(|(?:app|application)\.run\s*\(|Celery\s*\()/ },
+    { exts: /\.rb$/, marker: /\b(?:run!|Sidekiq\.configure_server)/ },
+    { exts: /\.go$/, marker: /\bhttp\.(?:ListenAndServe|Serve)\s*\(/ },
+    { exts: /\.(?:java|kt)$/, marker: /\bSpringApplication\.run\s*\(/ },
+  ];
+  const pattern = patterns.find((candidate) => candidate.exts.test(rel));
+  return pattern ? pattern.marker.exec(text) : null;
+}
+
+function safeText(repo, rel) {
+  try {
+    const raw = readFileSync(join(repo, rel));
+    return raw.length <= MAX_BYTES ? raw.toString("utf8") : null;
+  } catch { return null; }
+}
+
+/** Package metadata is consulted only when an executable script points to an existing entrypoint. */
+export function discoverServices(repo, files) {
+  const evidence = new Map();
+  const fileSet = new Set(files);
+  const packageRoots = new Set(
+    files
+      .filter((rel) =>
+        /(?:^|\/)(?:package\.json|pyproject\.toml|go\.mod|Cargo\.toml|pom\.xml|build\.gradle)$/.test(rel)
+      )
+      .map((rel) => dirname(rel) === "." ? "" : dirname(rel).split(sep).join("/")),
+  );
+  const runtimeRoot = (rel) => {
+    let candidate = dirname(rel) === "." ? "" : dirname(rel).split(sep).join("/");
+    while (true) {
+      if (packageRoots.has(candidate)) return candidate;
+      if (candidate === "") return dirname(rel) === "." ? "" : dirname(rel).split(sep).join("/");
+      const parent = dirname(candidate).split(sep).join("/");
+      candidate = parent === "." ? "" : parent;
+    }
+  };
+  const add = (root, ref, kind) => {
+    if (!evidence.has(root)) evidence.set(root, []);
+    evidence.get(root).push({ ref, kind });
+  };
+  for (const rel of files) {
+    if (isNonRuntimePath(rel)) continue;
+    const leaf = basename(rel);
+    const root = dirname(rel) === "." ? "" : dirname(rel).split(sep).join("/");
+    const text = safeText(repo, rel);
+    if (DEPLOYMENT_FILES.test(leaf)) add(root, `${rel}:1`, "deployment");
+    const workload = /\.ya?ml$/i.test(rel) && text ? WORKLOAD_MARKER.exec(text) : null;
+    if (workload) add(root, `${rel}:${lineNumberAt(text, workload.index)}`, "workload");
+    const entrypoint = text ? entrypointMatch(rel, text) : null;
+    if (entrypoint) {
+      add(runtimeRoot(rel), `${rel}:${lineNumberAt(text, entrypoint.index)}`, "entrypoint");
+    }
+    if (leaf === "package.json" && text) {
+      try {
+        const pkg = JSON.parse(text);
+        const scripts = pkg?.scripts ?? {};
+        for (const name of ["start", "serve", "worker", "deploy"]) {
+          if (typeof scripts[name] !== "string") continue;
+          const candidates = [
+            pkg.main,
+            pkg.bin,
+            ...scripts[name].matchAll(/(?:^|\s)([^\s"']+\.(?:[cm]?[jt]sx?))(?:\s|$)/g),
+          ].flatMap((item) =>
+            typeof item === "string"
+              ? [item]
+              : item?.[1]
+                ? [item[1]]
+                : typeof item === "object" && item
+                  ? Object.values(item).filter((value) => typeof value === "string")
+                  : []
+          );
+          if (candidates.some((candidate) => {
+            const path = candidate.replace(/^\.\//, "");
+            return fileSet.has(root ? `${root}/${path}` : path);
+          })) {
+            add(root, `${rel}:1`, "executable_script");
+            break;
+          }
+        }
+      } catch { /* Invalid package metadata is not runtime evidence. */ }
+    }
+  }
+  if (evidence.size === 0) {
+    evidence.set("", [{ ref: files.length > 0 ? `${files[0]}:1` : ".:1", kind: "repository_fallback" }]);
+  }
+  return [...evidence.entries()]
+    .sort(([a], [b]) => BY_PATH(a, b))
+    .map(([root, refs]) => ({
+      root,
+      evidence: refs.sort((a, b) => BY_PATH(a.ref, b.ref)),
+    }));
+}
+
+function assertUniqueKeys(kind, rows) {
+  const seen = new Map();
+  for (const row of rows) {
+    const previous = seen.get(row.fides_key);
+    if (previous) {
+      throw new Error(
+        `${kind} key collision '${row.fides_key}' for '${previous}' and '${row.name}'; `
+        + "rename one boundary so their normalized keys differ",
+      );
+    }
+    seen.set(row.fides_key, row.name);
+  }
+}
+
+export function collectFacts(repo) {
+  const { files, enumeratedBy } = listFiles(repo);
+  const observations = [];
+  const parsedFiles = new Set();
+  const parsedByKind = {};
+  for (const rel of files) {
+    const parser = PARSERS.find((candidate) => candidate.match(rel));
+    if (!parser) continue;
+    const text = safeText(repo, rel);
+    if (text === null) continue;
+    const parsed = parser.parse(text);
+    const migrationOnly = parser.kind === "sql_ddl" && isMigrationPath(rel);
+    const hasMigrationDdl = migrationOnly && splitSqlStatements(text).some(
+      (statement) => migrationOperation(statement, rel).kind !== "non_structural"
+    );
+    if (parsed.length === 0 && !hasMigrationDdl) continue;
+    parsedFiles.add(rel);
+    parsedByKind[parser.kind] = (parsedByKind[parser.kind] ?? 0) + 1;
+    observations.push({
+      path: rel,
+      boundary: datastoreBoundary(rel),
+      kind: parser.kind,
+      role: migrationOnly ? "migration" : "canonical",
+      collections: cloneCollections(parsed, rel),
+      ...(migrationOnly ? { text } : {}),
     });
   }
 
-  const systems = discoverServices(files).map((root) => ({
-    fides_key: fidesKeyFor(root === "" ? "repository" : root),
-    name: root === "" ? "repository" : root,
-    ref: root === "" ? "." : root,
+  const groups = new Map();
+  for (const observation of observations) {
+    if (!groups.has(observation.boundary)) groups.set(observation.boundary, []);
+    groups.get(observation.boundary).push(observation);
+  }
+  const datasets = [];
+  const migrationGaps = [];
+  const migrationOperations = [];
+  const schemaConflicts = [];
+  let fieldCount = 0;
+  let classified = 0;
+  let needsReview = 0;
+  const specialRefs = [];
+  for (const [boundary, group] of [...groups.entries()].sort(([a], [b]) => BY_PATH(a, b))) {
+    const canonical = group.filter((item) => item.role === "canonical");
+    const migration = group.filter((item) => item.role === "migration");
+    const result = canonical.length > 0 ? mergeCanonical(canonical) : replayMigrations(migration);
+    schemaConflicts.push(...(canonical.length > 0 ? result.gaps : []));
+    if (migration.length > 0) {
+      const replay = replayMigrations(migration);
+      migrationGaps.push(...replay.gaps);
+      migrationOperations.push(...replay.operations.map((operation) => ({
+        boundary,
+        ...operation,
+      })));
+      for (const observation of migration) delete observation.text;
+    }
+    if (result.collections.length === 0) continue;
+    const sourceKinds = [...new Set(group.map((item) => item.kind))].sort(BY_PATH);
+    const normalized = normalizedDataset(boundary, result.collections, sourceKinds);
+    datasets.push(normalized.dataset);
+    fieldCount += normalized.counts.fieldCount;
+    classified += normalized.counts.classified;
+    needsReview += normalized.counts.needsReview;
+    specialRefs.push(...normalized.specialRefs);
+  }
+  assertUniqueKeys("dataset", datasets);
+
+  const services = discoverServices(repo, files);
+  const systems = services.map(({ root, evidence }) => ({
+    fides_key: fidesKeyFor(root || "repository"),
+    name: root || "repository",
+    ref: evidence[0].ref,
+    refs: evidence.map((item) => item.ref),
+    runtime_evidence: evidence,
     dataset_references: datasets
-      .filter((d) => (root === "" ? true : d.name.startsWith(`${root}/`)))
-      .map((d) => d.fides_key)
-      .sort(),
+      .filter((dataset) => root === "" || dataset.name === root || dataset.name.startsWith(`${root}/`))
+      .map((dataset) => dataset.fides_key).sort(BY_PATH),
   }));
+  assertUniqueKeys("system", systems);
 
   return {
     piece: PIECE,
@@ -590,6 +1060,8 @@ export function collectFacts(repo) {
     files_scanned: files.length,
     datasets,
     systems,
+    observations,
+    migration_operations: migrationOperations,
     counts: {
       datasets: datasets.length,
       collections: datasets.reduce((n, d) => n + d.collections.length, 0),
@@ -614,6 +1086,8 @@ export function collectFacts(repo) {
       files_parsed: parsedFiles.size,
       parsed_by_kind: Object.fromEntries(Object.entries(parsedByKind).sort()),
       unparsed_candidates: findUnparsedCandidates(repo, files, parsedFiles),
+      migration_gaps: migrationGaps.sort((a, b) => BY_PATH(a.ref, b.ref)),
+      schema_conflicts: schemaConflicts.sort((a, b) => BY_PATH(a.ref, b.ref)),
     },
   };
 }
@@ -655,9 +1129,13 @@ export function digestOf(derived) {
   // `coverage` is excluded for the same reason and a sharper one: the manifest does not record it,
   // so a newly-appeared Mongoose file would produce a drift that re-running :scan could never
   // clear. Coverage is reported to CI from the derived facts directly, where it can be acted on.
-  const { generated_by, coverage, ...facts } = derived;
+  // Raw observations retain the evidence needed to audit normalization, but historical migration
+  // files that lose to a canonical schema are not part of the current logical topology.
+  const { generated_by, coverage, observations, migration_operations, ...facts } = derived;
   void generated_by;
   void coverage;
+  void observations;
+  void migration_operations;
   return createHash("sha256").update(JSON.stringify(facts, null, 0)).digest("hex");
 }
 
@@ -737,7 +1215,7 @@ export function buildSkeleton(derived, provenance) {
       name: dataset.name,
       collections: dataset.collections.map((collection) => ({
         name: collection.name,
-        refs: [collection.ref],
+        refs: collection.refs ?? [collection.ref],
         structure_digest: structureDigest(collection.fields),
         // The collection is the claim unit: one owner signs for "these are the categories in this
         // table". Per-field attribution would mean five hundred blocks on a five-hundred-column
@@ -747,7 +1225,7 @@ export function buildSkeleton(derived, provenance) {
           const out = {
             name: field.name,
             data_categories: field.data_categories,
-            refs: [field.ref],
+            refs: field.refs ?? [field.ref],
           };
           if (field.needs_review) out.needs_review = true;
           return out;
@@ -765,7 +1243,7 @@ export function buildSkeleton(derived, provenance) {
           data_use: "",
           data_subjects: [],
           data_categories: [],
-          refs: [system.ref],
+          refs: system.refs ?? [system.ref],
           needs_review: true,
         },
       ],
@@ -851,10 +1329,19 @@ function main(argv) {
     return 2;
   }
 
-  const derived = collectFacts(opts.repo);
-  const provenance = repoProvenance(opts.repo);
-  const digest = digestOf(derived);
-  const legacyDigest = legacyDigestOf(derived);
+  let derived;
+  let provenance;
+  let digest;
+  let legacyDigest;
+  try {
+    derived = collectFacts(opts.repo);
+    provenance = repoProvenance(opts.repo);
+    digest = digestOf(derived);
+    legacyDigest = legacyDigestOf(derived);
+  } catch (error) {
+    process.stderr.write(`error: ${error.message}\n`);
+    return 2;
+  }
   const manifestPath = join(opts.repo, ".noru", "privacy-datamap.yml");
   const derivedPath = join(opts.repo, ".noru", ".cache", "privacy-datamap.derived.json");
   const scanStatePath = join(opts.repo, ".noru", ".cache", "privacy-datamap.scan.json");
@@ -911,6 +1398,8 @@ function main(argv) {
     rendered: rendered,
     provenance,
     counts: { files_scanned: derived.files_scanned, ...derived.counts },
+    coverage_gaps: derived.coverage.unparsed_candidates.length
+      + derived.coverage.migration_gaps.length + derived.coverage.schema_conflicts.length,
   };
 
   if (opts.json) {
@@ -927,6 +1416,9 @@ function main(argv) {
         `classified: ${derived.counts.classified}, needs review: ${derived.counts.needs_review}`,
         derived.special_category_refs.length > 0
           ? `special-category data at: ${derived.special_category_refs.join(", ")}`
+          : "",
+        summary.coverage_gaps > 0
+          ? `coverage gaps: ${summary.coverage_gaps} (see ${summary.derived_facts})`
           : "",
         `derived facts: ${summary.derived_facts}`,
         wroteSkeleton ? `wrote skeleton: ${summary.manifest}` : "",

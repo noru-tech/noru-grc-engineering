@@ -21,13 +21,18 @@ model itself, and unchanged fields are never reclassified.
 
 | Format | Files | What it takes |
 |---|---|---|
-| SQL DDL | `*.sql` (schemas, migrations) | `CREATE TABLE` → collection, each column → field |
+| SQL DDL | `*.sql` (schemas, migrations) | declarative `CREATE TABLE`, or ordered migration replay for the supported operations below |
+| Drizzle | `*.ts`, `*.tsx`, `*.js`, `*.jsx` | common multiline `pgTable`, `mysqlTable` and `sqliteTable` declarations, including nested builder calls |
 | Prisma | `*.prisma` | `model` → collection, each field |
 | Python ORM | `*.py` | Django `models.Model` and SQLAlchemy declarative classes; an attribute assigned from `Column(...)`, `mapped_column(...)` or a `*Field(...)` call |
 | Protobuf | `*.proto` | `message` → collection, each numbered field |
 | GraphQL SDL | `*.graphql`, `*.gql`, `*.graphqls` | `type` and `input` → collection, each field |
 
-**Not read yet**: OpenAPI and JSON Schema, TypeORM and Sequelize entities, Drizzle tables, Mongoose
+Drizzle parsing is deliberately static: literal table names and object-literal column maps are
+supported; declarations assembled through runtime values are reported as `drizzle` coverage rather
+than executed.
+
+**Not read yet**: OpenAPI and JSON Schema, TypeORM and Sequelize entities, Mongoose
 schemas, ActiveRecord, Ecto, GORM structs, and TypeScript or Zod DTOs. A repository whose schema
 lives only in one of those produces an empty data map, which is not the same as having no personal
 data in it.
@@ -55,6 +60,43 @@ real, which is why they stay on the list.
 The marker is a deterministic text match, never an attempt to read the schema — the honest output is
 "there is one here and I cannot see inside it". A shape nobody has written a marker for is still
 invisible, so this table is still the thing to read before trusting a small result.
+
+## From observations to logical topology
+
+A parsed file is a structural **observation**, not automatically a dataset. The collector groups
+schema files under their nearest datastore boundary, merges tables contributed by multiple
+declarative files, and emits one current collection and field in the review manifest. The complete
+file-shaped observations remain in `.noru/.cache/privacy-datamap.derived.json` with their citations,
+so normalization is auditable without making a reviewer read duplicate migration history.
+
+Declarative schemas are the current-state authority when they share a boundary with migrations.
+That includes Drizzle, Prisma, Django/SQLAlchemy and standalone SQL schemas. Historical migrations
+remain as observations but do not produce duplicate datasets or fields. A migration-only datastore
+is replayed in lexical path order. The supported structural subset is:
+
+- `CREATE TABLE`
+- `ALTER TABLE ... ADD COLUMN`, `DROP COLUMN`, and `RENAME COLUMN ... TO ...`
+- `ALTER TABLE ... RENAME TO ...`
+- `DROP TABLE`
+
+If a structural statement is outside that subset, references missing state, or conflicts with
+another declarative field shape, the datastore is omitted from the logical map and the exact
+`file:line` appears under `coverage.migration_gaps` or `coverage.schema_conflicts`. The collector
+does not guess a partial current state. CI reports these alongside unsupported-format coverage.
+
+Dataset, collection and field identities come from the logical datastore boundary and schema
+names, not migration filenames. Normalized-key collisions are checked before any manifest is
+written and fail with both colliding boundaries. This also means a hidden directory such as
+`.example` becomes `example`, never an empty key that silently falls back to `repository`.
+
+Systems use a separate evidence pass. Package metadata alone is weak evidence and creates no
+system. A runtime boundary needs a container or deployment definition, a Kubernetes workload, a
+server/worker entrypoint, or an executable start/deploy script that points to an application
+entrypoint. Libraries and tooling packages therefore stay out of the topology. If none of those
+signals exists, the collector emits one conservative repository-level system. Runtime discovery
+ignores markers inside conventional test, fixture and example directories. It
+does not infer purpose, data use, subjects, or access to a datastore outside the runtime's own
+directory; those remain human review decisions.
 
 ## What it scans
 
@@ -117,6 +159,7 @@ On later scans `scripts/reconcile.py` compares every current field with that obs
 | new or structurally changed exact-table field | classify deterministically; re-sign the collection |
 | new or structurally changed ambiguous field | add only that field to the agent proposal queue |
 | removed field | remove it from the candidate; re-sign the collection |
+| unique logical-identity migration | carry the decision forward under the new datastore key |
 
 The reconciler writes `.noru/.cache/privacy-datamap.reconciliation.json`,
 `.noru/.cache/privacy-datamap.proposals.json` and
@@ -127,6 +170,13 @@ the current observations.
 
 A valid manifest from a release before locks existed enters migration mode. Its decisions are
 carried forward and its first lock is seeded without sending every field back through an agent.
+When a normalized identity replaces an older file-derived identity, maintenance mode matches only
+one-to-one candidates with the same collection and field, a compatible normalized scalar type
+family (for example SQL `TEXT` and a Drizzle `text(...)` builder), and supporting source scope.
+Ambiguous candidates appear in `identity_ambiguities` and are left for review; the
+reconciler never chooses one by similarity alone. The first normalized release can change dataset
+keys in the downstream diff even when field decisions carry forward, so review the dataset-level
+create/archive plan before pushing.
 
 The claim unit is the **collection**, not the field. One person signs for "these are the categories
 in this table"; per-field attribution would mean five hundred interpretation blocks on a

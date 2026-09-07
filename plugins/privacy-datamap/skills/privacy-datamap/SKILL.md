@@ -32,7 +32,9 @@ Always in that order.
 This is the shape of the work, and getting it wrong is the failure mode.
 
 The collector reads **structure**: that a column named `email` exists at `db/schema.sql:12` is a
-parse, and it carries the `file:line` to prove it. It also classifies the field names it can resolve
+parse, and it carries the `file:line` to prove it. A file is evidence, not automatically a dataset:
+the collector normalizes SQL, Drizzle, Prisma and Python ORM observations into logical datastore
+boundaries before it writes the review manifest. It also classifies the field names it can resolve
 by **exact lookup** against a bundled table — `email`, `password_hash`, `last_login_ip`. That is a
 lookup, not an inference, which is what lets the collector be deterministic.
 
@@ -52,6 +54,8 @@ not the agent, decides what needs semantic analysis:
 
 - `carry_forward` — preserve the accepted classification. Never reinterpret it.
 - `refresh_evidence` — update the citation only. Never invoke a model for line movement.
+- `identity_migration` — preserve the accepted classification under a unique, evidence-supported
+  logical identity. Do not reinterpret it.
 - an exact-table `add` or `material_change` — the classification is deterministic, although the
   changed collection still needs a new sign-off.
 - `proposal_required` — and only these entries — are the agent's work queue.
@@ -60,6 +64,19 @@ On a first scan the mode is `bootstrap`. A valid manifest created before locks e
 `migration` and must seed its first lock without reclassification. Later scans are `maintenance`.
 Agent suggestions live in `.noru/.cache/privacy-datamap.proposals.json`; they are not decisions and
 cannot update the accepted manifest or lock by themselves.
+
+Read `coverage.migration_gaps`, `coverage.schema_conflicts` and `identity_ambiguities` before
+proposing anything. Declarative schemas take precedence over migration history at the same
+datastore boundary. Migration-only stores replay only `CREATE TABLE`, column add/drop/rename, and
+table drop/rename. Unsupported or inconsistent structural operations omit that datastore rather
+than producing a guessed partial state. An ambiguous old-to-logical identity is review work, never
+permission to choose the closest-looking candidate.
+
+Runtime systems also come from evidence, not package manifests. Containers, workloads,
+server/worker entrypoints, deployment configuration, or executable start/deploy scripts paired
+with an entrypoint establish a boundary. A library package alone does not. With no confident
+boundary, expect one repository-level fallback system. Never infer processing purpose, data use,
+subjects, or cross-directory datastore access from those markers.
 
 When you resolve one, read `references/classification-guide.md` and use the surrounding context —
 the table's name, the other columns, what the service does. If you genuinely cannot tell, say so and
