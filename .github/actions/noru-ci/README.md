@@ -7,8 +7,8 @@ Full documentation, the exit-code table and the non-GitHub recipes are in
 [`docs/ci-mode.md`](../../../docs/ci-mode.md).
 
 ```yaml
-- uses: actions/checkout@v4
-- uses: actions/setup-node@v4
+- uses: actions/checkout@v5
+- uses: actions/setup-node@v5
   with:
     node-version: "20"
 - uses: noru-tech/noru-grc-engineering/.github/actions/noru-ci@v0.7.1

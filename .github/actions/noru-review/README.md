@@ -5,9 +5,9 @@ Routes a pull-request diff through the relevant GRC pieces and runs only their l
 `NORU_API_KEY` from child processes, and writes one consolidated JSON report and job summary.
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v5
   with: { fetch-depth: 0 }
-- uses: actions/setup-node@v4
+- uses: actions/setup-node@v5
   with: { node-version: "20" }
 - uses: noru-tech/noru-grc-engineering/.github/actions/noru-review@v0.7.1
   with:
