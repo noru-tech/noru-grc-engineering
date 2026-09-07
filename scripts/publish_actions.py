@@ -224,6 +224,24 @@ class Results:
         return 0 if ok else 1
 
 
+# The Marketplace listing form rejects a longer description, and only says so on the form — after
+# the release exists in the mirror. Two of three actions were published with descriptions over the
+# limit before this check existed.
+MARKETPLACE_DESCRIPTION_LIMIT = 125
+
+
+def action_description(text):
+    """The top-level description of an action.yml: one quoted line, or a folded `>` block."""
+    match = re.search(r'^description:\s*"([^"\n]*)"\s*$', text, re.M)
+    if match:
+        return match.group(1).strip()
+    match = re.search(r"^description:\s*>-?\n((?:  .*\n)+)", text, re.M)
+    if match:
+        return " ".join(line.strip() for line in match.group(1).splitlines() if line.strip())
+    match = re.search(r"^description:\s*(.+)$", text, re.M)
+    return match.group(1).strip().strip("'\"") if match else ""
+
+
 def check_metadata(results):
     """What the Marketplace validates at listing time, checked before a release rather than after."""
     names = {}
@@ -236,6 +254,12 @@ def check_metadata(results):
         name = match.group(1).strip() if match else ""
         names.setdefault(name, []).append(action)
         results.check(f"[{action}] declares a name", bool(name))
+        description = action_description(text)
+        results.check(
+            f"[{action}] description is 1-{MARKETPLACE_DESCRIPTION_LIMIT} characters (Marketplace limit)",
+            0 < len(description) <= MARKETPLACE_DESCRIPTION_LIMIT,
+            f"{len(description)} chars: {description[:80]}…",
+        )
     for name, owners in names.items():
         results.check(f"action name '{name}' is unique across the mirrors", len(owners) == 1, owners)
 
@@ -392,10 +416,18 @@ def check(output_json, quiet):
                 all((mirror / name).exists() for name in ("action.yml", "README.md", "DISTRIBUTION.json", "scripts/ci_check.py", "plugins", "contract", "LICENSE")),
                 sorted(p.name for p in mirror.iterdir()),
             )
+            # The generated banner always carries a `uses:` line, so the usage example has to be
+            # found in the in-tree README — the body — or a Marketplace listing ships with no
+            # example at all, which is how the enforce action was published the first time.
+            source_readme = (ROOT / ACTIONS[action]["source"] / "README.md").read_text(encoding="utf-8")
+            results.check(
+                f"[{action}] README body has a copyable `uses: {ACTIONS[action]['repo']}@v…` example",
+                f"uses: {ACTIONS[action]['repo']}@v" in source_readme,
+            )
             readme = (mirror / "README.md").read_text(encoding="utf-8")
             results.check(
-                f"[{action}] README points at the mirror and has no dangling relative links",
-                f"uses: {ACTIONS[action]['repo']}@v" in readme and "](../" not in readme,
+                f"[{action}] mirror README has no dangling relative links",
+                "](../" not in readme and "](./" not in readme,
             )
         check_ci(results, mirrors["noru-ci"], tmp)
         check_review(results, mirrors["noru-review"], tmp)
