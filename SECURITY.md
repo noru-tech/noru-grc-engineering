@@ -91,6 +91,6 @@ git.** `noru:doctor` checks this, and every piece README says so.
 ## What is deliberately not in this repository
 
 No framework control text, control guidance, or evidence-item catalogue. Two reasons, and both are
-sufficient on their own: licensing (the SCF is CC BY-ND), and drift — a vendored catalogue is wrong
-the moment the framework moves, and wrong quietly. Pieces call the API instead, and the contract test
+sufficient on their own: licensing — framework catalogues carry terms that forbid redistribution —
+and drift — a vendored catalogue is wrong the moment the framework moves, and wrong quietly. Pieces call the API instead, and the contract test
 fails the build if a catalogue-shaped identifier appears in a plugin.
