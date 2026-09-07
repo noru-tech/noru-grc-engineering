@@ -1,6 +1,6 @@
 {
   "name": "repo-enforcement",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "description": "Install, plan, apply, verify, and burn down enforceable repository-level GRC merge gates.",
   "author": {
     "name": "Noru",

@@ -6,6 +6,15 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.7.5 — 2026-09-07
+
+### Changed
+
+- The rationale for vendoring no framework catalogue, in `SECURITY.md` and `contract/README.md`,
+  is stated generically: framework catalogues carry terms that forbid redistribution, and a
+  vendored copy drifts the moment the framework moves. It no longer names one framework and its
+  licence as the example.
+
 ## 0.7.4 — 2026-09-07
 
 ### Added
