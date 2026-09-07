@@ -15,6 +15,7 @@
     "deterministic": true,
     "network": false,
     "inputs": [
+      ".noru/privacy-datamap-stores.json",
       ".noru/.cache/privacy-datamap-queue.json"
     ]
   },
@@ -67,7 +68,7 @@
         },
         {
           "path": "fixtures/invalid-needs-review.privacy-datamap.yml",
-          "expect_message": "still true"
+          "expect_message": "accept it as non-personal so reconciliation can compact it into `non_personal_fields`"
         },
         {
           "path": "fixtures/invalid-dangling-dataset-reference.privacy-datamap.yml",
@@ -168,7 +169,7 @@
     "quiet": true,
     "validate": { "runtime": "python3", "entrypoint": "scripts/validate_manifest.py", "arguments": ["{manifest}", "--output=json", "--quiet"] },
     "drift_check": { "runtime": "node", "entrypoint": "scripts/collect.mjs", "arguments": ["--repo={repo}", "--check", "--output=json", "--quiet"] },
-    "watch_paths": ["**/*.sql", "**/*.prisma", "**/*.py", "**/*.proto", "**/*.graphql", "**/*.gql", ".noru/privacy-datamap.yml"],
+    "watch_paths": ["**/*.sql", "**/*.prisma", "**/*.py", "**/*.proto", "**/*.graphql", "**/*.gql", ".noru/privacy-datamap-stores.json", ".noru/privacy-datamap.yml"],
     "exit_codes": {
       "0": "success",
       "1": "drift, validation failure, an unresolved needs_review claim, or a stale plan",

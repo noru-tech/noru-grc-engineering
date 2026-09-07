@@ -605,9 +605,9 @@ def check_fields(rep, path, fields, vocab, counts):
             counts["needs_review"] += 1
             rep.err(
                 f"{fpath}.needs_review",
-                "still true — the collector could not classify this field and nobody has. Give it "
-                "a data category, or delete the field if it holds no personal data, then remove "
-                "the flag",
+                "still true — the collector could not classify this field and nobody has. "
+                "Classify the field, or accept it as non-personal so reconciliation can compact "
+                "it into `non_personal_fields`. Then remove the flag",
             )
         elif not cats:
             has_review_child = any(

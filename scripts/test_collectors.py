@@ -2127,6 +2127,37 @@ def test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, t
         fields_of(supported, "customers")["phone_number"],
     )
 
+    constraints, _repo = datamap_repo(
+        tmp,
+        "migration-constraints",
+        {
+            "db/migrations/001.sql": (
+                "CREATE TABLE audit_events (\n"
+                "  operation TEXT,\n"
+                "  related_record_id TEXT,\n"
+                "  CHECK (\n"
+                "    operation = 'created'\n"
+                "    OR\n"
+                "    (operation = 'updated' AND related_record_id IS NOT NULL)\n"
+                "  )\n"
+                ");\n"
+                "--> statement-breakpoint\n"
+                "ALTER TABLE audit_events ADD CONSTRAINT audit_events_operation_fk\n"
+                "  FOREIGN KEY (related_record_id) REFERENCES records(id);\n"
+            ),
+        },
+    )
+    results.check(
+        "[privacy-datamap] migration delimiters and field-neutral constraints create no coverage gaps",
+        constraints["coverage"]["migration_gaps"] == [],
+        constraints["coverage"],
+    )
+    results.check(
+        "[privacy-datamap] multiline CHECK bodies do not become SQL columns",
+        set(fields_of(constraints, "audit_events")) == {"operation", "related_record_id"},
+        fields_of(constraints, "audit_events"),
+    )
+
     unsafe, _repo = datamap_repo(
         tmp,
         "migration-gap",
@@ -2155,6 +2186,170 @@ def test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, t
         conflict["datasets"] == []
         and len(conflict["coverage"]["schema_conflicts"]) == 1,
         conflict["coverage"],
+    )
+
+    duplicate, _repo = datamap_repo(
+        tmp,
+        "migration-duplicate-table",
+        {
+            "db/migrations/001.sql": "CREATE TABLE records (\n  id INTEGER\n);\n",
+            "db/migrations/002.sql": "CREATE TABLE records (\n  id INTEGER\n);\n",
+        },
+    )
+    results.check(
+        "[privacy-datamap] duplicate migration tables remain explicit coverage gaps",
+        duplicate["datasets"] == []
+        and [gap["reason"] for gap in duplicate["coverage"]["migration_gaps"]]
+        == ["table 'records' already exists during replay"],
+        duplicate["coverage"],
+    )
+
+
+def test_datamap_reads_evidence_backed_supplemental_stores(results, tmp):
+    supplement = {
+        "$schema": "https://raw.githubusercontent.com/noru-tech/noru-grc-engineering/v0/contract/privacy-datamap-stores.schema.json",
+        "version": "1.0.0",
+        "datastores": [
+            {
+                "fides_key": "customer_objects",
+                "name": "Customer object storage",
+                "store_type": "object_storage",
+                "provider": "gcs",
+                "refs": ["src/storage.ts:5"],
+                "system_references": ["src"],
+                "collections": [
+                    {
+                        "name": "uploaded_files",
+                        "refs": ["src/storage.ts:1"],
+                        "fields": [
+                            {
+                                "name": "object_key",
+                                "shape": "string",
+                                "evidence_kind": "typed_contract",
+                                "refs": ["src/storage.ts:2"],
+                            },
+                            {
+                                "name": "content_type",
+                                "shape": "string",
+                                "evidence_kind": "upload_payload",
+                                "refs": ["src/storage.ts:3"],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    schema = json.loads(
+        (ROOT / "contract" / "privacy-datamap-stores.schema.json").read_text(encoding="utf-8")
+    )
+    results.check(
+        "[privacy-datamap] the supplemental datastore fixture satisfies its public contract",
+        validate_json_schema(supplement, schema, schema) == [],
+        validate_json_schema(supplement, schema, schema),
+    )
+    derived, _repo = datamap_repo(
+        tmp,
+        "supplemental-store",
+        {
+            "src/storage.ts": (
+                "export type StoredObject = {\n"
+                "  object_key: string\n"
+                "  content_type: string\n"
+                "}\n"
+                "const bucket = storage.bucket('uploads')\n"
+                "export const upload = (value: StoredObject) => bucket.upload(value)\n"
+                "serve(() => 'ok')\n"
+            ),
+            ".noru/privacy-datamap-stores.json": json.dumps(supplement, indent=2) + "\n",
+        },
+    )
+    dataset = derived["datasets"][0]
+    results.check(
+        "[privacy-datamap] an evidence-backed non-schema store joins the logical topology",
+        dataset["fides_key"] == "customer_objects"
+        and dataset["store_type"] == "object_storage"
+        and dataset["provider"] == "gcs"
+        and set(fields_of(derived, "uploaded_files")) == {"object_key", "content_type"},
+        dataset,
+    )
+    results.check(
+        "[privacy-datamap] supplemental system references attach the store to discovered runtime evidence",
+        derived["systems"][0]["fides_key"] == "src"
+        and derived["systems"][0]["dataset_references"] == ["customer_objects"],
+        derived["systems"],
+    )
+
+    sdk_only, _repo = datamap_repo(
+        tmp,
+        "object-sdk-only",
+        {"src/storage.ts": "const bucket = storage.bucket('uploads')\n"},
+    )
+    results.check(
+        "[privacy-datamap] a bucket client call alone never invents object fields or a dataset",
+        sdk_only["datasets"] == [],
+        sdk_only["datasets"],
+    )
+
+    collector = PRIVACY_DATAMAP / "scripts" / "collect.mjs"
+    bad_citation = json.loads(json.dumps(supplement))
+    bad_citation["datastores"][0]["collections"][0]["fields"][0]["refs"] = [
+        "src/storage.ts:99"
+    ]
+    bad_repo = write_files(
+        pathlib.Path(tmp) / "supplement-bad-citation",
+        {
+            "src/storage.ts": (
+                "export type StoredObject = {\n"
+                "  object_key: string\n"
+                "  content_type: string\n"
+                "}\n"
+                "const bucket = storage.bucket('uploads')\n"
+                "export const upload = (value: StoredObject) => bucket.upload(value)\n"
+                "serve(() => 'ok')\n"
+            ),
+            ".noru/privacy-datamap-stores.json": json.dumps(bad_citation),
+        },
+    )
+    bad_result = run(["node", str(collector), f"--repo={bad_repo}", "--quiet"])
+    results.check(
+        "[privacy-datamap] a supplemental field citation beyond the source file stops the scan",
+        bad_result.returncode == 2 and "cites line 99" in bad_result.stderr,
+        bad_result.stderr,
+    )
+
+    unknown_system = json.loads(json.dumps(supplement))
+    unknown_system["datastores"][0]["system_references"] = ["missing_runtime"]
+    unknown_repo = write_files(
+        pathlib.Path(tmp) / "supplement-unknown-system",
+        {
+            "src/storage.ts": (
+                "export type StoredObject = {\n"
+                "  object_key: string\n"
+                "  content_type: string\n"
+                "}\n"
+                "const bucket = storage.bucket('uploads')\n"
+            ),
+            ".noru/privacy-datamap-stores.json": json.dumps(unknown_system),
+        },
+    )
+    unknown_result = run(["node", str(collector), f"--repo={unknown_repo}", "--quiet"])
+    results.check(
+        "[privacy-datamap] a supplemental link to an undiscovered runtime stops the scan",
+        unknown_result.returncode == 2 and "references undiscovered system" in unknown_result.stderr,
+        unknown_result.stderr,
+    )
+
+    tracked_repo = git_repo(
+        pathlib.Path(tmp) / "supplement-untracked",
+        {"src/storage.ts": "export const storage = true\n"},
+        then={".noru/privacy-datamap-stores.json": json.dumps(supplement)},
+    )
+    untracked_result = run(["node", str(collector), f"--repo={tracked_repo}", "--quiet"])
+    results.check(
+        "[privacy-datamap] an untracked supplemental declaration stops a git-backed scan",
+        untracked_result.returncode == 2 and "exists but is not tracked" in untracked_result.stderr,
+        untracked_result.stderr,
     )
 
 
@@ -3012,6 +3207,7 @@ def main(argv):
             test_datamap_separates_datastores_and_falls_back_for_runtime(results, tmp)
             test_datamap_runtime_discovery_ignores_test_files(results, tmp)
             test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, tmp)
+            test_datamap_reads_evidence_backed_supplemental_stores(results, tmp)
             test_datamap_keys_are_unique_or_fail_actionably(results, tmp)
             test_datamap_output_is_byte_deterministic(results, tmp)
             test_datamap_reconciles_file_ids_to_logical_ids(results, tmp)

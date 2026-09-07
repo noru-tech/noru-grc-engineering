@@ -1,14 +1,14 @@
 ---
 name: privacy-datamap
 version: 0.8.0
-description: Build a privacy data map (Fides/Fideslang dataset + system manifest) for this repository by reading its schemas and classifying the personal data in them, then land it in Noru. Use when the user wants a data map, a RoPA, a record of processing, a fideslang manifest, or to work out what personal data a codebase actually holds and where.
+description: Build a privacy data map (Fides/Fideslang dataset + system manifest) for this repository by reading its schemas and evidence-backed supplemental stores, classifying the personal data in them, then landing it in Noru. Use when the user wants a data map, a RoPA, a record of processing, a fideslang manifest, or to work out what personal data a codebase actually holds and where.
 requires:
   bins: ["node", "python3", "git"]
 ---
 
 # privacy-datamap
 
-Read the schemas a repository actually contains, classify the personal data in them against the
+Read the persistent structures a repository actually establishes, classify the personal data in them against the
 Fideslang taxonomy, and land the data map in Noru — with a citation for every field and a named
 owner for every judgement.
 
@@ -90,6 +90,13 @@ with an entrypoint establish a boundary. A library package alone does not. With 
 boundary, expect one repository-level fallback system. Never infer processing purpose, data use,
 subjects, or cross-directory datastore access from those markers.
 
+If repository evidence establishes an object store, queue, search index or third-party store that
+no supported schema describes, look for the committed `.noru/privacy-datamap-stores.json`. Its
+datastores and collections cite their integration evidence, and each field must separately cite a
+typed contract, serializer, upload payload or download result. Never derive object fields from a
+provider client call alone. Treat a missing supplement as missing structural coverage to report,
+not permission to copy fields from an older manifest.
+
 When you resolve one, read `references/classification-guide.md` and use the surrounding context —
 the table's name, the other columns, what the service does. If you genuinely cannot tell, say so and
 ask. A confidently wrong data category is worse than a gap, because the gap gets reviewed and the
@@ -125,8 +132,10 @@ under `special_category_refs`. **Always surface that list explicitly in your rep
 section. It carries the most risk in the map, it gets half the review horizon, and it is the thing a
 reviewer must not have to go looking for.
 
-## Three committed files, and they are not interchangeable
+## Committed inputs and outputs
 
+- `.noru/privacy-datamap-stores.json` — an **optional structural input** for evidence-backed stores
+  that no supported schema describes. Commit it when used; the collector rejects an untracked copy.
 - `.noru/privacy-datamap.yml` — the **manifest**. Privacy-relevant and unresolved field details,
   compact non-personal names, interpretation blocks and review flags. Commit it; reviewing it in a
   pull request is the point.

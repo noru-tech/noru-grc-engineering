@@ -1,6 +1,6 @@
 # privacy-datamap
 
-> Read the schemas a repository actually contains, classify the personal data in them against
+> Read the persistent structures a repository actually establishes, classify the personal data in them against
 > the Fideslang taxonomy, and land the data map in Noru — with complete cited structural facts and
 > a named owner for every judgement.
 
@@ -8,7 +8,7 @@
 
 | Command | Writes to Noru? | What it does |
 |---|---|---|
-| `/privacy-datamap:scan` | no | Reads the repository's schemas → `.noru/privacy-datamap.yml` — and, once that manifest validates, renders `.fides/datamap.yml` |
+| `/privacy-datamap:scan` | no | Reads schemas and evidence-backed supplemental stores → `.noru/privacy-datamap.yml` — and, once that manifest validates, renders `.fides/datamap.yml` |
 | `/privacy-datamap:diff` | no | Reads current state, prints the exact plan |
 | `/privacy-datamap:push` | **yes** | Executes the confirmed plan |
 
@@ -29,13 +29,14 @@ the accountable owner rather than handing over the raw structural inventory.
 | Python ORM | `*.py` | Django `models.Model` and SQLAlchemy declarative classes; an attribute assigned from `Column(...)`, `mapped_column(...)` or a `*Field(...)` call |
 | Protobuf | `*.proto` | `message` → collection, each numbered field |
 | GraphQL SDL | `*.graphql`, `*.gql`, `*.graphqls` | `type` and `input` → collection, each field |
+| Supplemental stores | `.noru/privacy-datamap-stores.json` | explicitly declared object stores, queues, search indexes and third-party stores; every field needs its own repository citation |
 
 Drizzle parsing is deliberately static: literal table names and object-literal column maps are
 supported, including comments between field declarations. Spreads, shorthand properties and
 declarations assembled through runtime values are reported as `drizzle` coverage rather than
 silently treated as a complete table or executed.
 
-**Not read yet**: OpenAPI and JSON Schema, TypeORM and Sequelize entities, Mongoose
+**Not read automatically yet**: OpenAPI and JSON Schema, TypeORM and Sequelize entities, Mongoose
 schemas, ActiveRecord, Ecto, GORM structs, and TypeScript or Zod DTOs. A repository whose schema
 lives only in one of those produces an empty data map, which is not the same as having no personal
 data in it.
@@ -83,6 +84,11 @@ is replayed in lexical path order. The supported structural subset is:
 - `ALTER TABLE ... RENAME TO ...`
 - `DROP TABLE`
 
+Drizzle's `--> statement-breakpoint` marker is only a delimiter. Table-level foreign-key, check,
+unique and primary-key constraints are inventory-neutral and do not create migration gaps. The SQL
+parser reads column declarations only at the top level of `CREATE TABLE`, so multiline `CHECK`
+expressions cannot become fields.
+
 If a structural statement is outside that subset, references missing state, or conflicts with
 another declarative field shape, the datastore is omitted from the logical map and the exact
 `file:line` appears under `coverage.migration_gaps` or `coverage.schema_conflicts`. The collector
@@ -105,6 +111,46 @@ directory; those remain human review decisions.
 Runtime discovery ignores conventional test and fixture directories, including `__tests__` and
 `__fixtures__`, plus `*.test.*` and `*.spec.*` files. A server-like call in test support code is not
 evidence of a deployed system.
+
+## Stores without a declarative schema
+
+SDK initialization or a bucket, queue, index or third-party client call can show that a store
+exists, but it cannot show which object fields the repository persists. The collector therefore
+never invents a dataset or fields from a client call alone. For structures that cannot be derived
+safely, commit `.noru/privacy-datamap-stores.json`, validated by
+[`contract/privacy-datamap-stores.schema.json`](../../contract/privacy-datamap-stores.schema.json).
+
+Each datastore and collection cites the integration or contract that establishes it. Every field
+also carries an `evidence_kind` and its own repository `file:line` citation. Accepted evidence kinds
+are `typed_contract`, `serializer`, `upload_payload` and `download_result`; a citation to the
+supplement itself is rejected. Optional `system_references` attach the datastore to system keys
+that runtime discovery actually found. Invalid citations, unknown system keys, duplicate identities
+and untracked supplements fail the scan instead of creating a guessed map.
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/noru-tech/noru-grc-engineering/v0/contract/privacy-datamap-stores.schema.json",
+  "version": "1.0.0",
+  "datastores": [{
+    "fides_key": "customer_objects",
+    "name": "Customer object storage",
+    "store_type": "object_storage",
+    "provider": "gcs",
+    "refs": ["src/storage.ts:18"],
+    "system_references": ["src"],
+    "collections": [{
+      "name": "uploaded_files",
+      "refs": ["src/storage.ts:5"],
+      "fields": [{
+        "name": "object_key",
+        "shape": "string",
+        "evidence_kind": "typed_contract",
+        "refs": ["src/storage.ts:6"]
+      }]
+    }]
+  }]
+}
+```
 
 ## What it scans
 
@@ -261,6 +307,11 @@ tools this piece reads. `write:datamaps` is documented as "Push fideslang privac
 (`.fides/datamap.yml`) from CI" — which is this piece, stated by the API itself.
 
 ## Artifacts
+
+`.noru/privacy-datamap-stores.json`, schema at
+[`contract/privacy-datamap-stores.schema.json`](../../contract/privacy-datamap-stores.schema.json),
+is an optional committed structural input for stores that no supported schema describes. It is
+reviewed source, not generated output.
 
 `.noru/privacy-datamap.yml`, schema at [`contract/privacy-datamap.schema.json`](../../contract/privacy-datamap.schema.json).
 

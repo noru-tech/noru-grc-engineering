@@ -22,6 +22,12 @@ one version number; the release workflow fails if they disagree.
 - Bootstrap reconciliation now treats invalid manifests as having no accepted semantic baseline,
   runtime discovery excludes test and fixture paths, and a compact collection/family review report
   is emitted beside the detailed proposal cache.
+- SQL migration replay now ignores Drizzle statement delimiters and inventory-neutral table
+  constraints, while multiline check expressions remain constraint bodies instead of becoming
+  fields. Validation directs accepted non-personal decisions into `non_personal_fields`.
+- `privacy-datamap` can include object stores, queues, search indexes and third-party stores through
+  a committed, evidence-backed supplemental datastore contract. Every field requires its own typed
+  or payload citation; provider client calls alone never invent fields.
 
 ## 0.8.0 — 2026-09-07
 

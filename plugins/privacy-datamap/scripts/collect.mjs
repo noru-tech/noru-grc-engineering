@@ -29,6 +29,7 @@ const TABLE = JSON.parse(
 // A schema file is small. Anything past this is generated data or a checked-in dump, and
 // reading it would cost more than it could ever tell us.
 const MAX_BYTES = 1_000_000;
+const SUPPLEMENT_PATH = ".noru/privacy-datamap-stores.json";
 
 // Directories that are in the repository but are not the repository: a checked-in vendor/ or dist/
 // describes a dependency's schema or a build's output, not anything this codebase decided to store.
@@ -101,7 +102,7 @@ function trackedFiles(repo) {
   // A Set because an unmerged path is listed once per conflict stage.
   const out = new Set();
   for (const rel of raw.split("\0")) {
-    if (rel === "" || isSkipped(rel)) continue;
+    if (rel === "" || (rel !== SUPPLEMENT_PATH && isSkipped(rel))) continue;
     let stat;
     try {
       stat = lstatSync(join(repo, rel));
@@ -240,9 +241,10 @@ export function parseSqlDdl(text) {
         if (ch === "(") depth += 1;
         else if (ch === ")") depth -= 1;
       }
-      // A column sits inside the CREATE TABLE parens, so the line must already be at depth >= 1
-      // before it is read. That is what keeps the CREATE line itself and the closing `);` out.
-      if (j > i && depthBefore >= 1) {
+      // A column declaration starts directly inside the CREATE TABLE parens. Lines nested inside
+      // CHECK expressions are constraint bodies, not columns; accepting every depth used to turn
+      // multiline boolean expressions into fields named `OR` and referenced column names.
+      if (j > i && depthBefore === 1) {
         const body = line.trim().replace(/^[`"[]/, "");
         const first = body.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
         if (first && !SQL_SKIP.test(body)) {
@@ -728,7 +730,175 @@ function cloneCollections(collections, rel) {
   }));
 }
 
+const SUPPLEMENT_VERSION = "1.0.0";
+const SUPPLEMENT_STORE_TYPES = new Set([
+  "object_storage", "queue", "search_index", "third_party_store", "other",
+]);
+const SUPPLEMENT_EVIDENCE_KINDS = new Set([
+  "typed_contract", "serializer", "upload_payload", "download_result",
+]);
+const FIDES_KEY = /^[A-Za-z0-9_.<>-]+$/;
+
+function supplementalError(path, message) {
+  throw new Error(`${SUPPLEMENT_PATH}${path}: ${message}`);
+}
+
+function supplementalObject(value, path) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    supplementalError(path, "must be an object");
+  }
+}
+
+function supplementalKeys(value, allowed, path) {
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) supplementalError(path, `unknown key '${key}'`);
+  }
+}
+
+function supplementalString(value, path, pattern = null) {
+  if (typeof value !== "string" || value.trim() === "") supplementalError(path, "must be a non-empty string");
+  if (pattern && !pattern.test(value)) supplementalError(path, `has invalid value '${value}'`);
+  return value;
+}
+
+function supplementalArray(value, path) {
+  if (!Array.isArray(value) || value.length === 0) supplementalError(path, "must be a non-empty array");
+  return value;
+}
+
+function supplementalRefs(repo, refs, path, knownFiles, lineCounts) {
+  const out = supplementalArray(refs, path).map((ref, index) => {
+    supplementalString(ref, `${path}[${index}]`);
+    const match = ref.match(/^([^:\s][^:]*):([1-9][0-9]*)$/);
+    if (!match) supplementalError(`${path}[${index}]`, "must be a repository-relative file:line citation");
+    const rel = match[1].split("\\").join("/");
+    if (rel === SUPPLEMENT_PATH) {
+      supplementalError(`${path}[${index}]`, "must cite repository evidence, not the declaration itself");
+    }
+    if (rel.startsWith("/") || rel.split("/").includes("..") || !knownFiles.has(rel)) {
+      supplementalError(`${path}[${index}]`, `cites a file outside the scanned repository: '${rel}'`);
+    }
+    if (!lineCounts.has(rel)) {
+      const text = safeText(repo, rel);
+      if (text === null) supplementalError(`${path}[${index}]`, `cannot read cited file '${rel}'`);
+      lineCounts.set(rel, text.split("\n").length);
+    }
+    const line = Number(match[2]);
+    if (line > lineCounts.get(rel)) {
+      supplementalError(`${path}[${index}]`, `cites line ${line}, but '${rel}' has only ${lineCounts.get(rel)} line(s)`);
+    }
+    return `${rel}:${line}`;
+  });
+  if (new Set(out).size !== out.length) supplementalError(path, "must not contain duplicate citations");
+  return out.sort(BY_PATH);
+}
+
+/**
+ * Read explicitly declared stores whose structure cannot be recovered from a supported schema.
+ * A provider client proves only that a store exists; every declared field therefore needs its own
+ * typed/payload/serialization citation. The collector never derives object fields from SDK calls.
+ */
+function loadSupplementalDatastores(repo, files, enumeratedBy) {
+  const full = join(repo, SUPPLEMENT_PATH);
+  if (!existsSync(full)) return [];
+  if (enumeratedBy === "git" && !files.includes(SUPPLEMENT_PATH)) {
+    throw new Error(`${SUPPLEMENT_PATH}: exists but is not tracked; stage it before scanning`);
+  }
+  let document;
+  try {
+    document = JSON.parse(readFileSync(full, "utf8"));
+  } catch (error) {
+    throw new Error(`${SUPPLEMENT_PATH}: invalid JSON: ${error.message}`);
+  }
+  supplementalObject(document, "");
+  supplementalKeys(document, new Set(["$schema", "version", "datastores"]), "");
+  if (document.$schema !== undefined) supplementalString(document.$schema, ".$schema");
+  if (document.version !== SUPPLEMENT_VERSION) {
+    supplementalError(".version", `must be '${SUPPLEMENT_VERSION}'`);
+  }
+  const stores = supplementalArray(document.datastores, ".datastores");
+  const knownFiles = new Set(files);
+  const lineCounts = new Map();
+  const seenStores = new Set();
+  const normalized = stores.map((store, storeIndex) => {
+    const path = `.datastores[${storeIndex}]`;
+    supplementalObject(store, path);
+    supplementalKeys(store, new Set([
+      "fides_key", "name", "store_type", "provider", "refs", "system_references", "collections",
+    ]), path);
+    const fidesKey = supplementalString(store.fides_key, `${path}.fides_key`, FIDES_KEY);
+    if (seenStores.has(fidesKey)) supplementalError(`${path}.fides_key`, `duplicate datastore key '${fidesKey}'`);
+    seenStores.add(fidesKey);
+    const name = supplementalString(store.name, `${path}.name`);
+    const storeType = supplementalString(store.store_type, `${path}.store_type`);
+    if (!SUPPLEMENT_STORE_TYPES.has(storeType)) {
+      supplementalError(`${path}.store_type`, `must be one of ${[...SUPPLEMENT_STORE_TYPES].join(", ")}`);
+    }
+    const provider = store.provider === undefined
+      ? null
+      : supplementalString(store.provider, `${path}.provider`);
+    const refs = supplementalRefs(repo, store.refs, `${path}.refs`, knownFiles, lineCounts);
+    const systemReferences = store.system_references === undefined ? [] : store.system_references;
+    if (!Array.isArray(systemReferences)) supplementalError(`${path}.system_references`, "must be an array");
+    for (let index = 0; index < systemReferences.length; index += 1) {
+      supplementalString(systemReferences[index], `${path}.system_references[${index}]`, FIDES_KEY);
+    }
+    if (new Set(systemReferences).size !== systemReferences.length) {
+      supplementalError(`${path}.system_references`, "must not contain duplicate system keys");
+    }
+    const seenCollections = new Set();
+    const collections = supplementalArray(store.collections, `${path}.collections`).map((collection, collectionIndex) => {
+      const collectionPath = `${path}.collections[${collectionIndex}]`;
+      supplementalObject(collection, collectionPath);
+      supplementalKeys(collection, new Set(["name", "refs", "fields"]), collectionPath);
+      const collectionName = supplementalString(collection.name, `${collectionPath}.name`);
+      if (seenCollections.has(collectionName)) supplementalError(`${collectionPath}.name`, `duplicate collection '${collectionName}'`);
+      seenCollections.add(collectionName);
+      const collectionRefs = supplementalRefs(
+        repo, collection.refs, `${collectionPath}.refs`, knownFiles, lineCounts,
+      );
+      const seenFields = new Set();
+      const fields = supplementalArray(collection.fields, `${collectionPath}.fields`).map((field, fieldIndex) => {
+        const fieldPath = `${collectionPath}.fields[${fieldIndex}]`;
+        supplementalObject(field, fieldPath);
+        supplementalKeys(field, new Set(["name", "shape", "evidence_kind", "refs"]), fieldPath);
+        const fieldName = supplementalString(field.name, `${fieldPath}.name`);
+        if (seenFields.has(fieldName)) supplementalError(`${fieldPath}.name`, `duplicate field '${fieldName}'`);
+        seenFields.add(fieldName);
+        const shape = supplementalString(field.shape, `${fieldPath}.shape`);
+        const evidenceKind = supplementalString(field.evidence_kind, `${fieldPath}.evidence_kind`);
+        if (!SUPPLEMENT_EVIDENCE_KINDS.has(evidenceKind)) {
+          supplementalError(
+            `${fieldPath}.evidence_kind`,
+            `must be one of ${[...SUPPLEMENT_EVIDENCE_KINDS].join(", ")}`,
+          );
+        }
+        return {
+          name: fieldName,
+          shape,
+          evidence_kind: evidenceKind,
+          refs: supplementalRefs(repo, field.refs, `${fieldPath}.refs`, knownFiles, lineCounts),
+        };
+      });
+      return { name: collectionName, refs: collectionRefs, fields };
+    });
+    return {
+      fides_key: fidesKey,
+      name,
+      store_type: storeType,
+      ...(provider ? { provider } : {}),
+      refs,
+      system_references: [...systemReferences].sort(BY_PATH),
+      collections,
+    };
+  });
+  return normalized.sort((a, b) => BY_PATH(a.fides_key, b.fides_key));
+}
+
 function splitSqlStatements(text) {
+  // Drizzle uses this exact comment as an out-of-band statement delimiter. Removing only the
+  // marker, while preserving its newline, keeps the next statement's citation on its real line.
+  text = text.replace(/^[ \t]*-->[ \t]*statement-breakpoint[ \t]*\r?$/gmi, "");
   const out = [];
   let start = 0;
   let line = 1;
@@ -784,6 +954,14 @@ function migrationOperation(statement, rel) {
   }
   if (/^alter\s+table\b/i.test(compact) && /,\s*(?:add|drop|rename|alter)\b/i.test(compact)) {
     return { kind: "unsupported", ref };
+  }
+  // Table constraints change validation or relationships, not the field inventory this replay
+  // computes. Their referenced columns already came from CREATE TABLE / ADD COLUMN operations.
+  if (
+    /^alter\s+table\s+[\s\S]+?\s+add\s+(?:constraint\s+[`"[]?[A-Za-z_][A-Za-z0-9_]*[`"\]]?\s+)?(?:foreign\s+key|check|unique|primary\s+key)\b/i
+      .test(compact)
+  ) {
+    return { kind: "non_structural", ref };
   }
   let match = compact.match(
     /^alter\s+table\s+(?:if\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+add\s+(?:column\s+)?(?:if\s+not\s+exists\s+)?(?!constraint\b)[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s+([\s\S]+?);?$/i,
@@ -887,8 +1065,8 @@ function mergeCanonical(observations) {
   return { collections: gaps.length === 0 ? [...tables.values()] : [], gaps };
 }
 
-function normalizedDataset(boundary, collections, sourceKinds) {
-  const datasetKey = fidesKeyFor(boundary || "repository");
+function normalizedDataset(boundary, collections, sourceKinds, explicitKey = null, explicitName = null) {
+  const datasetKey = explicitKey ?? fidesKeyFor(boundary || "repository");
   let fieldCount = 0;
   let classified = 0;
   let needsReview = 0;
@@ -925,7 +1103,7 @@ function normalizedDataset(boundary, collections, sourceKinds) {
   return {
     dataset: {
       fides_key: datasetKey,
-      name: boundary || "repository",
+      name: (explicitName ?? boundary) || "repository",
       source_kind: sourceKinds.length === 1 ? sourceKinds[0] : "normalized",
       source_kinds: sourceKinds,
       ref: normalizedCollections[0]?.ref ?? `${boundary || "."}:1`,
@@ -971,9 +1149,10 @@ function safeText(repo, rel) {
 /** Package metadata is consulted only when an executable script points to an existing entrypoint. */
 export function discoverServices(repo, files) {
   const evidence = new Map();
-  const fileSet = new Set(files);
+  const runtimeFiles = files.filter((rel) => rel !== SUPPLEMENT_PATH);
+  const fileSet = new Set(runtimeFiles);
   const packageRoots = new Set(
-    files
+    runtimeFiles
       .filter((rel) =>
         !isNonRuntimePath(rel)
         && /(?:^|\/)(?:package\.json|pyproject\.toml|go\.mod|Cargo\.toml|pom\.xml|build\.gradle)$/.test(rel)
@@ -993,7 +1172,7 @@ export function discoverServices(repo, files) {
     if (!evidence.has(root)) evidence.set(root, []);
     evidence.get(root).push({ ref, kind });
   };
-  for (const rel of files) {
+  for (const rel of runtimeFiles) {
     if (isNonRuntimePath(rel)) continue;
     const leaf = basename(rel);
     const root = dirname(rel) === "." ? "" : dirname(rel).split(sep).join("/");
@@ -1036,7 +1215,10 @@ export function discoverServices(repo, files) {
     }
   }
   if (evidence.size === 0) {
-    evidence.set("", [{ ref: files.length > 0 ? `${files[0]}:1` : ".:1", kind: "repository_fallback" }]);
+    evidence.set("", [{
+      ref: runtimeFiles.length > 0 ? `${runtimeFiles[0]}:1` : `${SUPPLEMENT_PATH}:1`,
+      kind: "repository_fallback",
+    }]);
   }
   return [...evidence.entries()]
     .sort(([a], [b]) => BY_PATH(a, b))
@@ -1061,7 +1243,14 @@ function assertUniqueKeys(kind, rows) {
 }
 
 export function collectFacts(repo) {
-  const { files, enumeratedBy } = listFiles(repo);
+  const listing = listFiles(repo);
+  const supplementalStores = loadSupplementalDatastores(
+    repo, listing.files, listing.enumeratedBy,
+  );
+  const files = existsSync(join(repo, SUPPLEMENT_PATH)) && !listing.files.includes(SUPPLEMENT_PATH)
+    ? [...listing.files, SUPPLEMENT_PATH].sort(BY_PATH)
+    : listing.files;
+  const enumeratedBy = listing.enumeratedBy;
   const observations = [];
   const parsedFiles = new Set();
   const parsedByKind = {};
@@ -1124,19 +1313,76 @@ export function collectFacts(repo) {
     needsReview += normalized.counts.needsReview;
     specialRefs.push(...normalized.specialRefs);
   }
+  for (const store of supplementalStores) {
+    parsedFiles.add(SUPPLEMENT_PATH);
+    const normalized = normalizedDataset(
+      store.fides_key,
+      store.collections.map((collection) => ({
+        name: collection.name,
+        refs: collection.refs,
+        fields: collection.fields.map((field) => ({
+          name: field.name,
+          shape: field.shape,
+          refs: field.refs,
+        })),
+      })),
+      ["supplemental_datastore"],
+      store.fides_key,
+      store.name,
+    );
+    normalized.dataset.ref = store.refs[0];
+    normalized.dataset.refs = [...new Set([
+      ...store.refs, ...normalized.dataset.refs,
+    ])].sort(BY_PATH);
+    normalized.dataset.store_type = store.store_type;
+    if (store.provider) normalized.dataset.provider = store.provider;
+    normalized.dataset.system_references = store.system_references;
+    datasets.push(normalized.dataset);
+    observations.push({
+      path: SUPPLEMENT_PATH,
+      boundary: store.fides_key,
+      kind: "supplemental_datastore",
+      role: "supplemental",
+      refs: store.refs,
+      collections: store.collections,
+    });
+    fieldCount += normalized.counts.fieldCount;
+    classified += normalized.counts.classified;
+    needsReview += normalized.counts.needsReview;
+    specialRefs.push(...normalized.specialRefs);
+    parsedByKind.supplemental_datastore = (parsedByKind.supplemental_datastore ?? 0) + 1;
+  }
   assertUniqueKeys("dataset", datasets);
 
   const services = discoverServices(repo, files);
-  const systems = services.map(({ root, evidence }) => ({
-    fides_key: fidesKeyFor(root || "repository"),
-    name: root || "repository",
-    ref: evidence[0].ref,
-    refs: evidence.map((item) => item.ref),
-    runtime_evidence: evidence,
-    dataset_references: datasets
-      .filter((dataset) => root === "" || dataset.name === root || dataset.name.startsWith(`${root}/`))
-      .map((dataset) => dataset.fides_key).sort(BY_PATH),
-  }));
+  const systemKeys = new Set(services.map(({ root }) => fidesKeyFor(root || "repository")));
+  for (const dataset of datasets) {
+    for (const systemKey of dataset.system_references ?? []) {
+      if (!systemKeys.has(systemKey)) {
+        throw new Error(
+          `${SUPPLEMENT_PATH}: datastore '${dataset.fides_key}' references undiscovered system '${systemKey}'`,
+        );
+      }
+    }
+  }
+  const systems = services.map(({ root, evidence }) => {
+    const systemKey = fidesKeyFor(root || "repository");
+    return {
+      fides_key: systemKey,
+      name: root || "repository",
+      ref: evidence[0].ref,
+      refs: evidence.map((item) => item.ref),
+      runtime_evidence: evidence,
+      dataset_references: datasets
+        .filter((dataset) =>
+          root === ""
+          || dataset.name === root
+          || dataset.name.startsWith(`${root}/`)
+          || (dataset.system_references ?? []).includes(systemKey)
+        )
+        .map((dataset) => dataset.fides_key).sort(BY_PATH),
+    };
+  });
   assertUniqueKeys("system", systems);
 
   return {

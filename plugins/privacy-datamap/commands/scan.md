@@ -1,6 +1,6 @@
 ---
 name: scan
-description: Read this repository's schemas into a privacy data map at .noru/privacy-datamap.yml. Writes nothing to Noru.
+description: Read this repository's persistent structures into a privacy data map at .noru/privacy-datamap.yml. Writes nothing to Noru.
 ---
 
 # /privacy-datamap:scan
@@ -16,9 +16,16 @@ systems. A source file is evidence for a dataset, not automatically a dataset. E
 retains all contributing `file:line` references. It classifies names it can resolve by exact lookup
 and marks everything else `needs_review: true`.
 
+For object stores, queues, search indexes or third-party stores without a supported declarative
+schema, the collector also reads a committed `.noru/privacy-datamap-stores.json`. Each declared
+field must cite typed, serializer, upload-payload or download-result evidence in the repository. A
+provider client call alone never supplies fields. The public shape is
+`contract/privacy-datamap-stores.schema.json`; invalid evidence stops the scan.
+
 At one datastore boundary, declarative schemas take precedence over historical migrations.
 Migration-only stores replay lexical file order for `CREATE TABLE`, column add/drop/rename, and
-table drop/rename. Read `coverage.unparsed_candidates`, `coverage.migration_gaps` and
+table drop/rename. Statement-breakpoint comments and inventory-neutral table constraints are
+ignored. Read `coverage.unparsed_candidates`, `coverage.migration_gaps` and
 `coverage.schema_conflicts`: unsupported or inconsistent structure is reported there and the
 collector omits that datastore instead of guessing a partial current state.
 
