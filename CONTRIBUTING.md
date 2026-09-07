@@ -162,8 +162,9 @@ Every plugin and every action shares one version number, and `scripts/check_repo
 any copy of it disagrees. A release is three steps, and the third one is automatic:
 
 1. **Bump.** Open a `chore: release X.Y.Z` pull request that moves the version everywhere at once:
-   both marketplace manifests, the two `plugin.json` files of every piece, every copyable
-   `@vX.Y.Z` action pin in the docs, and a `## X.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md`.
+   both marketplace manifests, the two `plugin.json` files of every piece, the `VERSION` constants,
+   and a `## X.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md`. Copyable `uses:` examples are not part
+   of a bump: they reference the floating major tag (`@v0`), which the publish step moves.
 2. **Tag.** After the merge, tag that commit and create the GitHub release for this repository:
 
    ```bash
@@ -184,10 +185,13 @@ distribution repository of its own:
 
 | In this repository | Marketplace repository | `uses:` |
 |---|---|---|
-| `.github/actions/noru-ci` | `noru-tech/noru-ci-action` | `noru-tech/noru-ci-action@vX.Y.Z` |
-| `.github/actions/noru-review` | `noru-tech/noru-review-action` | `noru-tech/noru-review-action@vX.Y.Z` |
-| `actions/enforce` | `noru-tech/noru-enforce-action` | `noru-tech/noru-enforce-action@vX.Y.Z` |
+| `.github/actions/noru-ci` | `noru-tech/noru-ci-action` | `noru-tech/noru-ci-action@v0` |
+| `.github/actions/noru-review` | `noru-tech/noru-review-action` | `noru-tech/noru-review-action@v0` |
+| `actions/enforce` | `noru-tech/noru-enforce-action` | `noru-tech/noru-enforce-action@v0` |
 
+Every copyable example references the Marketplace repository at its floating major tag, which the
+publish step moves to each newest release, so documentation never carries a version that goes
+stale; `scripts/check_repo.py` rejects an in-tree path or an exact version in a copyable example.
 Both `uses:` forms — the in-tree path and the mirror — are the same code at the same tag. The
 mirrors are generated: never edit them by hand, the next release overwrites the tree. Each carries a
 `DISTRIBUTION.json` naming the source commit it was built from.

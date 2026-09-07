@@ -6,6 +6,13 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Changed
+
+- Copyable `uses:` examples reference the GitHub Marketplace repositories at the floating major
+  tag (`noru-tech/noru-review-action@v0`, `noru-tech/noru-ci-action@v0`) instead of the in-tree
+  path at an exact version, so documentation no longer goes stale between releases. The
+  repository check rejects an in-tree path or an exact version in a copyable example.
+
 ## 0.7.1 — 2026-09-05
 
 ### Added

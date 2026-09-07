@@ -8,7 +8,8 @@ without pretending that missing external inputs passed.
 
 The template starts in report-only mode. Create the repository variable `NORU_GRC_MODE=gate` after
 the team has reviewed the initial backlog and committed the manifests and privacy baseline it wants
-to enforce. The action and its dependencies are pinned to the suite's release tag.
+to enforce. The action is referenced by its floating `v0` tag, which follows the newest 0.x
+release; pin a release tag or a full commit SHA to take changes only when you move the reference.
 
 ## Protected publication
 
