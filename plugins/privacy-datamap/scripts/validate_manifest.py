@@ -388,7 +388,7 @@ INTERPRETATION_KEYS = {"owner", "decided_at", "expires_at", "rationale", "refs"}
 DATASET_KEYS = {"fides_key", "name", "description", "collections"}
 COLLECTION_KEYS = {
     "name", "description", "refs", "interpretation", "needs_review", "fields",
-    "structure_digest",
+    "non_personal_fields", "structure_digest",
 }
 FIELD_KEYS = {"name", "description", "data_categories", "refs", "needs_review", "fields"}
 SYSTEM_KEYS = {
@@ -487,27 +487,30 @@ def check_source(rep, doc):
 
 
 
-def structure_digest(fields):
+def field_names(fields, prefix=""):
+    names = []
+    for field in fields or []:
+        if not isinstance(field, dict):
+            continue
+        name = field.get("name")
+        if not isinstance(name, str):
+            continue
+        path = f"{prefix}{name}"
+        names.append(path)
+        if isinstance(field.get("fields"), list):
+            names.extend(field_names(field["fields"], f"{path}."))
+    return names
+
+
+def structure_digest(fields, non_personal_fields=None):
     """Mirror of structureDigest() in collect.mjs. The two must agree.
 
     Kept deliberately trivial for exactly that reason: the sorted dotted field names, newline
     joined, sha256. Categories are not in it — resolving a classification must not invalidate a
     signature, but adding, removing or renaming a column must.
     """
-    names = []
-
-    def walk(items, prefix):
-        for field in items or []:
-            if not isinstance(field, dict):
-                continue
-            name = field.get("name")
-            if not isinstance(name, str):
-                continue
-            names.append(prefix + name)
-            if isinstance(field.get("fields"), list):
-                walk(field["fields"], f"{prefix}{name}.")
-
-    walk(fields, "")
+    names = set(field_names(fields))
+    names.update(name for name in (non_personal_fields or []) if isinstance(name, str))
     return hashlib.sha256("\n".join(sorted(names)).encode("utf-8")).hexdigest()
 
 
@@ -607,10 +610,20 @@ def check_fields(rep, path, fields, vocab, counts):
                 "the flag",
             )
         elif not cats:
-            # Not an error: plenty of columns are operational. But it is worth saying out loud,
-            # because a data map that quietly omits a field looks identical to one that considered
-            # it and found nothing.
-            rep.warn(f"{fpath}.data_categories", "empty — recorded as holding no personal data")
+            has_review_child = any(
+                child.get("needs_review") is True
+                or bool(child.get("data_categories"))
+                or bool(child.get("fields"))
+                for child in (field.get("fields") or [])
+                if isinstance(child, dict)
+            )
+            if not has_review_child:
+                # Accepted 0.8.0 manifests used full empty-category objects. Keep them valid so
+                # reconciliation can compact them without discarding the accepted decision.
+                rep.warn(
+                    f"{fpath}.data_categories",
+                    "empty — accepted as non-personal; the next reconciliation compacts this name",
+                )
         # Nested fields: a JSON column, an embedded document, a protobuf sub-message.
         if "fields" in field:
             check_fields(rep, fpath, field["fields"], vocab, counts)
@@ -669,12 +682,31 @@ def check_datasets(rep, doc, vocab, counts, as_of):
             check_refs(rep, cpath, collection)
             check_interpretation(rep, cpath, collection)
 
+            compact = collection.get("non_personal_fields", [])
+            if not isinstance(compact, list):
+                rep.err(f"{cpath}.non_personal_fields", "must be a list of dotted field names")
+                compact = []
+            else:
+                seen_compact = set()
+                verbose_names = set(field_names(collection.get("fields", [])))
+                for k, name in enumerate(compact):
+                    npath = f"{cpath}.non_personal_fields[{k}]"
+                    if not isinstance(name, str) or not name or name.startswith(".") or name.endswith("."):
+                        rep.err(npath, "must be a non-empty dotted field name")
+                    elif name in seen_compact:
+                        rep.err(npath, f"duplicate compact non-personal field '{name}'")
+                    elif name in verbose_names:
+                        rep.err(npath, f"'{name}' is also represented in fields")
+                    else:
+                        seen_compact.add(name)
+                counts["non_personal_fields"] += len(seen_compact)
+
             # The structural anchor. A signature is given for a set of columns; if that set has
             # changed, the signature is not a statement about this table any more. Recomputed here
             # rather than trusted, so editing the fields without re-running :scan is caught in the
             # same breath as editing the digest by hand.
             stamped = collection.get("structure_digest")
-            actual = structure_digest(collection.get("fields", []))
+            actual = structure_digest(collection.get("fields", []), compact)
             if not isinstance(stamped, str) or not DIGEST_RE.match(stamped or ""):
                 rep.err(
                     f"{cpath}.structure_digest",
@@ -692,12 +724,16 @@ def check_datasets(rep, doc, vocab, counts, as_of):
 
             block = collection.get("interpretation")
             if isinstance(block, dict):
-                cats = [
-                    c
-                    for field in collection.get("fields", []) or []
-                    if isinstance(field, dict)
-                    for c in (field.get("data_categories") or [])
-                ]
+                def categories(items):
+                    found = []
+                    for field in items or []:
+                        if not isinstance(field, dict):
+                            continue
+                        found.extend(field.get("data_categories") or [])
+                        found.extend(categories(field.get("fields") or []))
+                    return found
+
+                cats = categories(collection.get("fields", []))
                 special = any(c in vocab["special_categories"] for c in cats)
                 horizon = vocab["horizon_days"][
                     "special_category" if special else "standard"
@@ -814,9 +850,59 @@ def check_systems(rep, doc, vocab, dataset_keys, counts, as_of):
                 )
 
 
-def validate(doc, vocab, as_of=None):
+def observed_structures(derived):
+    structures = {}
+    for dataset in derived.get("datasets") or []:
+        key = dataset.get("fides_key")
+        for collection in dataset.get("collections") or []:
+            identity = f"{key}/{collection.get('name')}"
+            structures[identity] = set(field_names(collection.get("fields") or []))
+    return structures
+
+
+def manifest_structures(doc):
+    structures = {}
+    for dataset in doc.get("dataset") or []:
+        key = dataset.get("fides_key")
+        for collection in dataset.get("collections") or []:
+            identity = f"{key}/{collection.get('name')}"
+            names = set(field_names(collection.get("fields") or []))
+            names.update(
+                name for name in (collection.get("non_personal_fields") or [])
+                if isinstance(name, str)
+            )
+            structures[identity] = names
+    return structures
+
+
+def check_observed_structure(rep, doc, derived):
+    observed = observed_structures(derived)
+    represented = manifest_structures(doc)
+    for identity in sorted(set(observed) | set(represented)):
+        if identity not in represented:
+            rep.err("dataset", f"observed collection '{identity}' is missing from the manifest")
+            continue
+        if identity not in observed:
+            rep.err("dataset", f"manifest collection '{identity}' is not in the current observation")
+            continue
+        missing = sorted(observed[identity] - represented[identity])
+        extra = sorted(represented[identity] - observed[identity])
+        if missing:
+            rep.err(identity, f"observed field(s) missing from fields/non_personal_fields: {', '.join(missing)}")
+        if extra:
+            rep.err(identity, f"unobserved field(s) present in fields/non_personal_fields: {', '.join(extra)}")
+
+
+def validate(doc, vocab, as_of=None, observed=None):
     rep = Report()
-    counts = {"datasets": 0, "collections": 0, "fields": 0, "systems": 0, "needs_review": 0}
+    counts = {
+        "datasets": 0,
+        "collections": 0,
+        "fields": 0,
+        "non_personal_fields": 0,
+        "systems": 0,
+        "needs_review": 0,
+    }
     if not isinstance(doc, dict):
         rep.err(
             "<root>",
@@ -834,6 +920,8 @@ def validate(doc, vocab, as_of=None):
     check_source(rep, doc)
     dataset_keys = check_datasets(rep, doc, vocab, counts, as_of)
     check_systems(rep, doc, vocab, dataset_keys, counts, as_of)
+    if isinstance(observed, dict):
+        check_observed_structure(rep, doc, observed)
     counts["datasets"] = len(doc.get("dataset") or [])
     return rep, counts
 
@@ -894,7 +982,16 @@ def main(argv):
         sys.stderr.write(f"error: could not load bundled vocabulary ({exc})\n")
         return 2
 
-    rep, counts = validate(doc, vocab, as_of)
+    observed = None
+    derived_path = path.parent / ".cache" / "privacy-datamap.derived.json"
+    if derived_path.is_file():
+        try:
+            observed = json.loads(derived_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            sys.stderr.write(f"error: could not load current derived facts ({exc})\n")
+            return 2
+
+    rep, counts = validate(doc, vocab, as_of, observed)
     ok = not rep.errors
 
     if ok and emit_parsed:
@@ -939,7 +1036,8 @@ def main(argv):
     if not quiet:
         print(
             f"\nOK: {counts['datasets']} dataset(s), {counts['collections']} collection(s), "
-            f"{counts['fields']} field(s), {counts['systems']} system(s), all keys valid "
+            f"{counts['fields']} review field(s), {counts['non_personal_fields']} compact "
+            f"non-personal field(s), {counts['systems']} system(s), all keys valid "
             f"({len(rep.warnings)} warning(s))."
         )
     return 0

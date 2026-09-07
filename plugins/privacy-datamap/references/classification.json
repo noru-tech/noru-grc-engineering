@@ -152,20 +152,15 @@
     "created",
     "created_at",
     "deleted_at",
-    "enabled",
-    "id",
     "inserted_at",
-    "is_active",
     "is_deleted",
     "pk",
     "position",
     "revision",
     "sort_order",
     "state_machine_state",
-    "status",
     "updated",
     "updated_at",
-    "uuid",
     "version"
   ]
 }

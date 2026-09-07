@@ -388,12 +388,31 @@ function lineNumberAt(text, index) {
   return text.slice(0, index).split("\n").length;
 }
 
+function skipJsTrivia(text, index, limit = text.length) {
+  let cursor = index;
+  while (cursor < limit) {
+    if (/\s/.test(text[cursor])) {
+      cursor += 1;
+    } else if (text.startsWith("//", cursor)) {
+      const end = text.indexOf("\n", cursor + 2);
+      cursor = end < 0 || end >= limit ? limit : end + 1;
+    } else if (text.startsWith("/*", cursor)) {
+      const end = text.indexOf("*/", cursor + 2);
+      cursor = end < 0 || end + 2 >= limit ? limit : end + 2;
+    } else {
+      break;
+    }
+  }
+  return cursor;
+}
+
 function splitTopLevelProperties(text, offset) {
   const entries = [];
   let start = 0;
   let round = 0;
   let square = 0;
   let curly = 0;
+  let angle = 0;
   for (let i = 0; i <= text.length; i += 1) {
     const ch = text[i];
     if (ch === '"' || ch === "'" || ch === "`") {
@@ -416,49 +435,101 @@ function splitTopLevelProperties(text, offset) {
     else if (ch === "]") square -= 1;
     else if (ch === "{") curly += 1;
     else if (ch === "}") curly -= 1;
-    if ((ch === "," || i === text.length) && round === 0 && square === 0 && curly === 0) {
-      const raw = text.slice(start, i);
-      const leading = raw.search(/\S/);
-      if (leading >= 0) entries.push({ text: raw.slice(leading).trim(), index: offset + start + leading });
+    // Drizzle commonly uses `$type<Record<string, unknown>>()`. Without tracking that generic,
+    // its comma looks like the end of a column and both fragments disappear from extraction.
+    else if (ch === "<" && /[A-Za-z0-9_$.)\]]/.test(text[i - 1] ?? "")) angle += 1;
+    else if (ch === ">" && angle > 0) angle -= 1;
+    if (
+      (ch === "," || i === text.length)
+      && round === 0 && square === 0 && curly === 0 && angle === 0
+    ) {
+      // A comma commonly precedes an inline comment about the field that just ended. That comment
+      // is therefore leading trivia for the next slice; retaining it makes a valid next property
+      // fail the property regex and silently drops every field in a run of commented declarations.
+      const entryStart = skipJsTrivia(text, start, i);
+      if (entryStart < i) {
+        entries.push({ text: text.slice(entryStart, i).trim(), index: offset + entryStart });
+      }
       start = i + 1;
     }
   }
   return entries;
 }
 
-/** Parse common Drizzle table declarations without importing or executing repository code. */
-export function parseDrizzle(text) {
+function findDrizzleCalls(text) {
+  const calls = [];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '"' || text[i] === "'" || text[i] === "`") {
+      i = skipQuoted(text, i) - 1;
+      continue;
+    }
+    if (text.startsWith("//", i)) {
+      const end = text.indexOf("\n", i + 2);
+      i = end < 0 ? text.length : end;
+      continue;
+    }
+    if (text.startsWith("/*", i)) {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 1;
+      continue;
+    }
+    const match = text.slice(i).match(/^(pgTable|mysqlTable|sqliteTable)\s*\(/);
+    const previous = text[i - 1] ?? "";
+    if (match && !/[A-Za-z0-9_$]/.test(previous)) {
+      calls.push({ index: i });
+      i += match[0].length - 2;
+    }
+  }
+  return calls;
+}
+
+/** Parse common Drizzle table declarations and retain the locations of unsupported static gaps. */
+function parseDrizzleWithCoverage(text) {
   const out = [];
-  const call = /\b(pgTable|mysqlTable|sqliteTable)\s*\(/g;
-  for (let match = call.exec(text); match; match = call.exec(text)) {
+  const gaps = [];
+  for (const match of findDrizzleCalls(text)) {
     const open = text.indexOf("(", match.index);
     const close = matchingDelimiter(text, open, "(", ")");
-    if (close < 0) continue;
+    if (close < 0) {
+      gaps.push(match.index);
+      continue;
+    }
     const args = text.slice(open + 1, close);
     const tableName = args.match(/^\s*(["'])([^"']+)\1\s*,/);
     if (!tableName) {
-      call.lastIndex = close + 1;
+      gaps.push(match.index);
       continue;
     }
     const objectStartInArgs = args.indexOf("{", tableName[0].length);
     if (objectStartInArgs < 0) {
-      call.lastIndex = close + 1;
+      gaps.push(match.index);
       continue;
     }
     const objectStart = open + 1 + objectStartInArgs;
     const objectEnd = matchingDelimiter(text, objectStart, "{", "}");
     if (objectEnd < 0 || objectEnd > close) {
-      call.lastIndex = close + 1;
+      gaps.push(match.index);
       continue;
     }
     const body = text.slice(objectStart + 1, objectEnd);
     const fields = [];
     for (const entry of splitTopLevelProperties(body, objectStart + 1)) {
       const property = entry.text.match(/^(?:([A-Za-z_$][\w$]*)|["']([^"']+)["'])\s*:\s*([\s\S]+)$/);
-      if (!property) continue;
+      if (!property) {
+        // A spread, shorthand or computed property may contain columns, but resolving it requires
+        // executing or evaluating repository code. Surface the partial extraction as coverage.
+        gaps.push(entry.index);
+        continue;
+      }
       const expression = property[3].trim();
-      if (!/^[A-Za-z_$][\w$.]*\s*\(/.test(expression)) continue;
-      const physical = expression.match(/^[A-Za-z_$][\w$.]*\s*\(\s*(["'])([^"']+)\1/);
+      const builderCall = /^[A-Za-z_$][\w$.]*(?:\s*<[\s\S]*?>)?\s*\(/;
+      if (!builderCall.test(expression)) {
+        gaps.push(entry.index);
+        continue;
+      }
+      const physical = expression.match(
+        /^[A-Za-z_$][\w$.]*(?:\s*<[\s\S]*?>)?\s*\(\s*(["'])([^"']+)\1/,
+      );
       fields.push({
         name: physical?.[2] || property[1] || property[2],
         line: lineNumberAt(text, entry.index),
@@ -468,9 +539,13 @@ export function parseDrizzle(text) {
     if (fields.length > 0) {
       out.push({ name: tableName[2], line: lineNumberAt(text, match.index), fields });
     }
-    call.lastIndex = close + 1;
   }
-  return out;
+  return { collections: out, gaps };
+}
+
+/** Parse common Drizzle table declarations without importing or executing repository code. */
+export function parseDrizzle(text) {
+  return parseDrizzleWithCoverage(text).collections;
 }
 
 const PARSERS = [
@@ -545,12 +620,17 @@ function findUnparsedCandidates(repo, files, parsedFiles) {
       continue;
     }
     for (const { format, marker } of applicable) {
+      if (format === "drizzle") {
+        const calls = findDrizzleCalls(text);
+        if (calls.length === 0) continue;
+        const report = parseDrizzleWithCoverage(text);
+        if (report.collections.length >= calls.length && report.gaps.length === 0) continue;
+        const index = report.gaps[0] ?? calls[0].index;
+        out.push({ format, ref: `${rel}:${lineNumberAt(text, index)}` });
+        continue;
+      }
       const match = marker.exec(text);
       if (!match) continue;
-      if (format === "drizzle") {
-        const calls = text.match(/\b(?:pg|mysql|sqlite)Table\s*\(/g)?.length ?? 0;
-        if (parseDrizzle(text).length >= calls) continue;
-      }
       // The line the marker sits on, so the report cites a place and not just a filename.
       const line = text.slice(0, match.index).split("\n").length;
       out.push({ format, ref: `${rel}:${line}` });
@@ -1105,16 +1185,30 @@ export function collectFacts(repo) {
  * The validator recomputes this from the manifest, so the two implementations have to agree. They
  * are kept deliberately trivial for that reason: sorted dotted names, newline-joined, sha256.
  */
-export function structureDigest(fields) {
-  const names = [];
+export function structureDigest(fields, nonPersonalFields = []) {
+  const names = new Set(nonPersonalFields);
   const walkFields = (list, prefix) => {
     for (const field of list ?? []) {
-      names.push(prefix + field.name);
+      names.add(prefix + field.name);
       if (field.fields) walkFields(field.fields, `${prefix}${field.name}.`);
     }
   };
   walkFields(fields, "");
-  return createHash("sha256").update(names.sort().join("\n")).digest("hex");
+  return createHash("sha256").update([...names].sort().join("\n")).digest("hex");
+}
+
+/** Keep every newly observed field visible until a person accepts the collection decision. */
+export function reviewCollectionFields(fields) {
+  return (fields ?? []).map((field) => {
+    const out = {
+      name: field.name,
+      data_categories: field.data_categories ?? [],
+      refs: field.refs ?? [field.ref],
+    };
+    if (field.needs_review) out.needs_review = true;
+    if (field.fields?.length > 0) out.fields = reviewCollectionFields(field.fields);
+    return out;
+  });
 }
 
 export function digestOf(derived) {
@@ -1217,19 +1311,11 @@ export function buildSkeleton(derived, provenance) {
         name: collection.name,
         refs: collection.refs ?? [collection.ref],
         structure_digest: structureDigest(collection.fields),
-        // The collection is the claim unit: one owner signs for "these are the categories in this
-        // table". Per-field attribution would mean five hundred blocks on a five-hundred-column
-        // schema, which is a form nobody fills in.
+        // The collection is the claim unit. All new fields stay visible until an accountable owner
+        // accepts the grouped decisions; accepted non-personal names compact on reconciliation.
         needs_review: true,
-        fields: collection.fields.map((field) => {
-          const out = {
-            name: field.name,
-            data_categories: field.data_categories,
-            refs: field.refs ?? [field.ref],
-          };
-          if (field.needs_review) out.needs_review = true;
-          return out;
-        }),
+        fields: reviewCollectionFields(collection.fields),
+        non_personal_fields: [],
       })),
     })),
     system: derived.systems.map((system) => ({
@@ -1258,7 +1344,8 @@ const HEADER = `# .noru/privacy-datamap.yml — generated by ${GENERATED_BY}
 # needs_review: true, and a manifest carrying one cannot be pushed.
 #
 # What a person has to do, and sign for:
-#   * resolve every needs_review field to a data category, or delete the field if it holds none
+#   * resolve every needs_review field to a data category, or move its name to
+#     non_personal_fields if review confirms it holds none
 #   * name the purpose, data_use and data_subjects for each system's privacy declarations
 #   * add an interpretation block to each collection and each declaration: who decided, when,
 #     until when, and why
@@ -1295,9 +1382,9 @@ const FIDES_HEADER = `# .fides/datamap.yml — rendered by ${GENERATED_BY}
 # validated manifest, and it will not warn you, because it cannot tell your edit from its own
 # output.
 #
-# This is the same content that :push sends to Noru, with the review bookkeeping removed — the
-# citations, the interpretation blocks, the needs_review flags and the structure digests. What is
-# left is plain Fideslang, for \`fides push\` and anything else that reads a Fides manifest.
+# This is the same content that :push sends to Noru: privacy-relevant fields projected to plain
+# Fideslang. Review bookkeeping and compact non-personal fields stay local; empty collections and
+# datasets are removed and system dataset references are repaired.
 `;
 
 /** Render the Fides-CLI-shaped export. Declared in piece.json under outputs[]. */

@@ -6,6 +6,20 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Changed
+
+- `privacy-datamap` now records established non-personal fields as compact collection-level names
+  while retaining the complete cited schema in derived facts and the accepted lock. Validation and
+  structure digests cover both representations, reconciliation carries unchanged decisions forward,
+  and the Fides export removes non-personal branches, empty collections and empty datasets while
+  repairing system references.
+- The privacy scan workflow now analyzes its bounded proposal queue from repository context and
+  presents personal, non-personal, ambiguous and special-category proposals for grouped
+  collection-level approval.
+- Drizzle extraction now retains fields following inline or block comments, and generic identifiers
+  and state flags (`id`, `uuid`, `status`, `enabled`, `is_active`) require contextual proposals
+  instead of being treated as globally non-personal.
+
 ## 0.8.0 — 2026-09-07
 
 ### Changed

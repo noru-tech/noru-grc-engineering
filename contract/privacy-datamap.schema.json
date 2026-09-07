@@ -139,7 +139,7 @@
       }
     },
     "collection": {
-      "description": "The claim unit. One interpretation block covers the whole collection: per-field attribution would be five hundred blocks on a five-hundred-column schema, which is a form nobody fills in.",
+      "description": "The claim unit. Newly observed fields remain visible through review; accepted non-personal fields are recorded compactly by name. One interpretation block covers the whole collection.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -171,13 +171,23 @@
           "type": "boolean"
         },
         "fields": {
+          "description": "Privacy-relevant fields, unresolved fields, and parent fields needed to retain categorized nested children.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/field"
           }
         },
+        "non_personal_fields": {
+          "description": "Sorted dotted field names accepted as non-personal during collection review. Their complete shapes and citations remain in derived facts and the accepted observation lock.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "structure_digest": {
-          "description": "sha256 of this collection's sorted, dotted field NAMES \u2014 not their categories. Resolving a classification keeps the signature; adding, removing or renaming a column breaks it. This is the structural anchor in contract/README.md requirement 8: it pins what a signature was given for, which is what lets this piece anchor its expiry on decided_at honestly.",
+          "description": "sha256 of the union of sorted, dotted field names in fields and non_personal_fields \u2014 not their categories. Resolving a classification or moving a name between the two representations keeps the signature; adding, removing or renaming a column breaks it. This is the structural anchor in contract/README.md requirement 8.",
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         }
@@ -199,7 +209,7 @@
           "type": "string"
         },
         "data_categories": {
-          "description": "Fideslang data category keys, checked against the bundled snapshot in contract/lib/taxonomy/. An empty list means the field was considered and holds no personal data \u2014 which is not the same as a field nobody looked at, and is why needs_review exists.",
+          "description": "Fideslang data category keys, checked against the bundled snapshot in contract/lib/taxonomy/. Generated manifests use non_personal_fields instead of a full field object when this list would be empty; needs_review distinguishes unresolved fields.",
           "type": "array",
           "items": {
             "type": "string"

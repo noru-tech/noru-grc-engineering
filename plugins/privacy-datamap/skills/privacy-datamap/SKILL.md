@@ -38,6 +38,11 @@ boundaries before it writes the review manifest. It also classifies the field na
 by **exact lookup** against a bundled table — `email`, `password_hash`, `last_login_ip`. That is a
 lookup, not an inference, which is what lets the collector be deterministic.
 
+The derived facts and accepted lock retain every observed field. New fields stay verbose while the
+collection is under review. After acceptance, categorized fields use full `fields` entries while
+accepted non-personal names live under the collection's `non_personal_fields`. Their omission from
+Fides output is not omission from the audit trail; the collection signature covers both lists.
+
 Everything else is a judgement, and the collector marks it `needs_review: true` rather than guessing:
 
 - a field name the table does not know
@@ -63,7 +68,10 @@ not the agent, decides what needs semantic analysis:
 On a first scan the mode is `bootstrap`. A valid manifest created before locks existed is
 `migration` and must seed its first lock without reclassification. Later scans are `maintenance`.
 Agent suggestions live in `.noru/.cache/privacy-datamap.proposals.json`; they are not decisions and
-cannot update the accepted manifest or lock by themselves.
+cannot update the accepted manifest or lock by themselves. Analyse repository context before asking
+the user, mark each proposal as personal, non-personal, ambiguous or special-category, and present
+the results grouped by dataset and collection. The user can accept or amend a collection group;
+only accepted groups may be patched into the candidate.
 
 Read `coverage.migration_gaps`, `coverage.schema_conflicts` and `identity_ambiguities` before
 proposing anything. Declarative schemas take precedence over migration history at the same
@@ -115,13 +123,16 @@ reviewer must not have to go looking for.
 
 ## Three committed files, and they are not interchangeable
 
-- `.noru/privacy-datamap.yml` — the **manifest**. Citations, interpretation blocks, review flags.
-  Commit it; reviewing it in a pull request is the point.
+- `.noru/privacy-datamap.yml` — the **manifest**. Privacy-relevant and unresolved field details,
+  compact non-personal names, interpretation blocks and review flags. Commit it; reviewing it in a
+  pull request is the point.
 - `.noru/privacy-datamap.lock.json` — the **accepted observation**. Generated only after a current
   manifest validates. It records stable structural fingerprints and citations, never business
   meaning or agent reasoning. Commit it and do not edit it by hand.
 - `.fides/datamap.yml` — the **export**, in Ethyca's own format, for `fides push` and anything else
-  that reads a Fides manifest. Regenerated on every scan that finds a validated manifest.
+  that reads a Fides manifest. It contains only privacy-relevant fields, drops empty collections
+  and datasets, and repairs system dataset references. Regenerated on every scan that finds a
+  validated manifest.
 
 Edit the manifest, never the export. The next scan overwrites the export without warning, because it
 cannot tell an edit from its own output.

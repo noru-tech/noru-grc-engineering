@@ -1,8 +1,8 @@
 # privacy-datamap
 
 > Read the schemas a repository actually contains, classify the personal data in them against
-> the Fideslang taxonomy, and land the data map in Noru — with a citation for every field and a
-> named owner for every judgement.
+> the Fideslang taxonomy, and land the data map in Noru — with complete cited structural facts and
+> a named owner for every judgement.
 
 ## Commands
 
@@ -15,7 +15,9 @@
 `scan` now has two deterministic local phases. `collect.mjs` observes the repository; then
 `reconcile.py` compares those observations with the last accepted lock. The reconciler emits the
 small set of new or materially changed ambiguous fields that need agent analysis. It never calls a
-model itself, and unchanged fields are never reclassified.
+model itself, and unchanged fields are never reclassified. The agent inspects repository context,
+groups proposals by collection, and asks the user only about genuine ambiguities, amendments and
+the accountable owner rather than handing over the raw structural inventory.
 
 ## What it reads
 
@@ -29,8 +31,9 @@ model itself, and unchanged fields are never reclassified.
 | GraphQL SDL | `*.graphql`, `*.gql`, `*.graphqls` | `type` and `input` → collection, each field |
 
 Drizzle parsing is deliberately static: literal table names and object-literal column maps are
-supported; declarations assembled through runtime values are reported as `drizzle` coverage rather
-than executed.
+supported, including comments between field declarations. Spreads, shorthand properties and
+declarations assembled through runtime values are reported as `drizzle` coverage rather than
+silently treated as a complete table or executed.
 
 **Not read yet**: OpenAPI and JSON Schema, TypeORM and Sequelize entities, Mongoose
 schemas, ActiveRecord, Ecto, GORM structs, and TypeScript or Zod DTOs. A repository whose schema
@@ -64,10 +67,11 @@ invisible, so this table is still the thing to read before trusting a small resu
 ## From observations to logical topology
 
 A parsed file is a structural **observation**, not automatically a dataset. The collector groups
-schema files under their nearest datastore boundary, merges tables contributed by multiple
-declarative files, and emits one current collection and field in the review manifest. The complete
-file-shaped observations remain in `.noru/.cache/privacy-datamap.derived.json` with their citations,
-so normalization is auditable without making a reviewer read duplicate migration history.
+schema files under their nearest datastore boundary and merges tables contributed by multiple
+declarative files. The complete current fields and file-shaped observations remain in
+`.noru/.cache/privacy-datamap.derived.json` with their citations. New fields stay visible in the
+review candidate. Once the collection decision is accepted, non-personal names move to a compact
+collection-level `non_personal_fields` list without leaving the derived facts or accepted lock.
 
 Declarative schemas are the current-state authority when they share a boundary with migrations.
 That includes Drizzle, Prisma, Django/SQLAlchemy and standalone SQL schemas. Historical migrations
@@ -181,7 +185,10 @@ create/archive plan before pushing.
 The claim unit is the **collection**, not the field. One person signs for "these are the categories
 in this table"; per-field attribution would mean five hundred interpretation blocks on a
 five-hundred-column schema, which is a form nobody fills in. Field-level uncertainty still shows,
-as `needs_review` flags inside the collection that block the push.
+as `needs_review` flags inside the collection that block the push. Proposed personal,
+non-personal, ambiguous and special-category fields are reviewed as a collection group; accepting
+the non-personal group moves those names to `non_personal_fields` without removing them from the
+structural audit trail.
 
 Special-category data — GDPR Article 9, plus Article 10 criminal-offence data — is collected into
 its own list so a reviewer never has to go looking for the highest-risk thing in the map.
@@ -190,9 +197,9 @@ its own list so a reviewer never has to go looking for the highest-risk thing in
 
 Two things anchor a claim, and the pair is the point.
 
-**`structure_digest` pins what a signature was given for.** Every collection carries a digest of its
-field *names* — not their categories — so resolving a classification keeps the signature, and adding,
-removing or renaming a column breaks it:
+**`structure_digest` pins what a signature was given for.** Every collection carries a digest of the
+union of its verbose field names and compact `non_personal_fields` — not their categories — so
+compacting a decision keeps the signature, and adding, removing or renaming a column breaks it:
 
 ```
 ERROR dataset[0].collections[0].structure_digest: does not match this collection's fields
@@ -201,8 +208,9 @@ ERROR dataset[0].collections[0].structure_digest: does not match this collection
       Re-run :scan, review what changed, and sign again
 ```
 
-The validator recomputes it rather than trusting the stamp, so editing the fields and editing the
-digest by hand are caught by the same check.
+The validator recomputes it rather than trusting the stamp and, when current derived facts are
+present, compares that union with the complete observed collection. Compacting the review file
+therefore cannot hide a field from drift detection.
 
 **`expires_at` pins how long nobody has looked.** Required, and measured from `decided_at`:
 
@@ -262,12 +270,13 @@ by hand.
 anything else that reads a Fides manifest.
 
 The two are not the same file and not interchangeable. `.noru/privacy-datamap.yml` is the
-**manifest**: it carries the `file:line` citation behind every field, the interpretation block
-behind every judgement, and the `needs_review` flags that block a push. `.fides/datamap.yml` is
-that content projected down to plain Fideslang with the piece's own bookkeeping stripped out, and
-it is only ever written from a manifest that validated against the repository as it stands right
-now. Edit the manifest, never the export: the next scan overwrites the export and will not warn
-you, because it has no way to tell your edit from its own output.
+**manifest**: it carries citations for review-bearing fields, compact non-personal names, the
+interpretation block behind every judgement, and the `needs_review` flags that block a push.
+Complete citations and shapes remain in derived facts and the accepted lock. `.fides/datamap.yml`
+contains only privacy-relevant fields: non-personal leaves and empty collections or datasets are
+removed, and system references are restricted to retained datasets. It is only ever written from a
+manifest that validated against the repository as it stands right now. Edit the manifest, never the
+export: the next scan overwrites the export and will not warn you.
 
 ## Idempotency
 
