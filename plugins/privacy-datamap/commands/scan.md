@@ -49,6 +49,8 @@ The cache files are deliberately separate:
 - `.noru/.cache/privacy-datamap.proposals.json` — the bounded, non-authoritative agent work queue.
 - `.noru/.cache/privacy-datamap.candidate.yml` — the proposed next manifest. It never overwrites the
   accepted manifest.
+- `.noru/.cache/privacy-datamap.review.md` — a compact collection/family index for reviewing the
+  proposal queue without presenting its full machine-oriented JSON.
 
 For every proposal requested, read `references/classification-guide.md`, the cited schema and only
 the surrounding code needed to decide its meaning. Before asking the user, inspect neighbouring
@@ -64,6 +66,9 @@ Article 10 data. Explicitly report when the last list is empty. Do not ask the u
 confident proposal: ask only for decisions on genuine ambiguities, any amendments, and the
 accountable owner. Their collection-level acceptance covers the remaining grouped proposals. Do
 not patch the candidate until that group is accepted.
+
+In `bootstrap` mode the candidate has no semantic baseline. Even if an invalid manifest exists, do
+not carry its systems, declarations, descriptions or references into the review.
 
 **The skeleton it writes is a starting point, not a data map.** What the user has to decide, and
 what you help with:

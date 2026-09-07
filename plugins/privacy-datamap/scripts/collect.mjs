@@ -939,10 +939,14 @@ function normalizedDataset(boundary, collections, sourceKinds) {
 
 const DEPLOYMENT_FILES = /^(?:Dockerfile(?:\..+)?|docker-compose\.ya?ml|compose\.ya?ml|serverless\.ya?ml|vercel\.json|fly\.toml|Procfile)$/i;
 const WORKLOAD_MARKER = /^\s*kind:\s*(?:Deployment|StatefulSet|DaemonSet|CronJob|Job)\s*$/m;
-const NON_RUNTIME_DIRS = new Set(["test", "tests", "fixture", "fixtures", "example", "examples"]);
+const NON_RUNTIME_DIRS = new Set([
+  "test", "tests", "__tests__", "fixture", "fixtures", "__fixtures__", "example", "examples",
+]);
+const NON_RUNTIME_FILE = /(?:^|\/)[^/]*\.(?:test|spec)\.[^/]+$/i;
 
 function isNonRuntimePath(rel) {
-  return rel.split("/").slice(0, -1).some((part) => NON_RUNTIME_DIRS.has(part.toLowerCase()));
+  return NON_RUNTIME_FILE.test(rel)
+    || rel.split("/").slice(0, -1).some((part) => NON_RUNTIME_DIRS.has(part.toLowerCase()));
 }
 
 function entrypointMatch(rel, text) {
@@ -971,7 +975,8 @@ export function discoverServices(repo, files) {
   const packageRoots = new Set(
     files
       .filter((rel) =>
-        /(?:^|\/)(?:package\.json|pyproject\.toml|go\.mod|Cargo\.toml|pom\.xml|build\.gradle)$/.test(rel)
+        !isNonRuntimePath(rel)
+        && /(?:^|\/)(?:package\.json|pyproject\.toml|go\.mod|Cargo\.toml|pom\.xml|build\.gradle)$/.test(rel)
       )
       .map((rel) => dirname(rel) === "." ? "" : dirname(rel).split(sep).join("/")),
   );

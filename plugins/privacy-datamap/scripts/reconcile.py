@@ -722,6 +722,75 @@ def build_lock(derived, scan, manifest_path):
     }
 
 
+def proposal_family(field):
+    """Group review work by syntax without making a privacy determination."""
+    name = str(field or "").lower()
+    if re.search(r"(?:^|_)(?:password|secret|token|credential)(?:_|$)", name):
+        return "credentials and secrets"
+    if name in {"id", "uuid"} or re.search(r"_(?:id|ids|uuid|uuids)$", name):
+        return "identifiers"
+    if name in {"status", "state", "enabled", "is_active"} or re.search(
+        r"^(?:is|has|can)_[a-z0-9_]+$", name
+    ):
+        return "state and flags"
+    if re.search(r"(?:^|_)(?:email|phone|address|url|uri|domain)(?:_|$)", name):
+        return "contact and location"
+    if re.search(r"(?:^|_)(?:at|date|time|timestamp)$", name):
+        return "dates and times"
+    if re.search(
+        r"(?:^|_)(?:content|description|message|notes?|metadata|config|payload|data|result|results)(?:_|$)",
+        name,
+    ):
+        return "content and structured values"
+    return "other fields"
+
+
+def build_review_report(result):
+    grouped = {}
+    for proposal in result.get("proposal_required") or []:
+        key = (proposal.get("dataset", ""), proposal.get("collection", ""))
+        family = proposal_family(proposal.get("field"))
+        grouped.setdefault(key, {}).setdefault(family, []).append(proposal)
+
+    lines = [
+        "# Privacy data-map proposal review",
+        "",
+        (
+            "This is a compact navigation report, not a classification. Field families are "
+            "syntactic groupings only; inspect the cited schema, relationships, neighbouring "
+            "fields and code usage before proposing or accepting a privacy decision."
+        ),
+        "",
+        f"- Mode: {result.get('mode', 'unknown')}",
+        f"- Collections requiring review: {len(grouped)}",
+        f"- Fields requiring contextual proposals: {sum(len(rows) for families in grouped.values() for rows in families.values())}",
+        f"- Possible special-category references: {len(result.get('special_category_refs') or [])}",
+        "",
+    ]
+    family_order = [
+        "credentials and secrets",
+        "identifiers",
+        "state and flags",
+        "contact and location",
+        "dates and times",
+        "content and structured values",
+        "other fields",
+    ]
+    for (dataset, collection), families in sorted(grouped.items()):
+        lines.extend([f"## {dataset} / {collection}", ""])
+        for family in family_order:
+            rows = families.get(family, [])
+            if not rows:
+                continue
+            fields = ", ".join(
+                f"{row.get('field')} ({(row.get('refs') or ['no citation'])[0]})"
+                for row in sorted(rows, key=lambda item: item.get("field", ""))
+            )
+            lines.append(f"- {family} ({len(rows)}): {fields}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def parse_args(argv):
     opts = {"repo": pathlib.Path.cwd(), "seal": False, "json": False, "quiet": False}
     for arg in argv:
@@ -812,10 +881,14 @@ def main(argv):
         reconciliation_path = cache / "privacy-datamap.reconciliation.json"
         proposals_path = cache / "privacy-datamap.proposals.json"
         candidate_path = cache / "privacy-datamap.candidate.yml"
+        review_path = cache / "privacy-datamap.review.md"
         candidate_lock = (
             build_lock(derived, scan, manifest_path) if result["mode"] == "migration" else lock
         )
-        candidate = build_candidate(derived, scan, manifest, candidate_lock)
+        # Bootstrap has no accepted semantic baseline. An invalid manifest is untrusted input, not
+        # a source for descriptions, declarations, references or system identities.
+        baseline_manifest = {} if result["mode"] == "bootstrap" else manifest
+        candidate = build_candidate(derived, scan, baseline_manifest, candidate_lock)
         reconciliation_path.write_text(
             json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -851,12 +924,14 @@ def main(argv):
             + to_yaml(candidate),
             encoding="utf-8",
         )
+        review_path.write_text(build_review_report(result), encoding="utf-8")
         result.update(
             {
                 "ok": True,
                 "reconciliation": str(reconciliation_path.relative_to(repo)),
                 "proposals": str(proposals_path.relative_to(repo)),
                 "candidate": str(candidate_path.relative_to(repo)),
+                "review_report": str(review_path.relative_to(repo)),
             }
         )
 

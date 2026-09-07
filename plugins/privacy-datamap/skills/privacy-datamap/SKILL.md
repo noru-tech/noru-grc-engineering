@@ -73,6 +73,10 @@ the user, mark each proposal as personal, non-personal, ambiguous or special-cat
 the results grouped by dataset and collection. The user can accept or amend a collection group;
 only accepted groups may be patched into the candidate.
 
+Bootstrap has no accepted semantic baseline. An invalid manifest cannot seed descriptions, systems,
+declarations or references. Use `.noru/.cache/privacy-datamap.review.md` as the compact
+collection/family index; the larger proposal JSON is the machine work queue, not the user review.
+
 Read `coverage.migration_gaps`, `coverage.schema_conflicts` and `identity_ambiguities` before
 proposing anything. Declarative schemas take precedence over migration history at the same
 datastore boundary. Migration-only stores replay only `CREATE TABLE`, column add/drop/rename, and

@@ -102,6 +102,10 @@ ignores markers inside conventional test, fixture and example directories. It
 does not infer purpose, data use, subjects, or access to a datastore outside the runtime's own
 directory; those remain human review decisions.
 
+Runtime discovery ignores conventional test and fixture directories, including `__tests__` and
+`__fixtures__`, plus `*.test.*` and `*.spec.*` files. A server-like call in test support code is not
+evidence of a deployed system.
+
 ## What it scans
 
 **Tracked files, wherever there is a git to ask** — `git ls-files`, which is the same set
@@ -167,10 +171,13 @@ On later scans `scripts/reconcile.py` compares every current field with that obs
 
 The reconciler writes `.noru/.cache/privacy-datamap.reconciliation.json`,
 `.noru/.cache/privacy-datamap.proposals.json` and
-`.noru/.cache/privacy-datamap.candidate.yml`. They are working files and must not be committed. The
-candidate never overwrites the accepted manifest. After the candidate has been resolved and
-reviewed, `reconcile.py --seal` refuses to write the lock unless the manifest is valid and matches
-the current observations.
+`.noru/.cache/privacy-datamap.candidate.yml`. It also writes
+`.noru/.cache/privacy-datamap.review.md`, a compact index grouped by collection and syntactic field
+family so the detailed proposal JSON is not the user interface. These are working files and must
+not be committed. The candidate never overwrites the accepted manifest. In bootstrap mode an
+invalid manifest contributes no descriptions, systems, declarations or references to the
+candidate. After the candidate has been resolved and reviewed, `reconcile.py --seal` refuses to
+write the lock unless the manifest is valid and matches the current observations.
 
 A valid manifest from a release before locks existed enters migration mode. Its decisions are
 carried forward and its first lock is seeded without sending every field back through an agent.

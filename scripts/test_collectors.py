@@ -1876,6 +1876,84 @@ def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
         validate_json_schema(proposals_document, proposals_schema, proposals_schema) == [],
         validate_json_schema(proposals_document, proposals_schema, proposals_schema),
     )
+    review_report = (
+        repo / ".noru" / ".cache" / "privacy-datamap.review.md"
+    ).read_text(encoding="utf-8")
+    results.check(
+        "[privacy-datamap] proposal review is compact and grouped by collection and field family",
+        "## db / accounts" in review_report
+        and "content and structured values" in review_report
+        and "profile_notes" in review_report
+        and "observation_digest" not in review_report
+        and "shape" not in review_report,
+        review_report[:1000],
+    )
+
+
+def test_datamap_bootstrap_ignores_invalid_manifest_baseline(results, tmp):
+    repo = write_files(pathlib.Path(tmp) / "bootstrap-baseline", {"db/schema.sql": SQL_FIXTURE})
+    summary, _derived = datamap_scan(repo)
+    manifest = repo / ".noru" / "privacy-datamap.yml"
+    manifest.write_text(
+        f"""version: 0.8.0
+piece: privacy-datamap
+source:
+  slug: fixture/bootstrap
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: privacy-datamap@0.8.0
+  derived_digest: {summary["derived_digest"]}
+dataset:
+  - fides_key: db
+    name: contaminated dataset name
+    description: UNTRUSTED_DATASET_DESCRIPTION
+    collections:
+      - name: accounts
+        description: UNTRUSTED_COLLECTION_DESCRIPTION
+        refs: ["old/schema.sql:1"]
+        structure_digest: {"0" * 64}
+        fields: []
+system:
+  - fides_key: repository
+    name: contaminated system name
+    description: UNTRUSTED_SYSTEM_DESCRIPTION
+    system_type: Third Party
+    dataset_references: [stale_dataset]
+    privacy_declarations:
+      - name: UNTRUSTED_DECLARATION
+        data_use: essential.service
+        data_subjects: [customer]
+        data_categories: [user.contact.email]
+        refs: ["old/service.ts:1"]
+""",
+        encoding="utf-8",
+    )
+    reconcile = PRIVACY_DATAMAP / "scripts" / "reconcile.py"
+    completed = run(
+        ["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"]
+    )
+    payload = json.loads(completed.stdout)
+    candidate_path = repo / ".noru" / ".cache" / "privacy-datamap.candidate.yml"
+    candidate_text = candidate_path.read_text(encoding="utf-8")
+    candidate = load_datamap_yaml(candidate_path)
+    declaration = candidate["system"][0]["privacy_declarations"][0]
+    results.check(
+        "[privacy-datamap] bootstrap candidate ignores every invalid manifest semantic",
+        completed.returncode == 0
+        and payload["mode"] == "bootstrap"
+        and "UNTRUSTED_" not in candidate_text
+        and "old/" not in candidate_text
+        and "stale_dataset" not in candidate_text
+        and candidate["dataset"][0]["name"] == "db"
+        and "description" not in candidate["dataset"][0]
+        and "description" not in candidate["dataset"][0]["collections"][0]
+        and candidate["system"][0]["name"] == "repository"
+        and candidate["system"][0]["system_type"] == "Application"
+        and candidate["system"][0]["dataset_references"] == ["db"]
+        and declaration["name"] == ""
+        and declaration["needs_review"] is True,
+        candidate_text[:2000],
+    )
 
 
 def test_datamap_normalizes_logical_topology(results, tmp):
@@ -1991,6 +2069,30 @@ def test_datamap_separates_datastores_and_falls_back_for_runtime(results, tmp):
         "[privacy-datamap] a library package alone is not a system and root fallback references every dataset",
         [system["name"] for system in derived["systems"]] == ["repository"]
         and sorted(refs) == keys,
+        derived["systems"],
+    )
+
+
+def test_datamap_runtime_discovery_ignores_test_files(results, tmp):
+    derived, _repo = datamap_repo(
+        tmp,
+        "test-runtime-markers",
+        {
+            "db/schema.sql": SQL_FIXTURE,
+            "__tests__/server.ts": "serve(() => 'test')\n",
+            "src/__fixtures__/worker.ts": "new Worker('fixture.js')\n",
+            "src/http.test.ts": "createServer(() => {}).listen(3000)\n",
+            "src/http.spec.js": "app.listen(3001)\n",
+        },
+    )
+    results.check(
+        "[privacy-datamap] test and fixture runtime markers do not create systems",
+        [system["name"] for system in derived["systems"]] == ["repository"]
+        and [
+            evidence["kind"]
+            for evidence in derived["systems"][0]["runtime_evidence"]
+        ]
+        == ["repository_fallback"],
         derived["systems"],
     )
 
@@ -2903,10 +3005,12 @@ def main(argv):
             test_datamap_surfaces_special_category_data(results, tmp)
             test_datamap_never_overwrites_a_reviewed_manifest(results, tmp)
             test_datamap_reconciles_only_the_privacy_delta(results, tmp)
+            test_datamap_bootstrap_ignores_invalid_manifest_baseline(results, tmp)
             test_datamap_compacts_non_personal_review_state(results, tmp)
             test_datamap_fides_projection_is_privacy_only(results, tmp)
             test_datamap_normalizes_logical_topology(results, tmp)
             test_datamap_separates_datastores_and_falls_back_for_runtime(results, tmp)
+            test_datamap_runtime_discovery_ignores_test_files(results, tmp)
             test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, tmp)
             test_datamap_keys_are_unique_or_fail_actionably(results, tmp)
             test_datamap_output_is_byte_deterministic(results, tmp)

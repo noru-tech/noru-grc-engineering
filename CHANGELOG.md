@@ -19,6 +19,9 @@ one version number; the release workflow fails if they disagree.
 - Drizzle extraction now retains fields following inline or block comments, and generic identifiers
   and state flags (`id`, `uuid`, `status`, `enabled`, `is_active`) require contextual proposals
   instead of being treated as globally non-personal.
+- Bootstrap reconciliation now treats invalid manifests as having no accepted semantic baseline,
+  runtime discovery excludes test and fixture paths, and a compact collection/family review report
+  is emitted beside the detailed proposal cache.
 
 ## 0.8.0 — 2026-09-07
 
