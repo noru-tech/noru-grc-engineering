@@ -30,11 +30,11 @@ jobs:
     name: verify the release is consistent
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # A manual run verifies the tag it names, not whatever main happens to be.
           ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
 
@@ -106,10 +106,10 @@ jobs:
     # account that created it can satisfy GitHub's two-factor requirement.
     environment: marketplace
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
 

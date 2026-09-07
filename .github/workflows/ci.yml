@@ -23,8 +23,8 @@ jobs:
     name: syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
       - name: node --check every .mjs
@@ -66,8 +66,8 @@ jobs:
     name: marketplace and hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
       - name: marketplace manifests, schema sync, secret hygiene
@@ -109,8 +109,8 @@ jobs:
             python: "3.13"
             yaml: "pyyaml"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
       - uses: actions/setup-python@v5
@@ -152,8 +152,8 @@ jobs:
     # If this fails, the contract has moved and the scaffolder has not. That is the moment to fix
     # the scaffolder, because every future piece starts from it.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
       - name: scaffold a throwaway piece
@@ -183,8 +183,8 @@ jobs:
     env:
       NORU_CI_AS_OF: "2026-08-27"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
 
