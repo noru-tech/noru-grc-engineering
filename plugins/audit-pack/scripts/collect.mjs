@@ -36,7 +36,7 @@ import { basename, dirname, extname, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const PIECE = "audit-pack";
-export const VERSION = "0.7.2";
+export const VERSION = "0.7.3";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));

@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.7.3 — 2026-09-07
+
 ### Fixed
 
 - The `noru-ci` and `noru-review` action descriptions fit the GitHub Marketplace limit of 125
