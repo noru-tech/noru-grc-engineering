@@ -81,8 +81,10 @@ Read `coverage.migration_gaps`, `coverage.schema_conflicts` and `identity_ambigu
 proposing anything. Declarative schemas take precedence over migration history at the same
 datastore boundary. Migration-only stores replay only `CREATE TABLE`, column add/drop/rename, and
 table drop/rename. Unsupported or inconsistent structural operations omit that datastore rather
-than producing a guessed partial state. An ambiguous old-to-logical identity is review work, never
-permission to choose the closest-looking candidate.
+than producing a guessed partial state. This blocking migration-gap rule applies only to
+migration-only datastores; when a canonical schema exists, migrations remain auditable history and
+their replay limitations are not current coverage gaps. An ambiguous old-to-logical identity is
+review work, never permission to choose the closest-looking candidate.
 
 Treat a tracked `drizzle.config.*` with static `schema` and `out` paths as explicit topology
 evidence. The collector resolves both paths relative to that config, keeps the schema boundary as

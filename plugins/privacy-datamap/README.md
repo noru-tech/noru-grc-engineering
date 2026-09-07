@@ -95,10 +95,12 @@ unique and primary-key constraints are inventory-neutral and do not create migra
 parser reads column declarations only at the top level of `CREATE TABLE`, so multiline `CHECK`
 expressions cannot become fields.
 
-If a structural statement is outside that subset, references missing state, or conflicts with
-another declarative field shape, the datastore is omitted from the logical map and the exact
-`file:line` appears under `coverage.migration_gaps` or `coverage.schema_conflicts`. The collector
-does not guess a partial current state. CI reports these alongside unsupported-format coverage.
+For a migration-only datastore, a structural statement outside that subset or one that references
+missing state omits the datastore from the logical map and appears under
+`coverage.migration_gaps`; the collector does not guess a partial current state. When a canonical
+schema exists, it remains authoritative: migrations stay in the audit observations, but replay
+limitations are not current coverage gaps. Conflicting canonical field shapes remain blocking
+`coverage.schema_conflicts`. CI reports current coverage gaps alongside unsupported formats.
 
 Dataset, collection and field identities come from the logical datastore boundary and schema
 names, not migration filenames. Normalized-key collisions are checked before any manifest is

@@ -1539,7 +1539,10 @@ export function collectFacts(repo) {
     schemaConflicts.push(...(canonical.length > 0 ? result.gaps : []));
     if (migration.length > 0) {
       const replay = replayMigrations(migration);
-      migrationGaps.push(...replay.gaps);
+      // Migration replay is structural coverage only when migrations are the current-state
+      // authority. With a canonical schema, migrations remain auditable history but an operation
+      // outside the safe replay subset cannot make the authoritative schema incomplete.
+      if (canonical.length === 0) migrationGaps.push(...replay.gaps);
       migrationOperations.push(...replay.operations.map((operation) => ({
         boundary,
         ...operation,

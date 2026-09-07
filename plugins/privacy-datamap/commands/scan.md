@@ -31,8 +31,10 @@ At one datastore boundary, declarative schemas take precedence over historical m
 Migration-only stores replay lexical file order for `CREATE TABLE`, column add/drop/rename, and
 table drop/rename. Statement-breakpoint comments and inventory-neutral table constraints are
 ignored. Read `coverage.unparsed_candidates`, `coverage.migration_gaps` and
-`coverage.schema_conflicts`: unsupported or inconsistent structure is reported there and the
-collector omits that datastore instead of guessing a partial current state.
+`coverage.schema_conflicts`: unsupported or inconsistent migration structure is a blocking gap only
+for migration-only datastores, which are omitted instead of guessed. When a canonical schema exists,
+its migrations remain historical observations and replay limitations do not count as current
+coverage gaps.
 
 A package manifest alone is not a system. Runtime evidence is a container/deployment definition,
 Kubernetes workload, server/worker entrypoint, or executable start/deploy script paired with an

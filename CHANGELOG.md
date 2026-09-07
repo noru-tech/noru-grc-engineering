@@ -24,7 +24,9 @@ one version number; the release workflow fails if they disagree.
   is emitted beside the detailed proposal cache.
 - SQL migration replay now ignores Drizzle statement delimiters and inventory-neutral table
   constraints, while multiline check expressions remain constraint bodies instead of becoming
-  fields. Validation directs accepted non-personal decisions into `non_personal_fields`.
+  fields. Replay limitations block coverage only for migration-only datastores; canonical-backed
+  migrations remain historical observations without producing misleading current gaps. Validation
+  directs accepted non-personal decisions into `non_personal_fields`.
 - `privacy-datamap` can include object stores, queues, search indexes and third-party stores through
   a committed, evidence-backed supplemental datastore contract. Every field requires its own typed
   or payload citation; provider client calls alone never invent fields.

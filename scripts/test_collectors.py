@@ -2143,6 +2143,41 @@ def test_datamap_uses_drizzle_config_for_cross_directory_topology(results, tmp):
     )
 
 
+def test_datamap_canonical_schema_makes_migration_replay_non_blocking(results, tmp):
+    derived, _repo = datamap_repo(
+        tmp,
+        "canonical-with-unsupported-migration",
+        {
+            "db/schema/accounts.ts": (
+                'export const accounts = pgTable("accounts", {\n'
+                '  id: uuid("id"),\n'
+                '  email: text("email"),\n'
+                "})\n"
+            ),
+            "db/migrations/001.sql": (
+                "CREATE TABLE accounts (\n  id UUID,\n  email TEXT\n);\n"
+            ),
+            "db/migrations/002.sql": (
+                "ALTER TABLE accounts ALTER COLUMN email TYPE VARCHAR(320);\n"
+            ),
+        },
+    )
+    results.check(
+        "[privacy-datamap] canonical-backed migration replay failures are not coverage gaps",
+        derived["coverage"]["migration_gaps"] == []
+        and set(fields_of(derived, "accounts")) == {"id", "email"},
+        derived["coverage"],
+    )
+    results.check(
+        "[privacy-datamap] canonical-backed migrations remain auditable history",
+        any(
+            operation["ref"] == "db/migrations/002.sql:1"
+            for operation in derived["migration_operations"]
+        ),
+        derived["migration_operations"],
+    )
+
+
 def test_datamap_separates_datastores_and_falls_back_for_runtime(results, tmp):
     derived, _repo = datamap_repo(
         tmp,
@@ -3302,6 +3337,7 @@ def main(argv):
             test_datamap_fides_projection_is_privacy_only(results, tmp)
             test_datamap_normalizes_logical_topology(results, tmp)
             test_datamap_uses_drizzle_config_for_cross_directory_topology(results, tmp)
+            test_datamap_canonical_schema_makes_migration_replay_non_blocking(results, tmp)
             test_datamap_separates_datastores_and_falls_back_for_runtime(results, tmp)
             test_datamap_runtime_discovery_ignores_test_files(results, tmp)
             test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, tmp)
