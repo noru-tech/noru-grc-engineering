@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.7.2 — 2026-09-07
+
 ### Changed
 
 - Copyable `uses:` examples reference the GitHub Marketplace repositories at the floating major
