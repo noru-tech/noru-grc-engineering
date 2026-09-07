@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import {
   existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync,
 } from "node:fs";
-import { basename, dirname, extname, join, relative, sep } from "node:path";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { toFideslang } from "./lib/fides.mjs";
@@ -714,6 +714,240 @@ export function datastoreBoundary(rel) {
   return parts.join("/");
 }
 
+const DRIZZLE_CONFIG = /(?:^|\/)drizzle\.config\.(?:[cm]?[jt]s)$/;
+const GLOB_MAGIC = /[*?{]/;
+
+function maskJsNonCode(text) {
+  const out = text.split("");
+  const blank = (start, end) => {
+    for (let i = start; i < end; i += 1) if (out[i] !== "\n" && out[i] !== "\r") out[i] = " ";
+  };
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '"' || text[i] === "'" || text[i] === "`") {
+      const end = skipQuoted(text, i);
+      blank(i, end);
+      i = end - 1;
+    } else if (text.startsWith("//", i)) {
+      const end = text.indexOf("\n", i + 2);
+      const stop = end < 0 ? text.length : end;
+      blank(i, stop);
+      i = stop - 1;
+    } else if (text.startsWith("/*", i)) {
+      const end = text.indexOf("*/", i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      blank(i, stop);
+      i = stop - 1;
+    }
+  }
+  return out.join("");
+}
+
+function drizzleConfigObject(text) {
+  const masked = maskJsNonCode(text);
+  const configured = /\bdefineConfig\s*\(/g;
+  let match;
+  while ((match = configured.exec(masked)) !== null) {
+    const open = masked.indexOf("(", match.index);
+    const objectStart = skipJsTrivia(text, open + 1);
+    if (text[objectStart] !== "{") continue;
+    const objectEnd = matchingDelimiter(text, objectStart, "{", "}");
+    if (objectEnd >= 0) return { start: objectStart, end: objectEnd };
+  }
+  const direct = /\bexport\s+default\s*\{/g.exec(masked);
+  if (!direct) return null;
+  const objectStart = masked.indexOf("{", direct.index);
+  const objectEnd = matchingDelimiter(text, objectStart, "{", "}");
+  return objectEnd < 0 ? null : { start: objectStart, end: objectEnd };
+}
+
+function staticJsString(value) {
+  const text = value.trim();
+  if (!['"', "'", "`"].includes(text[0])) return null;
+  const end = skipQuoted(text, 0);
+  if (text[end - 1] !== text[0] || !/^(?:as\s+const)?$/.test(text.slice(end).trim())) return null;
+  const raw = text.slice(1, end - 1);
+  if (text[0] === "`" && raw.includes("${")) return null;
+  let out = "";
+  for (let i = 0; i < raw.length; i += 1) {
+    if (raw[i] !== "\\") {
+      out += raw[i];
+      continue;
+    }
+    i += 1;
+    if (i >= raw.length || !/[\\/'"`]/.test(raw[i])) return null;
+    out += raw[i];
+  }
+  return out;
+}
+
+function staticConfigPaths(text, object, key) {
+  const body = text.slice(object.start + 1, object.end);
+  const entries = splitTopLevelProperties(body, object.start + 1);
+  const property = entries.filter((entry) => {
+    const match = entry.text.match(/^(?:([A-Za-z_$][\w$]*)|["']([^"']+)["'])\s*:/);
+    return (match?.[1] ?? match?.[2]) === key;
+  });
+  if (property.length !== 1) return null;
+  const colon = property[0].text.indexOf(":");
+  const value = property[0].text.slice(colon + 1).trim();
+  const one = staticJsString(value);
+  if (one !== null) {
+    return { paths: [one], ref: lineNumberAt(text, property[0].index) };
+  }
+  if (value[0] !== "[") return null;
+  const end = matchingDelimiter(value, 0, "[", "]");
+  if (end < 0 || !/^(?:as\s+const)?$/.test(value.slice(end + 1).trim())) return null;
+  const items = splitTopLevelProperties(value.slice(1, end), 1);
+  const paths = items.map((entry) => staticJsString(entry.text));
+  if (paths.length === 0 || paths.some((item) => item === null)) return null;
+  return { paths, ref: lineNumberAt(text, property[0].index) };
+}
+
+function resolveRepoPattern(repo, configPath, pattern) {
+  const portable = pattern.split("\\").join("/");
+  const absolute = resolve(repo, dirname(configPath), portable);
+  const rel = relative(repo, absolute).split(sep).join("/");
+  if (rel === ".." || rel.startsWith("../") || rel === "") return null;
+  return rel;
+}
+
+function regexEscape(value) {
+  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+}
+
+function globRegex(pattern) {
+  let out = "^";
+  for (let i = 0; i < pattern.length; i += 1) {
+    const ch = pattern[i];
+    if (ch === "*" && pattern[i + 1] === "*") {
+      i += 1;
+      if (pattern[i + 1] === "/") {
+        i += 1;
+        out += "(?:.*/)?";
+      } else {
+        out += ".*";
+      }
+    } else if (ch === "*") {
+      out += "[^/]*";
+    } else if (ch === "?") {
+      out += "[^/]";
+    } else if (ch === "{") {
+      const end = pattern.indexOf("}", i + 1);
+      if (end < 0) return null;
+      const choices = pattern.slice(i + 1, end).split(",");
+      if (choices.some((choice) => choice === "")) return null;
+      out += `(?:${choices.map(regexEscape).join("|")})`;
+      i = end;
+    } else {
+      out += regexEscape(ch);
+    }
+  }
+  return new RegExp(`${out}$`);
+}
+
+function matchesSchemaPattern(path, pattern) {
+  if (!GLOB_MAGIC.test(pattern)) {
+    return path === pattern || (extname(pattern) === "" && path.startsWith(`${pattern}/`));
+  }
+  const regex = globRegex(pattern);
+  return regex ? regex.test(path) : false;
+}
+
+function matchesOutputPath(path, output) {
+  const root = output.replace(/\/$/, "");
+  return path === root || path.startsWith(`${root}/`);
+}
+
+function commonBoundary(paths) {
+  if (paths.length === 0) return null;
+  const parts = paths.map((path) => path === "" ? [] : path.split("/"));
+  const limit = Math.min(...parts.map((item) => item.length));
+  let count = 0;
+  while (count < limit && parts.every((item) => item[count] === parts[0][count])) count += 1;
+  return parts[0].slice(0, count).join("/");
+}
+
+/** Link canonical Drizzle schema and generated migrations only when a tracked config says so. */
+function discoverDrizzleTopology(repo, files) {
+  const claims = new Map();
+  const gaps = [];
+  const links = [];
+  const parsedConfigs = [];
+  const addClaim = (path, claim) => {
+    if (!claims.has(path)) claims.set(path, []);
+    claims.get(path).push(claim);
+  };
+  for (const configPath of files.filter((path) => DRIZZLE_CONFIG.test(path))) {
+    const text = safeText(repo, configPath);
+    if (text === null) {
+      gaps.push({ format: "drizzle_config", ref: `${configPath}:1` });
+      continue;
+    }
+    const object = drizzleConfigObject(text);
+    const schema = object ? staticConfigPaths(text, object, "schema") : null;
+    const output = object ? staticConfigPaths(text, object, "out") : null;
+    if (!object || !schema || !output || output.paths.length !== 1) {
+      gaps.push({ format: "drizzle_config", ref: `${configPath}:1` });
+      continue;
+    }
+    const schemaPatterns = schema.paths.map((path) => resolveRepoPattern(repo, configPath, path));
+    const outputPath = resolveRepoPattern(repo, configPath, output.paths[0]);
+    if (schemaPatterns.some((path) => path === null) || outputPath === null) {
+      gaps.push({ format: "drizzle_config", ref: `${configPath}:${schema.ref}` });
+      continue;
+    }
+    const schemaFiles = files.filter((path) =>
+      path !== configPath
+      && /\.[cm]?[jt]sx?$/.test(path)
+      && schemaPatterns.some((pattern) => matchesSchemaPattern(path, pattern))
+    );
+    if (schemaFiles.length === 0) {
+      gaps.push({ format: "drizzle_config", ref: `${configPath}:${schema.ref}` });
+      continue;
+    }
+    const boundary = commonBoundary(schemaFiles.map(datastoreBoundary));
+    if (boundary === null) {
+      gaps.push({ format: "drizzle_config", ref: `${configPath}:${schema.ref}` });
+      continue;
+    }
+    const outputFiles = files.filter((path) =>
+      path !== configPath && path.endsWith(".sql") && matchesOutputPath(path, outputPath)
+    );
+    for (const path of schemaFiles) {
+      addClaim(path, { boundary, role: "canonical", ref: `${configPath}:${schema.ref}` });
+    }
+    for (const path of outputFiles) {
+      addClaim(path, { boundary, role: "migration", ref: `${configPath}:${output.ref}` });
+    }
+    parsedConfigs.push(configPath);
+    links.push({
+      config_ref: `${configPath}:${schema.ref}`,
+      boundary,
+      schema_patterns: [...schemaPatterns].sort(BY_PATH),
+      output_path: outputPath,
+    });
+  }
+  const byPath = new Map();
+  for (const [path, candidates] of claims.entries()) {
+    const unique = new Map(candidates.map((candidate) => [
+      `${candidate.boundary}\0${candidate.role}`, candidate,
+    ]));
+    if (unique.size === 1) {
+      byPath.set(path, [...unique.values()][0]);
+    } else {
+      for (const ref of new Set(candidates.map((candidate) => candidate.ref))) {
+        gaps.push({ format: "drizzle_config", ref });
+      }
+    }
+  }
+  return {
+    byPath,
+    gaps: gaps.sort((a, b) => BY_PATH(a.ref, b.ref)),
+    links: links.sort((a, b) => BY_PATH(a.config_ref, b.config_ref)),
+    parsedConfigs: [...new Set(parsedConfigs)].sort(BY_PATH),
+  };
+}
+
 function refsFor(rel, item) {
   return [`${rel}:${item.line}`];
 }
@@ -1251,16 +1485,23 @@ export function collectFacts(repo) {
     ? [...listing.files, SUPPLEMENT_PATH].sort(BY_PATH)
     : listing.files;
   const enumeratedBy = listing.enumeratedBy;
+  const drizzleTopology = discoverDrizzleTopology(repo, files);
   const observations = [];
   const parsedFiles = new Set();
   const parsedByKind = {};
+  for (const configPath of drizzleTopology.parsedConfigs) parsedFiles.add(configPath);
+  if (drizzleTopology.parsedConfigs.length > 0) {
+    parsedByKind.drizzle_config = drizzleTopology.parsedConfigs.length;
+  }
   for (const rel of files) {
     const parser = PARSERS.find((candidate) => candidate.match(rel));
     if (!parser) continue;
     const text = safeText(repo, rel);
     if (text === null) continue;
     const parsed = parser.parse(text);
-    const migrationOnly = parser.kind === "sql_ddl" && isMigrationPath(rel);
+    const topology = drizzleTopology.byPath.get(rel);
+    const migrationOnly = parser.kind === "sql_ddl"
+      && (topology?.role === "migration" || isMigrationPath(rel));
     const hasMigrationDdl = migrationOnly && splitSqlStatements(text).some(
       (statement) => migrationOperation(statement, rel).kind !== "non_structural"
     );
@@ -1269,10 +1510,11 @@ export function collectFacts(repo) {
     parsedByKind[parser.kind] = (parsedByKind[parser.kind] ?? 0) + 1;
     observations.push({
       path: rel,
-      boundary: datastoreBoundary(rel),
+      boundary: topology?.boundary ?? datastoreBoundary(rel),
       kind: parser.kind,
-      role: migrationOnly ? "migration" : "canonical",
+      role: topology?.role === "canonical" || !migrationOnly ? "canonical" : "migration",
       collections: cloneCollections(parsed, rel),
+      ...(topology ? { topology_ref: topology.ref } : {}),
       ...(migrationOnly ? { text } : {}),
     });
   }
@@ -1392,6 +1634,7 @@ export function collectFacts(repo) {
     datasets,
     systems,
     observations,
+    datastore_links: drizzleTopology.links,
     migration_operations: migrationOperations,
     counts: {
       datasets: datasets.length,
@@ -1416,7 +1659,12 @@ export function collectFacts(repo) {
       enumerated_by: enumeratedBy,
       files_parsed: parsedFiles.size,
       parsed_by_kind: Object.fromEntries(Object.entries(parsedByKind).sort()),
-      unparsed_candidates: findUnparsedCandidates(repo, files, parsedFiles),
+      unparsed_candidates: [...new Map([
+        ...findUnparsedCandidates(repo, files, parsedFiles),
+        ...drizzleTopology.gaps,
+      ].map((item) => [`${item.format}\0${item.ref}`, item])).values()].sort((a, b) =>
+        a.ref === b.ref ? BY_PATH(a.format, b.format) : BY_PATH(a.ref, b.ref)
+      ),
       migration_gaps: migrationGaps.sort((a, b) => BY_PATH(a.ref, b.ref)),
       schema_conflicts: schemaConflicts.sort((a, b) => BY_PATH(a.ref, b.ref)),
     },

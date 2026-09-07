@@ -84,6 +84,11 @@ table drop/rename. Unsupported or inconsistent structural operations omit that d
 than producing a guessed partial state. An ambiguous old-to-logical identity is review work, never
 permission to choose the closest-looking candidate.
 
+Treat a tracked `drizzle.config.*` with static `schema` and `out` paths as explicit topology
+evidence. The collector resolves both paths relative to that config, keeps the schema boundary as
+the datastore identity, and attaches generated SQL as migration history. Never merge datastores
+from overlapping table names alone.
+
 Runtime systems also come from evidence, not package manifests. Containers, workloads,
 server/worker entrypoints, deployment configuration, or executable start/deploy scripts paired
 with an entrypoint establish a boundary. A library package alone does not. With no confident

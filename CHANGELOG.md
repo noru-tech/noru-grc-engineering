@@ -28,6 +28,9 @@ one version number; the release workflow fails if they disagree.
 - `privacy-datamap` can include object stores, queues, search indexes and third-party stores through
   a committed, evidence-backed supplemental datastore contract. Every field requires its own typed
   or payload citation; provider client calls alone never invent fields.
+- Tracked Drizzle configuration now links static schema and migration-output paths across physical
+  directories. The canonical schema remains current-state authority, generated SQL remains cited
+  history, and unrelated stores are never merged from table-name overlap alone.
 
 ## 0.8.0 — 2026-09-07
 

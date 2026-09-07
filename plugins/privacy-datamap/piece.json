@@ -169,7 +169,7 @@
     "quiet": true,
     "validate": { "runtime": "python3", "entrypoint": "scripts/validate_manifest.py", "arguments": ["{manifest}", "--output=json", "--quiet"] },
     "drift_check": { "runtime": "node", "entrypoint": "scripts/collect.mjs", "arguments": ["--repo={repo}", "--check", "--output=json", "--quiet"] },
-    "watch_paths": ["**/*.sql", "**/*.prisma", "**/*.py", "**/*.proto", "**/*.graphql", "**/*.gql", ".noru/privacy-datamap-stores.json", ".noru/privacy-datamap.yml"],
+    "watch_paths": ["**/*.sql", "**/drizzle.config.*", "**/*.prisma", "**/*.py", "**/*.proto", "**/*.graphql", "**/*.gql", ".noru/privacy-datamap-stores.json", ".noru/privacy-datamap.yml"],
     "exit_codes": {
       "0": "success",
       "1": "drift, validation failure, an unresolved needs_review claim, or a stale plan",

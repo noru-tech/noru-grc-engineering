@@ -209,6 +209,7 @@
       },
       "watch_paths": [
         "**/*.sql",
+        "**/drizzle.config.*",
         "**/*.prisma",
         "**/*.py",
         "**/*.proto",

@@ -2041,8 +2041,105 @@ def test_datamap_normalizes_logical_topology(results, tmp):
     implementation = (PRIVACY_DATAMAP / "scripts" / "collect.mjs").read_text(encoding="utf-8")
     results.check(
         "[privacy-datamap] generic topology code contains no synthetic repository identifiers",
-        not any(name in implementation for name in ("apps/gateway", "apps/jobs", "packages/storage", "packages/helpers")),
+        not any(name in implementation for name in (
+            "apps/gateway", "apps/jobs", "packages/storage", "packages/helpers",
+            "apps/portal", "packages/persistence", "analytics",
+        )),
         "a fixture-specific topology identifier leaked into the collector",
+    )
+
+
+def test_datamap_uses_drizzle_config_for_cross_directory_topology(results, tmp):
+    repo = git_repo(
+        pathlib.Path(tmp) / "drizzle-config-topology",
+        {
+            "apps/portal/drizzle.config.ts": (
+                'import { defineConfig } from "drizzle-kit"\n'
+                "export default defineConfig({\n"
+                '  schema: "../../packages/persistence/src/schema/*",\n'
+                '  out: "./generated-migrations",\n'
+                "})\n"
+            ),
+            "packages/persistence/src/schema/accounts.ts": (
+                'export const accounts = pgTable("accounts", {\n'
+                '  id: uuid("id"),\n'
+                '  email: text("email"),\n'
+                "})\n"
+            ),
+            "packages/persistence/src/schema/projects.ts": (
+                'export const projects = pgTable("projects", {\n'
+                '  id: uuid("id"),\n'
+                '  title: text("title"),\n'
+                "})\n"
+            ),
+            "apps/portal/generated-migrations/001.sql": (
+                "CREATE TABLE accounts (\n  id UUID,\n  legacy_contact TEXT\n);\n"
+                "CREATE TABLE projects (\n  id UUID,\n  title TEXT\n);\n"
+                "CREATE TABLE retired_records (\n  id UUID\n);\n"
+            ),
+            "analytics/schema/accounts.ts": (
+                'export const accounts = pgTable("accounts", {\n'
+                '  event_count: integer("event_count"),\n'
+                "})\n"
+            ),
+        },
+    )
+    _summary, derived = datamap_scan(repo)
+    datasets = {dataset["fides_key"]: dataset for dataset in derived["datasets"]}
+    linked = datasets.get("packages_persistence_src", {})
+    linked_collections = {
+        collection["name"]: collection for collection in linked.get("collections", [])
+    }
+    results.check(
+        "[privacy-datamap] tracked Drizzle config joins cross-directory schema and migration paths",
+        set(datasets) == {"analytics", "packages_persistence_src"}
+        and derived["datastore_links"] == [
+            {
+                "config_ref": "apps/portal/drizzle.config.ts:3",
+                "boundary": "packages/persistence/src",
+                "schema_patterns": ["packages/persistence/src/schema/*"],
+                "output_path": "apps/portal/generated-migrations",
+            }
+        ],
+        {"datasets": datasets, "links": derived["datastore_links"]},
+    )
+    results.check(
+        "[privacy-datamap] cross-directory canonical Drizzle schema wins over migration history",
+        set(linked_collections) == {"accounts", "projects"}
+        and {field["name"] for field in linked_collections["accounts"]["fields"]}
+        == {"id", "email"}
+        and "retired_records" not in linked_collections,
+        linked_collections,
+    )
+    results.check(
+        "[privacy-datamap] table-name overlap never merges an unlinked datastore",
+        "accounts" in {
+            collection["name"] for collection in datasets["analytics"]["collections"]
+        }
+        and datasets["analytics"]["name"] == "analytics",
+        datasets["analytics"],
+    )
+    linked_observations = {
+        observation["path"]: (observation["boundary"], observation["role"])
+        for observation in derived["observations"]
+        if observation["path"].startswith("apps/portal/generated-migrations/")
+        or observation["path"].startswith("packages/persistence/src/schema/")
+    }
+    results.check(
+        "[privacy-datamap] linked migrations remain cited history under the canonical boundary",
+        linked_observations
+        == {
+            "apps/portal/generated-migrations/001.sql": (
+                "packages/persistence/src", "migration"
+            ),
+            "packages/persistence/src/schema/accounts.ts": (
+                "packages/persistence/src", "canonical"
+            ),
+            "packages/persistence/src/schema/projects.ts": (
+                "packages/persistence/src", "canonical"
+            ),
+        },
+        linked_observations,
     )
 
 
@@ -3204,6 +3301,7 @@ def main(argv):
             test_datamap_compacts_non_personal_review_state(results, tmp)
             test_datamap_fides_projection_is_privacy_only(results, tmp)
             test_datamap_normalizes_logical_topology(results, tmp)
+            test_datamap_uses_drizzle_config_for_cross_directory_topology(results, tmp)
             test_datamap_separates_datastores_and_falls_back_for_runtime(results, tmp)
             test_datamap_runtime_discovery_ignores_test_files(results, tmp)
             test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, tmp)

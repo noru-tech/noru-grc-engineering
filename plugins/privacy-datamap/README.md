@@ -74,6 +74,12 @@ declarative files. The complete current fields and file-shaped observations rema
 review candidate. Once the collection decision is accepted, non-personal names move to a compact
 collection-level `non_personal_fields` list without leaving the derived facts or accepted lock.
 
+Tracked `drizzle.config.ts`, `.js`, `.mts`, `.cts`, `.mjs` and `.cjs` files provide an explicit
+cross-directory topology edge when `schema` and `out` use static paths. Both paths are resolved
+relative to the config. Schema observations keep
+the canonical schema boundary and the generated SQL output joins it as migration history. A table
+name shared by two stores is never enough to merge them; only the config link is.
+
 Declarative schemas are the current-state authority when they share a boundary with migrations.
 That includes Drizzle, Prisma, Django/SQLAlchemy and standalone SQL schemas. Historical migrations
 remain as observations but do not produce duplicate datasets or fields. A migration-only datastore

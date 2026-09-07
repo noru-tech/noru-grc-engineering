@@ -16,6 +16,11 @@ systems. A source file is evidence for a dataset, not automatically a dataset. E
 retains all contributing `file:line` references. It classifies names it can resolve by exact lookup
 and marks everything else `needs_review: true`.
 
+Tracked `drizzle.config.*` files link static `schema` paths to their static `out` directory after
+resolving both relative to the config. The canonical schema boundary supplies current structure;
+generated SQL remains migration history. Do not merge unlinked stores because their table names
+overlap.
+
 For object stores, queues, search indexes or third-party stores without a supported declarative
 schema, the collector also reads a committed `.noru/privacy-datamap-stores.json`. Each declared
 field must cite typed, serializer, upload-payload or download-result evidence in the repository. A
