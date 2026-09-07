@@ -6,6 +6,15 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Added
+
+- Each action README is a full Marketplace listing: about, usage, examples, inputs, outputs,
+  runner assumptions, versioning and where to get support, in the shape of the well-known
+  actions people already read.
+- The distribution check validates `branding.icon` against the 257 Feather icons GitHub accepts
+  and `branding.color` against the nine Marketplace colors, so an unlisted value fails before a
+  release instead of on the listing form.
+
 ## 0.7.3 — 2026-09-07
 
 ### Fixed
