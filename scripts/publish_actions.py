@@ -224,6 +224,69 @@ class Results:
         return 0 if ok else 1
 
 
+# The Marketplace listing form rejects a longer description, and only says so on the form — after
+# the release exists in the mirror. Two of three actions were published with descriptions over the
+# limit before this check existed.
+MARKETPLACE_DESCRIPTION_LIMIT = 125
+
+# branding.color and branding.icon accept only these values. The icon set is Feather v4.28.0 minus
+# the brand icons and the thirteen GitHub omits (coffee, columns, divide*, frown, hexagon, key, meh,
+# mouse-pointer, smile, tool, x-octagon). Source, at the time of writing:
+# https://docs.github.com/en/actions/reference/workflows-and-actions/metadata-syntax#branding
+BRANDING_COLORS = {"white", "black", "yellow", "blue", "green", "orange", "red", "purple", "gray-dark"}
+BRANDING_ICONS = set("""
+activity airplay alert-circle alert-octagon alert-triangle align-center align-justify align-left
+align-right anchor aperture archive arrow-down-circle arrow-down-left arrow-down-right arrow-down
+arrow-left-circle arrow-left arrow-right-circle arrow-right arrow-up-circle arrow-up-left
+arrow-up-right arrow-up at-sign award bar-chart-2 bar-chart battery-charging battery bell-off bell
+bluetooth bold book-open book bookmark box briefcase calendar camera-off camera cast check-circle
+check-square check chevron-down chevron-left chevron-right chevron-up chevrons-down chevrons-left
+chevrons-right chevrons-up circle clipboard clock cloud-drizzle cloud-lightning cloud-off cloud-rain
+cloud-snow cloud code command compass copy corner-down-left corner-down-right corner-left-down
+corner-left-up corner-right-down corner-right-up corner-up-left corner-up-right cpu credit-card crop
+crosshair database delete disc dollar-sign download-cloud download droplet edit-2 edit-3 edit
+external-link eye-off eye fast-forward feather file-minus file-plus file-text file film filter flag
+folder-minus folder-plus folder gift git-branch git-commit git-merge git-pull-request globe grid
+hard-drive hash headphones heart help-circle home image inbox info italic layers layout life-buoy
+link-2 link list loader lock log-in log-out mail map-pin map maximize-2 maximize menu message-circle
+message-square mic-off mic minimize-2 minimize minus-circle minus-square minus monitor moon
+more-horizontal more-vertical move music navigation-2 navigation octagon package paperclip
+pause-circle pause percent phone-call phone-forwarded phone-incoming phone-missed phone-off
+phone-outgoing phone pie-chart play-circle play plus-circle plus-square plus pocket power printer
+radio refresh-ccw refresh-cw repeat rewind rotate-ccw rotate-cw rss save scissors search send server
+settings share-2 share shield-off shield shopping-bag shopping-cart shuffle sidebar skip-back
+skip-forward slash sliders smartphone speaker square star stop-circle sun sunrise sunset table tablet
+tag target terminal thermometer thumbs-down thumbs-up toggle-left toggle-right trash-2 trash
+trending-down trending-up triangle truck tv type umbrella underline unlock upload-cloud upload
+user-check user-minus user-plus user-x user users video-off video voicemail volume-1 volume-2
+volume-x volume watch wifi-off wifi wind x-circle x-square x zap-off zap zoom-in zoom-out
+""".split())
+
+
+def action_branding(text):
+    """icon and color from the top-level branding block of an action.yml, unquoted."""
+    match = re.search(r"^branding:\n((?:  .*\n)+)", text, re.M)
+    if not match:
+        return {}
+    branding = {}
+    for line in match.group(1).splitlines():
+        key, _, value = line.strip().partition(":")
+        branding[key.strip()] = value.strip().strip("'\"")
+    return branding
+
+
+def action_description(text):
+    """The top-level description of an action.yml: one quoted line, or a folded `>` block."""
+    match = re.search(r'^description:\s*"([^"\n]*)"\s*$', text, re.M)
+    if match:
+        return match.group(1).strip()
+    match = re.search(r"^description:\s*>-?\n((?:  .*\n)+)", text, re.M)
+    if match:
+        return " ".join(line.strip() for line in match.group(1).splitlines() if line.strip())
+    match = re.search(r"^description:\s*(.+)$", text, re.M)
+    return match.group(1).strip().strip("'\"") if match else ""
+
+
 def check_metadata(results):
     """What the Marketplace validates at listing time, checked before a release rather than after."""
     names = {}
@@ -231,11 +294,28 @@ def check_metadata(results):
         source = ROOT / spec["source"]
         text = (source / "action.yml").read_text(encoding="utf-8") if (source / "action.yml").is_file() else ""
         results.check(f"[{action}] has action.yml and README.md", text and (source / "README.md").is_file(), spec["source"])
-        results.check(f"[{action}] declares branding (Marketplace requires it)", "branding:" in text)
+        branding = action_branding(text)
+        results.check(f"[{action}] declares branding (Marketplace requires it)", bool(branding))
+        results.check(
+            f"[{action}] branding.icon is an allowed Feather icon",
+            branding.get("icon") in BRANDING_ICONS,
+            f"icon={branding.get('icon')!r}; GitHub accepts {len(BRANDING_ICONS)} Feather icons, brand icons excluded",
+        )
+        results.check(
+            f"[{action}] branding.color is an allowed Marketplace color",
+            branding.get("color") in BRANDING_COLORS,
+            f"color={branding.get('color')!r}; one of {', '.join(sorted(BRANDING_COLORS))}",
+        )
         match = re.search(r'^name:\s*"?([^"\n]+)"?\s*$', text, re.M)
         name = match.group(1).strip() if match else ""
         names.setdefault(name, []).append(action)
         results.check(f"[{action}] declares a name", bool(name))
+        description = action_description(text)
+        results.check(
+            f"[{action}] description is 1-{MARKETPLACE_DESCRIPTION_LIMIT} characters (Marketplace limit)",
+            0 < len(description) <= MARKETPLACE_DESCRIPTION_LIMIT,
+            f"{len(description)} chars: {description[:80]}…",
+        )
     for name, owners in names.items():
         results.check(f"action name '{name}' is unique across the mirrors", len(owners) == 1, owners)
 
@@ -392,10 +472,18 @@ def check(output_json, quiet):
                 all((mirror / name).exists() for name in ("action.yml", "README.md", "DISTRIBUTION.json", "scripts/ci_check.py", "plugins", "contract", "LICENSE")),
                 sorted(p.name for p in mirror.iterdir()),
             )
+            # The generated banner always carries a `uses:` line, so the usage example has to be
+            # found in the in-tree README — the body — or a Marketplace listing ships with no
+            # example at all, which is how the enforce action was published the first time.
+            source_readme = (ROOT / ACTIONS[action]["source"] / "README.md").read_text(encoding="utf-8")
+            results.check(
+                f"[{action}] README body has a copyable `uses: {ACTIONS[action]['repo']}@v…` example",
+                f"uses: {ACTIONS[action]['repo']}@v" in source_readme,
+            )
             readme = (mirror / "README.md").read_text(encoding="utf-8")
             results.check(
-                f"[{action}] README points at the mirror and has no dangling relative links",
-                f"uses: {ACTIONS[action]['repo']}@v" in readme and "](../" not in readme,
+                f"[{action}] mirror README has no dangling relative links",
+                "](../" not in readme and "](./" not in readme,
             )
         check_ci(results, mirrors["noru-ci"], tmp)
         check_review(results, mirrors["noru-review"], tmp)

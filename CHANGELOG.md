@@ -19,6 +19,36 @@ one version number; the release workflow fails if they disagree.
   evidence-supported logical identities, while surfacing ambiguous matches for review. Normalized
   key collisions fail before a manifest is written.
 
+## 0.7.5 — 2026-09-07
+
+### Changed
+
+- The rationale for vendoring no framework catalogue, in `SECURITY.md` and `contract/README.md`,
+  is stated generically: framework catalogues carry terms that forbid redistribution, and a
+  vendored copy drifts the moment the framework moves. It no longer names one framework and its
+  licence as the example.
+
+## 0.7.4 — 2026-09-07
+
+### Added
+
+- Each action README is a full Marketplace listing: about, usage, examples, inputs, outputs,
+  runner assumptions, versioning and where to get support, in the shape of the well-known
+  actions people already read.
+- The distribution check validates `branding.icon` against the 257 Feather icons GitHub accepts
+  and `branding.color` against the nine Marketplace colors, so an unlisted value fails before a
+  release instead of on the listing form.
+
+## 0.7.3 — 2026-09-07
+
+### Fixed
+
+- The `noru-ci` and `noru-review` action descriptions fit the GitHub Marketplace limit of 125
+  characters, which the listing form enforced and the distribution check now enforces first.
+- The enforce action README has a copyable workflow example. The distribution check now
+  requires the usage example in each action's own README, not just in the generated mirror
+  banner, so an action can no longer be published without one.
+
 ## 0.7.2 — 2026-09-07
 
 ### Changed

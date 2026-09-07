@@ -1377,13 +1377,13 @@ def test_datamap_never_overwrites_a_reviewed_manifest(results, tmp):
 def accepted_datamap_text(digest):
     names = ["id", "email", "password_hash", "weird_column", "created_at"]
     structure = hashlib.sha256("\n".join(sorted(names)).encode("utf-8")).hexdigest()
-    return f"""version: 0.7.2
+    return f"""version: 0.7.5
 piece: privacy-datamap
 source:
   slug: fixture/privacy-map
   commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
   branch: main
-  generated_by: privacy-datamap@0.7.2
+  generated_by: privacy-datamap@0.7.5
   derived_digest: {digest}
 dataset:
   - fides_key: db
