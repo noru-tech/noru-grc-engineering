@@ -1,14 +1,14 @@
 ---
 name: privacy-datamap
 version: 0.8.0
-description: Build a privacy data map (Fides/Fideslang dataset + system manifest) for this repository by reading its schemas and classifying the personal data in them, then land it in Noru. Use when the user wants a data map, a RoPA, a record of processing, a fideslang manifest, or to work out what personal data a codebase actually holds and where.
+description: Build a privacy data map (Fides/Fideslang dataset + system manifest) for this repository by reading its schemas and evidence-backed supplemental stores, classifying the personal data in them, then landing it in Noru. Use when the user wants a data map, a RoPA, a record of processing, a fideslang manifest, or to work out what personal data a codebase actually holds and where.
 requires:
   bins: ["node", "python3", "git"]
 ---
 
 # privacy-datamap
 
-Read the schemas a repository actually contains, classify the personal data in them against the
+Read the persistent structures a repository actually establishes, classify the personal data in them against the
 Fideslang taxonomy, and land the data map in Noru — with a citation for every field and a named
 owner for every judgement.
 
@@ -38,6 +38,11 @@ boundaries before it writes the review manifest. It also classifies the field na
 by **exact lookup** against a bundled table — `email`, `password_hash`, `last_login_ip`. That is a
 lookup, not an inference, which is what lets the collector be deterministic.
 
+The derived facts and accepted lock retain every observed field. New fields stay verbose while the
+collection is under review. After acceptance, categorized fields use full `fields` entries while
+accepted non-personal names live under the collection's `non_personal_fields`. Their omission from
+Fides output is not omission from the audit trail; the collection signature covers both lists.
+
 Everything else is a judgement, and the collector marks it `needs_review: true` rather than guessing:
 
 - a field name the table does not know
@@ -63,20 +68,41 @@ not the agent, decides what needs semantic analysis:
 On a first scan the mode is `bootstrap`. A valid manifest created before locks existed is
 `migration` and must seed its first lock without reclassification. Later scans are `maintenance`.
 Agent suggestions live in `.noru/.cache/privacy-datamap.proposals.json`; they are not decisions and
-cannot update the accepted manifest or lock by themselves.
+cannot update the accepted manifest or lock by themselves. Analyse repository context before asking
+the user, mark each proposal as personal, non-personal, ambiguous or special-category, and present
+the results grouped by dataset and collection. The user can accept or amend a collection group;
+only accepted groups may be patched into the candidate.
+
+Bootstrap has no accepted semantic baseline. An invalid manifest cannot seed descriptions, systems,
+declarations or references. Use `.noru/.cache/privacy-datamap.review.md` as the compact
+collection/family index; the larger proposal JSON is the machine work queue, not the user review.
 
 Read `coverage.migration_gaps`, `coverage.schema_conflicts` and `identity_ambiguities` before
 proposing anything. Declarative schemas take precedence over migration history at the same
 datastore boundary. Migration-only stores replay only `CREATE TABLE`, column add/drop/rename, and
 table drop/rename. Unsupported or inconsistent structural operations omit that datastore rather
-than producing a guessed partial state. An ambiguous old-to-logical identity is review work, never
-permission to choose the closest-looking candidate.
+than producing a guessed partial state. This blocking migration-gap rule applies only to
+migration-only datastores; when a canonical schema exists, migrations remain auditable history and
+their replay limitations are not current coverage gaps. An ambiguous old-to-logical identity is
+review work, never permission to choose the closest-looking candidate.
+
+Treat a tracked `drizzle.config.*` with static `schema` and `out` paths as explicit topology
+evidence. The collector resolves both paths relative to that config, keeps the schema boundary as
+the datastore identity, and attaches generated SQL as migration history. Never merge datastores
+from overlapping table names alone.
 
 Runtime systems also come from evidence, not package manifests. Containers, workloads,
 server/worker entrypoints, deployment configuration, or executable start/deploy scripts paired
 with an entrypoint establish a boundary. A library package alone does not. With no confident
 boundary, expect one repository-level fallback system. Never infer processing purpose, data use,
 subjects, or cross-directory datastore access from those markers.
+
+If repository evidence establishes an object store, queue, search index or third-party store that
+no supported schema describes, look for the committed `.noru/privacy-datamap-stores.json`. Its
+datastores and collections cite their integration evidence, and each field must separately cite a
+typed contract, serializer, upload payload or download result. Never derive object fields from a
+provider client call alone. Treat a missing supplement as missing structural coverage to report,
+not permission to copy fields from an older manifest.
 
 When you resolve one, read `references/classification-guide.md` and use the surrounding context —
 the table's name, the other columns, what the service does. If you genuinely cannot tell, say so and
@@ -113,15 +139,20 @@ under `special_category_refs`. **Always surface that list explicitly in your rep
 section. It carries the most risk in the map, it gets half the review horizon, and it is the thing a
 reviewer must not have to go looking for.
 
-## Three committed files, and they are not interchangeable
+## Committed inputs and outputs
 
-- `.noru/privacy-datamap.yml` — the **manifest**. Citations, interpretation blocks, review flags.
-  Commit it; reviewing it in a pull request is the point.
+- `.noru/privacy-datamap-stores.json` — an **optional structural input** for evidence-backed stores
+  that no supported schema describes. Commit it when used; the collector rejects an untracked copy.
+- `.noru/privacy-datamap.yml` — the **manifest**. Privacy-relevant and unresolved field details,
+  compact non-personal names, interpretation blocks and review flags. Commit it; reviewing it in a
+  pull request is the point.
 - `.noru/privacy-datamap.lock.json` — the **accepted observation**. Generated only after a current
   manifest validates. It records stable structural fingerprints and citations, never business
   meaning or agent reasoning. Commit it and do not edit it by hand.
 - `.fides/datamap.yml` — the **export**, in Ethyca's own format, for `fides push` and anything else
-  that reads a Fides manifest. Regenerated on every scan that finds a validated manifest.
+  that reads a Fides manifest. It contains only privacy-relevant fields, drops empty collections
+  and datasets, and repairs system dataset references. Regenerated on every scan that finds a
+  validated manifest.
 
 Edit the manifest, never the export. The next scan overwrites the export without warning, because it
 cannot tell an edit from its own output.

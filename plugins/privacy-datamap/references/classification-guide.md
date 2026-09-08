@@ -20,9 +20,11 @@ key** — if the one you want does not exist, the answer is a different key or a
    `user.contact`.
 2. **A field can carry several categories.** A `billing_address` blob may warrant
    `user.contact.address.street` + `.city` + `.postal_code`.
-3. **Operational columns are not personal data.** Surrogate keys, timestamps, soft-delete flags, row
-   versions: `system.operations`, or an empty `data_categories`. Do not force a `user.*` label onto
-   them.
+3. **Operational columns are not personal data when their context proves it.** Timestamps,
+   soft-delete flags and row versions are often operational. Generic identifiers and state flags
+   are not safe global shortcuts: they can identify a person or record behaviour. Do not force a
+   `user.*` label onto operational data, and do not dismiss context-sensitive data without reading
+   its collection and usage.
 4. **A wrong label is worse than an unresolved one.** The unresolved one gets reviewed. The wrong
    one gets signed, and then it is in the record with somebody's name against it. If you cannot
    tell, say so and ask.
@@ -35,7 +37,8 @@ in different schemas.
 | Name | It depends on |
 |---|---|
 | `name` | Whose name? On `products` or `tags` it is not personal data at all. On a person row, `user.name`. |
-| `id`, `account_id`, `customer_id` | `user.unique_id` **only when the row is a person**. A join key to a non-person table is `system.operations`. |
+| `id`, `uuid`, `account_id`, `customer_id` | `user.unique_id` **only when the row identifies a person or their account**. A join key to a non-person table is operational. |
+| `status`, `enabled`, `is_active` | State on a person, account, subscription or activity record may describe behaviour or account settings. A service-health or migration flag may be operational. |
 | `role` | Usually an RBAC role (`admin`, `member`) → `user.account` or `system.operations`. `user.job_title` only if the surrounding model is clearly about employment. |
 | `title` | A job title, a document title, or a salutation. Read the neighbours. |
 | `address` | A postal address (`user.contact.address.*`), an email address, or a wallet/IP address. |

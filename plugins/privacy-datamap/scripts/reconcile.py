@@ -219,8 +219,20 @@ def manifest_indexes(manifest):
         for collection in dataset.get("collections") or []:
             collection_id = f"{key}/{collection.get('name')}"
             collections[collection_id] = collection
-            for field in collection.get("fields") or []:
-                fields[f"{collection_id}/{field.get('name')}"] = field
+            def add_fields(items, prefix=""):
+                for field in items or []:
+                    name = field.get("name")
+                    path = f"{prefix}{name}"
+                    fields[f"{collection_id}/{path}"] = field
+                    add_fields(field.get("fields") or [], f"{path}.")
+
+            add_fields(collection.get("fields") or [])
+            for name in collection.get("non_personal_fields") or []:
+                fields[f"{collection_id}/{name}"] = {
+                    "name": name,
+                    "data_categories": [],
+                    "_compact_non_personal": True,
+                }
     for system in manifest.get("system") or []:
         systems[system.get("fides_key")] = system
     return datasets, collections, fields, systems
@@ -244,8 +256,17 @@ def manifest_matches_observation(manifest, derived):
     return accepted_systems == observed_systems
 
 
-def structure_digest(fields):
-    return sha256_bytes("\n".join(sorted(field["name"] for field in fields)).encode("utf-8"))
+def structure_digest(fields, non_personal_fields=None):
+    names = set(non_personal_fields or [])
+
+    def walk(items, prefix=""):
+        for field in items or []:
+            name = f"{prefix}{field['name']}"
+            names.add(name)
+            walk(field.get("fields") or [], f"{name}.")
+
+    walk(fields)
+    return sha256_bytes("\n".join(sorted(names)).encode("utf-8"))
 
 
 def _identity_tail(entity_id):
@@ -402,6 +423,7 @@ def build_candidate(derived, scan, manifest, lock):
                 )
             )
             candidate_fields = []
+            non_personal_fields = []
             for field in collection.get("fields") or []:
                 entity_id = field.get("entity_id") or f"{collection_id}/{field.get('name')}"
                 previous_entity_id = field_aliases.get(entity_id, entity_id)
@@ -414,25 +436,34 @@ def build_candidate(derived, scan, manifest, lock):
                         or locked_field.get("semantic_digest") == field.get("semantic_digest")
                     )
                 )
+                categories = (
+                    list(old_field.get("data_categories") or [])
+                    if field_unchanged
+                    else list(field.get("data_categories") or [])
+                )
+                unresolved = not field_unchanged and field.get("needs_review") is True
+                accepted_non_personal = field_unchanged and not categories and not old_field.get(
+                    "needs_review"
+                )
+                if accepted_non_personal:
+                    non_personal_fields.append(field.get("name"))
+                    continue
+
                 candidate_field = {
                     "name": field.get("name"),
-                    "data_categories": (
-                        list(old_field.get("data_categories") or [])
-                        if field_unchanged
-                        else list(field.get("data_categories") or [])
-                    ),
+                    "data_categories": categories,
                     "refs": list(field.get("refs") or [field.get("ref")]),
                 }
                 if field_unchanged and old_field.get("description") is not None:
                     candidate_field["description"] = old_field["description"]
-                if not field_unchanged and field.get("needs_review") is True:
+                if unresolved:
                     candidate_field["needs_review"] = True
                 candidate_fields.append(candidate_field)
 
             candidate_collection = {
                 "name": collection.get("name"),
                 "refs": list(collection.get("refs") or [collection.get("ref")]),
-                "structure_digest": structure_digest(candidate_fields),
+                "structure_digest": structure_digest(collection.get("fields") or []),
             }
             if old_collection.get("description") is not None:
                 candidate_collection["description"] = old_collection["description"]
@@ -449,6 +480,7 @@ def build_candidate(derived, scan, manifest, lock):
             else:
                 candidate_collection["needs_review"] = True
             candidate_collection["fields"] = candidate_fields
+            candidate_collection["non_personal_fields"] = sorted(non_personal_fields)
             candidate_collections.append(candidate_collection)
         candidate_dataset["collections"] = candidate_collections
         datasets.append(candidate_dataset)
@@ -508,7 +540,9 @@ def reconcile(derived, scan, manifest, lock, manifest_path):
 
     valid_manifest = False
     if manifest:
-        report, _counts = VALIDATOR.validate(manifest, VALIDATOR.load_vocabulary())
+        report, _counts = VALIDATOR.validate(
+            manifest, VALIDATOR.load_vocabulary(), observed=derived
+        )
         valid_manifest = not report.errors
     accepted_digest = (manifest or {}).get("source", {}).get("derived_digest")
     current_manifest = bool(
@@ -688,6 +722,75 @@ def build_lock(derived, scan, manifest_path):
     }
 
 
+def proposal_family(field):
+    """Group review work by syntax without making a privacy determination."""
+    name = str(field or "").lower()
+    if re.search(r"(?:^|_)(?:password|secret|token|credential)(?:_|$)", name):
+        return "credentials and secrets"
+    if name in {"id", "uuid"} or re.search(r"_(?:id|ids|uuid|uuids)$", name):
+        return "identifiers"
+    if name in {"status", "state", "enabled", "is_active"} or re.search(
+        r"^(?:is|has|can)_[a-z0-9_]+$", name
+    ):
+        return "state and flags"
+    if re.search(r"(?:^|_)(?:email|phone|address|url|uri|domain)(?:_|$)", name):
+        return "contact and location"
+    if re.search(r"(?:^|_)(?:at|date|time|timestamp)$", name):
+        return "dates and times"
+    if re.search(
+        r"(?:^|_)(?:content|description|message|notes?|metadata|config|payload|data|result|results)(?:_|$)",
+        name,
+    ):
+        return "content and structured values"
+    return "other fields"
+
+
+def build_review_report(result):
+    grouped = {}
+    for proposal in result.get("proposal_required") or []:
+        key = (proposal.get("dataset", ""), proposal.get("collection", ""))
+        family = proposal_family(proposal.get("field"))
+        grouped.setdefault(key, {}).setdefault(family, []).append(proposal)
+
+    lines = [
+        "# Privacy data-map proposal review",
+        "",
+        (
+            "This is a compact navigation report, not a classification. Field families are "
+            "syntactic groupings only; inspect the cited schema, relationships, neighbouring "
+            "fields and code usage before proposing or accepting a privacy decision."
+        ),
+        "",
+        f"- Mode: {result.get('mode', 'unknown')}",
+        f"- Collections requiring review: {len(grouped)}",
+        f"- Fields requiring contextual proposals: {sum(len(rows) for families in grouped.values() for rows in families.values())}",
+        f"- Possible special-category references: {len(result.get('special_category_refs') or [])}",
+        "",
+    ]
+    family_order = [
+        "credentials and secrets",
+        "identifiers",
+        "state and flags",
+        "contact and location",
+        "dates and times",
+        "content and structured values",
+        "other fields",
+    ]
+    for (dataset, collection), families in sorted(grouped.items()):
+        lines.extend([f"## {dataset} / {collection}", ""])
+        for family in family_order:
+            rows = families.get(family, [])
+            if not rows:
+                continue
+            fields = ", ".join(
+                f"{row.get('field')} ({(row.get('refs') or ['no citation'])[0]})"
+                for row in sorted(rows, key=lambda item: item.get("field", ""))
+            )
+            lines.append(f"- {family} ({len(rows)}): {fields}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def parse_args(argv):
     opts = {"repo": pathlib.Path.cwd(), "seal": False, "json": False, "quiet": False}
     for arg in argv:
@@ -740,7 +843,9 @@ def main(argv):
         if not manifest:
             sys.stderr.write("error: cannot seal without .noru/privacy-datamap.yml\n")
             return 1
-        report, _counts = VALIDATOR.validate(manifest, VALIDATOR.load_vocabulary())
+        report, _counts = VALIDATOR.validate(
+            manifest, VALIDATOR.load_vocabulary(), observed=derived
+        )
         if report.errors:
             sys.stderr.write(
                 f"error: cannot seal an invalid manifest ({len(report.errors)} validation error(s))\n"
@@ -776,10 +881,14 @@ def main(argv):
         reconciliation_path = cache / "privacy-datamap.reconciliation.json"
         proposals_path = cache / "privacy-datamap.proposals.json"
         candidate_path = cache / "privacy-datamap.candidate.yml"
+        review_path = cache / "privacy-datamap.review.md"
         candidate_lock = (
             build_lock(derived, scan, manifest_path) if result["mode"] == "migration" else lock
         )
-        candidate = build_candidate(derived, scan, manifest, candidate_lock)
+        # Bootstrap has no accepted semantic baseline. An invalid manifest is untrusted input, not
+        # a source for descriptions, declarations, references or system identities.
+        baseline_manifest = {} if result["mode"] == "bootstrap" else manifest
+        candidate = build_candidate(derived, scan, baseline_manifest, candidate_lock)
         reconciliation_path.write_text(
             json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -793,6 +902,7 @@ def main(argv):
                     "proposals": [
                         {
                             **item,
+                            "proposal_kind": None,
                             "proposed_categories": [],
                             "rationale": "",
                             "confidence": None,
@@ -814,12 +924,14 @@ def main(argv):
             + to_yaml(candidate),
             encoding="utf-8",
         )
+        review_path.write_text(build_review_report(result), encoding="utf-8")
         result.update(
             {
                 "ok": True,
                 "reconciliation": str(reconciliation_path.relative_to(repo)),
                 "proposals": str(proposals_path.relative_to(repo)),
                 "candidate": str(candidate_path.relative_to(repo)),
+                "review_report": str(review_path.relative_to(repo)),
             }
         )
 

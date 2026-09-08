@@ -6,6 +6,34 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Changed
+
+- `privacy-datamap` now records established non-personal fields as compact collection-level names
+  while retaining the complete cited schema in derived facts and the accepted lock. Validation and
+  structure digests cover both representations, reconciliation carries unchanged decisions forward,
+  and the Fides export removes non-personal branches, empty collections and empty datasets while
+  repairing system references.
+- The privacy scan workflow now analyzes its bounded proposal queue from repository context and
+  presents personal, non-personal, ambiguous and special-category proposals for grouped
+  collection-level approval.
+- Drizzle extraction now retains fields following inline or block comments, and generic identifiers
+  and state flags (`id`, `uuid`, `status`, `enabled`, `is_active`) require contextual proposals
+  instead of being treated as globally non-personal.
+- Bootstrap reconciliation now treats invalid manifests as having no accepted semantic baseline,
+  runtime discovery excludes test and fixture paths, and a compact collection/family review report
+  is emitted beside the detailed proposal cache.
+- SQL migration replay now ignores Drizzle statement delimiters and inventory-neutral table
+  constraints, while multiline check expressions remain constraint bodies instead of becoming
+  fields. Replay limitations block coverage only for migration-only datastores; canonical-backed
+  migrations remain historical observations without producing misleading current gaps. Validation
+  directs accepted non-personal decisions into `non_personal_fields`.
+- `privacy-datamap` can include object stores, queues, search indexes and third-party stores through
+  a committed, evidence-backed supplemental datastore contract. Every field requires its own typed
+  or payload citation; provider client calls alone never invent fields.
+- Tracked Drizzle configuration now links static schema and migration-output paths across physical
+  directories. The canonical schema remains current-state authority, generated SQL remains cited
+  history, and unrelated stores are never merged from table-name overlap alone.
+
 ## 0.8.0 — 2026-09-07
 
 ### Changed

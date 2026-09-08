@@ -25,6 +25,7 @@ Usage:
     python3 scripts/test_ci_mode.py [--output=json] [--quiet] [--emit-fixture=<dir>]
 Exit codes: 0 = pass, 1 = a case failed, 2 = usage / setup error.
 """
+import importlib.util
 import json
 import os
 import pathlib
@@ -131,6 +132,53 @@ def build_green_repo(dest, piece_name="ai-inventory"):
         raise RuntimeError(f"collector failed on the fixture repo: {completed.stderr[:400]}")
     digest = json.loads(completed.stdout)["derived_digest"]
 
+    manifest = repo / decl["artifact"]
+    if piece_name == "privacy-datamap":
+        # This validator compares the compact+verbose union with current derived facts. Resolve the
+        # collector's own synthetic candidate so the green fixture genuinely represents this repo;
+        # substituting only a digest would turn the test into a stale-manifest bypass.
+        document = ci_check.parse_manifest_text(manifest.read_text(encoding="utf-8"))
+        interpretation = {
+            "owner": "Fixture Owner",
+            "decided_at": "2026-08-20",
+            "expires_at": "2027-02-19",
+            "rationale": "Reviewed the synthetic fixture schema and its application semantics.",
+        }
+        for dataset in document.get("dataset", []):
+            for collection in dataset.get("collections", []):
+                collection.pop("needs_review", None)
+                collection["interpretation"] = interpretation
+                for field in collection.get("fields", []):
+                    field.pop("needs_review", None)
+                    field["data_categories"] = [
+                        "user.device.ip_address"
+                        if field.get("name") == "last_login_ip"
+                        else "user.authorization.password"
+                        if field.get("name") == "password_hash"
+                        else "user.contact.email"
+                    ]
+        for system in document.get("system", []):
+            for declaration in system.get("privacy_declarations", []):
+                declaration.update(
+                    {
+                        "name": "Operate the fixture service",
+                        "data_use": "essential.service",
+                        "data_subjects": ["customer"],
+                        "data_categories": [
+                            "user.contact.email",
+                            "user.authorization.password",
+                        ],
+                        "interpretation": interpretation,
+                    }
+                )
+                declaration.pop("needs_review", None)
+        reconcile_path = piece / "scripts" / "reconcile.py"
+        spec = importlib.util.spec_from_file_location("privacy_reconcile", reconcile_path)
+        reconcile = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reconcile)
+        manifest.write_text(reconcile.to_yaml(document), encoding="utf-8")
+        return repo, manifest
+
     fixture = piece / decl["validator"]["fixtures"]["valid"][0]
     text = fixture.read_text(encoding="utf-8")
     if "derived_digest" in text:
@@ -144,7 +192,6 @@ def build_green_repo(dest, piece_name="ai-inventory"):
     text = REF_TOKEN_RE.sub(
         lambda m: f"{REF_TARGET}:{min(int(m.group(2)), REF_TARGET_LINES)}", text
     )
-    manifest = repo / decl["artifact"]
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text(text, encoding="utf-8")
     return repo, manifest
@@ -502,14 +549,29 @@ def case_base_ref(results, tmp):
 
     # Now this branch introduces one. The structure digest has to be re-stamped because adding a
     # field is exactly what that digest exists to notice — which is itself worth asserting.
+    schema = repo / "db" / "migrations" / "0001_create_accounts.sql"
+    schema.write_text(
+        schema.read_text(encoding="utf-8").replace(
+            "    password_hash TEXT NOT NULL,",
+            "    password_hash TEXT NOT NULL,\n    passport_number TEXT,",
+        ),
+        encoding="utf-8",
+    )
+    collector = PLUGINS / "privacy-datamap" / "scripts" / "collect.mjs"
+    scanned = run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+    changed_digest = json.loads(scanned.stdout)["derived_digest"]
     manifest = repo / ".noru" / "privacy-datamap.yml"
-    before = manifest.read_text(encoding="utf-8")
+    before = re.sub(
+        r"derived_digest: [0-9a-f]{64}",
+        f"derived_digest: {changed_digest}",
+        manifest.read_text(encoding="utf-8"),
+    )
     manifest.write_text(
         before.replace(
             "          - name: password_hash",
             "          - name: passport_number\n"
             "            data_categories: [user.government_id.passport_number]\n"
-            f"            refs: [\"{REF_TARGET}:9\"]\n"
+            "            refs: [\"db/migrations/0001_create_accounts.sql:6\"]\n"
             "          - name: password_hash",
             1,
         ),
@@ -525,7 +587,10 @@ def case_base_ref(results, tmp):
     restamp_structure_digest(manifest)
     code, report = ci(repo, "--base-ref=HEAD", "--gate-on-new", piece="privacy-datamap")
     new = [f for f in (report or {}).get("findings", []) if f.get("first_seen") == "this_pr"]
-    results.check("base-ref: a new violation gates even with --gate-on-new", code == 7, f"exit {code}")
+    results.check(
+        "base-ref: a new violation gates even with --gate-on-new", code == 7,
+        next((f for f in (report or {}).get("findings", []) if f.get("kind") == "invalid"), report),
+    )
     results.check(
         "base-ref: and only the new one is attributed to this branch",
         [f["value"] for f in new] == ["user.government_id.passport_number"],
@@ -547,21 +612,25 @@ def case_base_ref(results, tmp):
 
 
 def restamp_structure_digest(manifest):
-    """Re-sign the first collection for its current fields, the way :scan would."""
-    import hashlib
-
+    """Re-sign every collection for its verbose+compact field union, the way :scan would."""
     document = ci_check.parse_manifest_text(manifest.read_text(encoding="utf-8"))
-    fields = sorted(f["name"] for f in document["dataset"][0]["collections"][0]["fields"])
-    digest = hashlib.sha256("\n".join(fields).encode("utf-8")).hexdigest()
-    manifest.write_text(
-        re.sub(
-            r"structure_digest: [0-9a-f]{64}",
-            f"structure_digest: {digest}",
-            manifest.read_text(encoding="utf-8"),
-            count=1,
-        ),
-        encoding="utf-8",
+    piece = PLUGINS / "privacy-datamap"
+    validator_spec = importlib.util.spec_from_file_location(
+        "privacy_validator_for_ci", piece / "scripts" / "validate_manifest.py"
     )
+    validator = importlib.util.module_from_spec(validator_spec)
+    validator_spec.loader.exec_module(validator)
+    reconcile_spec = importlib.util.spec_from_file_location(
+        "privacy_reconcile_for_ci", piece / "scripts" / "reconcile.py"
+    )
+    reconcile = importlib.util.module_from_spec(reconcile_spec)
+    reconcile_spec.loader.exec_module(reconcile)
+    for dataset in document.get("dataset", []):
+        for collection in dataset.get("collections", []):
+            collection["structure_digest"] = validator.structure_digest(
+                collection.get("fields", []), collection.get("non_personal_fields", [])
+            )
+    manifest.write_text(reconcile.to_yaml(document), encoding="utf-8")
 
 
 def case_drift(results, tmp):

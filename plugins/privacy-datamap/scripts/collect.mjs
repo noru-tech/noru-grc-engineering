@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import {
   existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync,
 } from "node:fs";
-import { basename, dirname, extname, join, relative, sep } from "node:path";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { toFideslang } from "./lib/fides.mjs";
@@ -29,6 +29,7 @@ const TABLE = JSON.parse(
 // A schema file is small. Anything past this is generated data or a checked-in dump, and
 // reading it would cost more than it could ever tell us.
 const MAX_BYTES = 1_000_000;
+const SUPPLEMENT_PATH = ".noru/privacy-datamap-stores.json";
 
 // Directories that are in the repository but are not the repository: a checked-in vendor/ or dist/
 // describes a dependency's schema or a build's output, not anything this codebase decided to store.
@@ -101,7 +102,7 @@ function trackedFiles(repo) {
   // A Set because an unmerged path is listed once per conflict stage.
   const out = new Set();
   for (const rel of raw.split("\0")) {
-    if (rel === "" || isSkipped(rel)) continue;
+    if (rel === "" || (rel !== SUPPLEMENT_PATH && isSkipped(rel))) continue;
     let stat;
     try {
       stat = lstatSync(join(repo, rel));
@@ -240,9 +241,10 @@ export function parseSqlDdl(text) {
         if (ch === "(") depth += 1;
         else if (ch === ")") depth -= 1;
       }
-      // A column sits inside the CREATE TABLE parens, so the line must already be at depth >= 1
-      // before it is read. That is what keeps the CREATE line itself and the closing `);` out.
-      if (j > i && depthBefore >= 1) {
+      // A column declaration starts directly inside the CREATE TABLE parens. Lines nested inside
+      // CHECK expressions are constraint bodies, not columns; accepting every depth used to turn
+      // multiline boolean expressions into fields named `OR` and referenced column names.
+      if (j > i && depthBefore === 1) {
         const body = line.trim().replace(/^[`"[]/, "");
         const first = body.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
         if (first && !SQL_SKIP.test(body)) {
@@ -388,12 +390,31 @@ function lineNumberAt(text, index) {
   return text.slice(0, index).split("\n").length;
 }
 
+function skipJsTrivia(text, index, limit = text.length) {
+  let cursor = index;
+  while (cursor < limit) {
+    if (/\s/.test(text[cursor])) {
+      cursor += 1;
+    } else if (text.startsWith("//", cursor)) {
+      const end = text.indexOf("\n", cursor + 2);
+      cursor = end < 0 || end >= limit ? limit : end + 1;
+    } else if (text.startsWith("/*", cursor)) {
+      const end = text.indexOf("*/", cursor + 2);
+      cursor = end < 0 || end + 2 >= limit ? limit : end + 2;
+    } else {
+      break;
+    }
+  }
+  return cursor;
+}
+
 function splitTopLevelProperties(text, offset) {
   const entries = [];
   let start = 0;
   let round = 0;
   let square = 0;
   let curly = 0;
+  let angle = 0;
   for (let i = 0; i <= text.length; i += 1) {
     const ch = text[i];
     if (ch === '"' || ch === "'" || ch === "`") {
@@ -416,49 +437,101 @@ function splitTopLevelProperties(text, offset) {
     else if (ch === "]") square -= 1;
     else if (ch === "{") curly += 1;
     else if (ch === "}") curly -= 1;
-    if ((ch === "," || i === text.length) && round === 0 && square === 0 && curly === 0) {
-      const raw = text.slice(start, i);
-      const leading = raw.search(/\S/);
-      if (leading >= 0) entries.push({ text: raw.slice(leading).trim(), index: offset + start + leading });
+    // Drizzle commonly uses `$type<Record<string, unknown>>()`. Without tracking that generic,
+    // its comma looks like the end of a column and both fragments disappear from extraction.
+    else if (ch === "<" && /[A-Za-z0-9_$.)\]]/.test(text[i - 1] ?? "")) angle += 1;
+    else if (ch === ">" && angle > 0) angle -= 1;
+    if (
+      (ch === "," || i === text.length)
+      && round === 0 && square === 0 && curly === 0 && angle === 0
+    ) {
+      // A comma commonly precedes an inline comment about the field that just ended. That comment
+      // is therefore leading trivia for the next slice; retaining it makes a valid next property
+      // fail the property regex and silently drops every field in a run of commented declarations.
+      const entryStart = skipJsTrivia(text, start, i);
+      if (entryStart < i) {
+        entries.push({ text: text.slice(entryStart, i).trim(), index: offset + entryStart });
+      }
       start = i + 1;
     }
   }
   return entries;
 }
 
-/** Parse common Drizzle table declarations without importing or executing repository code. */
-export function parseDrizzle(text) {
+function findDrizzleCalls(text) {
+  const calls = [];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '"' || text[i] === "'" || text[i] === "`") {
+      i = skipQuoted(text, i) - 1;
+      continue;
+    }
+    if (text.startsWith("//", i)) {
+      const end = text.indexOf("\n", i + 2);
+      i = end < 0 ? text.length : end;
+      continue;
+    }
+    if (text.startsWith("/*", i)) {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 1;
+      continue;
+    }
+    const match = text.slice(i).match(/^(pgTable|mysqlTable|sqliteTable)\s*\(/);
+    const previous = text[i - 1] ?? "";
+    if (match && !/[A-Za-z0-9_$]/.test(previous)) {
+      calls.push({ index: i });
+      i += match[0].length - 2;
+    }
+  }
+  return calls;
+}
+
+/** Parse common Drizzle table declarations and retain the locations of unsupported static gaps. */
+function parseDrizzleWithCoverage(text) {
   const out = [];
-  const call = /\b(pgTable|mysqlTable|sqliteTable)\s*\(/g;
-  for (let match = call.exec(text); match; match = call.exec(text)) {
+  const gaps = [];
+  for (const match of findDrizzleCalls(text)) {
     const open = text.indexOf("(", match.index);
     const close = matchingDelimiter(text, open, "(", ")");
-    if (close < 0) continue;
+    if (close < 0) {
+      gaps.push(match.index);
+      continue;
+    }
     const args = text.slice(open + 1, close);
     const tableName = args.match(/^\s*(["'])([^"']+)\1\s*,/);
     if (!tableName) {
-      call.lastIndex = close + 1;
+      gaps.push(match.index);
       continue;
     }
     const objectStartInArgs = args.indexOf("{", tableName[0].length);
     if (objectStartInArgs < 0) {
-      call.lastIndex = close + 1;
+      gaps.push(match.index);
       continue;
     }
     const objectStart = open + 1 + objectStartInArgs;
     const objectEnd = matchingDelimiter(text, objectStart, "{", "}");
     if (objectEnd < 0 || objectEnd > close) {
-      call.lastIndex = close + 1;
+      gaps.push(match.index);
       continue;
     }
     const body = text.slice(objectStart + 1, objectEnd);
     const fields = [];
     for (const entry of splitTopLevelProperties(body, objectStart + 1)) {
       const property = entry.text.match(/^(?:([A-Za-z_$][\w$]*)|["']([^"']+)["'])\s*:\s*([\s\S]+)$/);
-      if (!property) continue;
+      if (!property) {
+        // A spread, shorthand or computed property may contain columns, but resolving it requires
+        // executing or evaluating repository code. Surface the partial extraction as coverage.
+        gaps.push(entry.index);
+        continue;
+      }
       const expression = property[3].trim();
-      if (!/^[A-Za-z_$][\w$.]*\s*\(/.test(expression)) continue;
-      const physical = expression.match(/^[A-Za-z_$][\w$.]*\s*\(\s*(["'])([^"']+)\1/);
+      const builderCall = /^[A-Za-z_$][\w$.]*(?:\s*<[\s\S]*?>)?\s*\(/;
+      if (!builderCall.test(expression)) {
+        gaps.push(entry.index);
+        continue;
+      }
+      const physical = expression.match(
+        /^[A-Za-z_$][\w$.]*(?:\s*<[\s\S]*?>)?\s*\(\s*(["'])([^"']+)\1/,
+      );
       fields.push({
         name: physical?.[2] || property[1] || property[2],
         line: lineNumberAt(text, entry.index),
@@ -468,9 +541,13 @@ export function parseDrizzle(text) {
     if (fields.length > 0) {
       out.push({ name: tableName[2], line: lineNumberAt(text, match.index), fields });
     }
-    call.lastIndex = close + 1;
   }
-  return out;
+  return { collections: out, gaps };
+}
+
+/** Parse common Drizzle table declarations without importing or executing repository code. */
+export function parseDrizzle(text) {
+  return parseDrizzleWithCoverage(text).collections;
 }
 
 const PARSERS = [
@@ -545,12 +622,17 @@ function findUnparsedCandidates(repo, files, parsedFiles) {
       continue;
     }
     for (const { format, marker } of applicable) {
+      if (format === "drizzle") {
+        const calls = findDrizzleCalls(text);
+        if (calls.length === 0) continue;
+        const report = parseDrizzleWithCoverage(text);
+        if (report.collections.length >= calls.length && report.gaps.length === 0) continue;
+        const index = report.gaps[0] ?? calls[0].index;
+        out.push({ format, ref: `${rel}:${lineNumberAt(text, index)}` });
+        continue;
+      }
       const match = marker.exec(text);
       if (!match) continue;
-      if (format === "drizzle") {
-        const calls = text.match(/\b(?:pg|mysql|sqlite)Table\s*\(/g)?.length ?? 0;
-        if (parseDrizzle(text).length >= calls) continue;
-      }
       // The line the marker sits on, so the report cites a place and not just a filename.
       const line = text.slice(0, match.index).split("\n").length;
       out.push({ format, ref: `${rel}:${line}` });
@@ -632,6 +714,240 @@ export function datastoreBoundary(rel) {
   return parts.join("/");
 }
 
+const DRIZZLE_CONFIG = /(?:^|\/)drizzle\.config\.(?:[cm]?[jt]s)$/;
+const GLOB_MAGIC = /[*?{]/;
+
+function maskJsNonCode(text) {
+  const out = text.split("");
+  const blank = (start, end) => {
+    for (let i = start; i < end; i += 1) if (out[i] !== "\n" && out[i] !== "\r") out[i] = " ";
+  };
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '"' || text[i] === "'" || text[i] === "`") {
+      const end = skipQuoted(text, i);
+      blank(i, end);
+      i = end - 1;
+    } else if (text.startsWith("//", i)) {
+      const end = text.indexOf("\n", i + 2);
+      const stop = end < 0 ? text.length : end;
+      blank(i, stop);
+      i = stop - 1;
+    } else if (text.startsWith("/*", i)) {
+      const end = text.indexOf("*/", i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      blank(i, stop);
+      i = stop - 1;
+    }
+  }
+  return out.join("");
+}
+
+function drizzleConfigObject(text) {
+  const masked = maskJsNonCode(text);
+  const configured = /\bdefineConfig\s*\(/g;
+  let match;
+  while ((match = configured.exec(masked)) !== null) {
+    const open = masked.indexOf("(", match.index);
+    const objectStart = skipJsTrivia(text, open + 1);
+    if (text[objectStart] !== "{") continue;
+    const objectEnd = matchingDelimiter(text, objectStart, "{", "}");
+    if (objectEnd >= 0) return { start: objectStart, end: objectEnd };
+  }
+  const direct = /\bexport\s+default\s*\{/g.exec(masked);
+  if (!direct) return null;
+  const objectStart = masked.indexOf("{", direct.index);
+  const objectEnd = matchingDelimiter(text, objectStart, "{", "}");
+  return objectEnd < 0 ? null : { start: objectStart, end: objectEnd };
+}
+
+function staticJsString(value) {
+  const text = value.trim();
+  if (!['"', "'", "`"].includes(text[0])) return null;
+  const end = skipQuoted(text, 0);
+  if (text[end - 1] !== text[0] || !/^(?:as\s+const)?$/.test(text.slice(end).trim())) return null;
+  const raw = text.slice(1, end - 1);
+  if (text[0] === "`" && raw.includes("${")) return null;
+  let out = "";
+  for (let i = 0; i < raw.length; i += 1) {
+    if (raw[i] !== "\\") {
+      out += raw[i];
+      continue;
+    }
+    i += 1;
+    if (i >= raw.length || !/[\\/'"`]/.test(raw[i])) return null;
+    out += raw[i];
+  }
+  return out;
+}
+
+function staticConfigPaths(text, object, key) {
+  const body = text.slice(object.start + 1, object.end);
+  const entries = splitTopLevelProperties(body, object.start + 1);
+  const property = entries.filter((entry) => {
+    const match = entry.text.match(/^(?:([A-Za-z_$][\w$]*)|["']([^"']+)["'])\s*:/);
+    return (match?.[1] ?? match?.[2]) === key;
+  });
+  if (property.length !== 1) return null;
+  const colon = property[0].text.indexOf(":");
+  const value = property[0].text.slice(colon + 1).trim();
+  const one = staticJsString(value);
+  if (one !== null) {
+    return { paths: [one], ref: lineNumberAt(text, property[0].index) };
+  }
+  if (value[0] !== "[") return null;
+  const end = matchingDelimiter(value, 0, "[", "]");
+  if (end < 0 || !/^(?:as\s+const)?$/.test(value.slice(end + 1).trim())) return null;
+  const items = splitTopLevelProperties(value.slice(1, end), 1);
+  const paths = items.map((entry) => staticJsString(entry.text));
+  if (paths.length === 0 || paths.some((item) => item === null)) return null;
+  return { paths, ref: lineNumberAt(text, property[0].index) };
+}
+
+function resolveRepoPattern(repo, configPath, pattern) {
+  const portable = pattern.split("\\").join("/");
+  const absolute = resolve(repo, dirname(configPath), portable);
+  const rel = relative(repo, absolute).split(sep).join("/");
+  if (rel === ".." || rel.startsWith("../") || rel === "") return null;
+  return rel;
+}
+
+function regexEscape(value) {
+  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+}
+
+function globRegex(pattern) {
+  let out = "^";
+  for (let i = 0; i < pattern.length; i += 1) {
+    const ch = pattern[i];
+    if (ch === "*" && pattern[i + 1] === "*") {
+      i += 1;
+      if (pattern[i + 1] === "/") {
+        i += 1;
+        out += "(?:.*/)?";
+      } else {
+        out += ".*";
+      }
+    } else if (ch === "*") {
+      out += "[^/]*";
+    } else if (ch === "?") {
+      out += "[^/]";
+    } else if (ch === "{") {
+      const end = pattern.indexOf("}", i + 1);
+      if (end < 0) return null;
+      const choices = pattern.slice(i + 1, end).split(",");
+      if (choices.some((choice) => choice === "")) return null;
+      out += `(?:${choices.map(regexEscape).join("|")})`;
+      i = end;
+    } else {
+      out += regexEscape(ch);
+    }
+  }
+  return new RegExp(`${out}$`);
+}
+
+function matchesSchemaPattern(path, pattern) {
+  if (!GLOB_MAGIC.test(pattern)) {
+    return path === pattern || (extname(pattern) === "" && path.startsWith(`${pattern}/`));
+  }
+  const regex = globRegex(pattern);
+  return regex ? regex.test(path) : false;
+}
+
+function matchesOutputPath(path, output) {
+  const root = output.replace(/\/$/, "");
+  return path === root || path.startsWith(`${root}/`);
+}
+
+function commonBoundary(paths) {
+  if (paths.length === 0) return null;
+  const parts = paths.map((path) => path === "" ? [] : path.split("/"));
+  const limit = Math.min(...parts.map((item) => item.length));
+  let count = 0;
+  while (count < limit && parts.every((item) => item[count] === parts[0][count])) count += 1;
+  return parts[0].slice(0, count).join("/");
+}
+
+/** Link canonical Drizzle schema and generated migrations only when a tracked config says so. */
+function discoverDrizzleTopology(repo, files) {
+  const claims = new Map();
+  const gaps = [];
+  const links = [];
+  const parsedConfigs = [];
+  const addClaim = (path, claim) => {
+    if (!claims.has(path)) claims.set(path, []);
+    claims.get(path).push(claim);
+  };
+  for (const configPath of files.filter((path) => DRIZZLE_CONFIG.test(path))) {
+    const text = safeText(repo, configPath);
+    if (text === null) {
+      gaps.push({ format: "drizzle_config", ref: `${configPath}:1` });
+      continue;
+    }
+    const object = drizzleConfigObject(text);
+    const schema = object ? staticConfigPaths(text, object, "schema") : null;
+    const output = object ? staticConfigPaths(text, object, "out") : null;
+    if (!object || !schema || !output || output.paths.length !== 1) {
+      gaps.push({ format: "drizzle_config", ref: `${configPath}:1` });
+      continue;
+    }
+    const schemaPatterns = schema.paths.map((path) => resolveRepoPattern(repo, configPath, path));
+    const outputPath = resolveRepoPattern(repo, configPath, output.paths[0]);
+    if (schemaPatterns.some((path) => path === null) || outputPath === null) {
+      gaps.push({ format: "drizzle_config", ref: `${configPath}:${schema.ref}` });
+      continue;
+    }
+    const schemaFiles = files.filter((path) =>
+      path !== configPath
+      && /\.[cm]?[jt]sx?$/.test(path)
+      && schemaPatterns.some((pattern) => matchesSchemaPattern(path, pattern))
+    );
+    if (schemaFiles.length === 0) {
+      gaps.push({ format: "drizzle_config", ref: `${configPath}:${schema.ref}` });
+      continue;
+    }
+    const boundary = commonBoundary(schemaFiles.map(datastoreBoundary));
+    if (boundary === null) {
+      gaps.push({ format: "drizzle_config", ref: `${configPath}:${schema.ref}` });
+      continue;
+    }
+    const outputFiles = files.filter((path) =>
+      path !== configPath && path.endsWith(".sql") && matchesOutputPath(path, outputPath)
+    );
+    for (const path of schemaFiles) {
+      addClaim(path, { boundary, role: "canonical", ref: `${configPath}:${schema.ref}` });
+    }
+    for (const path of outputFiles) {
+      addClaim(path, { boundary, role: "migration", ref: `${configPath}:${output.ref}` });
+    }
+    parsedConfigs.push(configPath);
+    links.push({
+      config_ref: `${configPath}:${schema.ref}`,
+      boundary,
+      schema_patterns: [...schemaPatterns].sort(BY_PATH),
+      output_path: outputPath,
+    });
+  }
+  const byPath = new Map();
+  for (const [path, candidates] of claims.entries()) {
+    const unique = new Map(candidates.map((candidate) => [
+      `${candidate.boundary}\0${candidate.role}`, candidate,
+    ]));
+    if (unique.size === 1) {
+      byPath.set(path, [...unique.values()][0]);
+    } else {
+      for (const ref of new Set(candidates.map((candidate) => candidate.ref))) {
+        gaps.push({ format: "drizzle_config", ref });
+      }
+    }
+  }
+  return {
+    byPath,
+    gaps: gaps.sort((a, b) => BY_PATH(a.ref, b.ref)),
+    links: links.sort((a, b) => BY_PATH(a.config_ref, b.config_ref)),
+    parsedConfigs: [...new Set(parsedConfigs)].sort(BY_PATH),
+  };
+}
+
 function refsFor(rel, item) {
   return [`${rel}:${item.line}`];
 }
@@ -648,7 +964,175 @@ function cloneCollections(collections, rel) {
   }));
 }
 
+const SUPPLEMENT_VERSION = "1.0.0";
+const SUPPLEMENT_STORE_TYPES = new Set([
+  "object_storage", "queue", "search_index", "third_party_store", "other",
+]);
+const SUPPLEMENT_EVIDENCE_KINDS = new Set([
+  "typed_contract", "serializer", "upload_payload", "download_result",
+]);
+const FIDES_KEY = /^[A-Za-z0-9_.<>-]+$/;
+
+function supplementalError(path, message) {
+  throw new Error(`${SUPPLEMENT_PATH}${path}: ${message}`);
+}
+
+function supplementalObject(value, path) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    supplementalError(path, "must be an object");
+  }
+}
+
+function supplementalKeys(value, allowed, path) {
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) supplementalError(path, `unknown key '${key}'`);
+  }
+}
+
+function supplementalString(value, path, pattern = null) {
+  if (typeof value !== "string" || value.trim() === "") supplementalError(path, "must be a non-empty string");
+  if (pattern && !pattern.test(value)) supplementalError(path, `has invalid value '${value}'`);
+  return value;
+}
+
+function supplementalArray(value, path) {
+  if (!Array.isArray(value) || value.length === 0) supplementalError(path, "must be a non-empty array");
+  return value;
+}
+
+function supplementalRefs(repo, refs, path, knownFiles, lineCounts) {
+  const out = supplementalArray(refs, path).map((ref, index) => {
+    supplementalString(ref, `${path}[${index}]`);
+    const match = ref.match(/^([^:\s][^:]*):([1-9][0-9]*)$/);
+    if (!match) supplementalError(`${path}[${index}]`, "must be a repository-relative file:line citation");
+    const rel = match[1].split("\\").join("/");
+    if (rel === SUPPLEMENT_PATH) {
+      supplementalError(`${path}[${index}]`, "must cite repository evidence, not the declaration itself");
+    }
+    if (rel.startsWith("/") || rel.split("/").includes("..") || !knownFiles.has(rel)) {
+      supplementalError(`${path}[${index}]`, `cites a file outside the scanned repository: '${rel}'`);
+    }
+    if (!lineCounts.has(rel)) {
+      const text = safeText(repo, rel);
+      if (text === null) supplementalError(`${path}[${index}]`, `cannot read cited file '${rel}'`);
+      lineCounts.set(rel, text.split("\n").length);
+    }
+    const line = Number(match[2]);
+    if (line > lineCounts.get(rel)) {
+      supplementalError(`${path}[${index}]`, `cites line ${line}, but '${rel}' has only ${lineCounts.get(rel)} line(s)`);
+    }
+    return `${rel}:${line}`;
+  });
+  if (new Set(out).size !== out.length) supplementalError(path, "must not contain duplicate citations");
+  return out.sort(BY_PATH);
+}
+
+/**
+ * Read explicitly declared stores whose structure cannot be recovered from a supported schema.
+ * A provider client proves only that a store exists; every declared field therefore needs its own
+ * typed/payload/serialization citation. The collector never derives object fields from SDK calls.
+ */
+function loadSupplementalDatastores(repo, files, enumeratedBy) {
+  const full = join(repo, SUPPLEMENT_PATH);
+  if (!existsSync(full)) return [];
+  if (enumeratedBy === "git" && !files.includes(SUPPLEMENT_PATH)) {
+    throw new Error(`${SUPPLEMENT_PATH}: exists but is not tracked; stage it before scanning`);
+  }
+  let document;
+  try {
+    document = JSON.parse(readFileSync(full, "utf8"));
+  } catch (error) {
+    throw new Error(`${SUPPLEMENT_PATH}: invalid JSON: ${error.message}`);
+  }
+  supplementalObject(document, "");
+  supplementalKeys(document, new Set(["$schema", "version", "datastores"]), "");
+  if (document.$schema !== undefined) supplementalString(document.$schema, ".$schema");
+  if (document.version !== SUPPLEMENT_VERSION) {
+    supplementalError(".version", `must be '${SUPPLEMENT_VERSION}'`);
+  }
+  const stores = supplementalArray(document.datastores, ".datastores");
+  const knownFiles = new Set(files);
+  const lineCounts = new Map();
+  const seenStores = new Set();
+  const normalized = stores.map((store, storeIndex) => {
+    const path = `.datastores[${storeIndex}]`;
+    supplementalObject(store, path);
+    supplementalKeys(store, new Set([
+      "fides_key", "name", "store_type", "provider", "refs", "system_references", "collections",
+    ]), path);
+    const fidesKey = supplementalString(store.fides_key, `${path}.fides_key`, FIDES_KEY);
+    if (seenStores.has(fidesKey)) supplementalError(`${path}.fides_key`, `duplicate datastore key '${fidesKey}'`);
+    seenStores.add(fidesKey);
+    const name = supplementalString(store.name, `${path}.name`);
+    const storeType = supplementalString(store.store_type, `${path}.store_type`);
+    if (!SUPPLEMENT_STORE_TYPES.has(storeType)) {
+      supplementalError(`${path}.store_type`, `must be one of ${[...SUPPLEMENT_STORE_TYPES].join(", ")}`);
+    }
+    const provider = store.provider === undefined
+      ? null
+      : supplementalString(store.provider, `${path}.provider`);
+    const refs = supplementalRefs(repo, store.refs, `${path}.refs`, knownFiles, lineCounts);
+    const systemReferences = store.system_references === undefined ? [] : store.system_references;
+    if (!Array.isArray(systemReferences)) supplementalError(`${path}.system_references`, "must be an array");
+    for (let index = 0; index < systemReferences.length; index += 1) {
+      supplementalString(systemReferences[index], `${path}.system_references[${index}]`, FIDES_KEY);
+    }
+    if (new Set(systemReferences).size !== systemReferences.length) {
+      supplementalError(`${path}.system_references`, "must not contain duplicate system keys");
+    }
+    const seenCollections = new Set();
+    const collections = supplementalArray(store.collections, `${path}.collections`).map((collection, collectionIndex) => {
+      const collectionPath = `${path}.collections[${collectionIndex}]`;
+      supplementalObject(collection, collectionPath);
+      supplementalKeys(collection, new Set(["name", "refs", "fields"]), collectionPath);
+      const collectionName = supplementalString(collection.name, `${collectionPath}.name`);
+      if (seenCollections.has(collectionName)) supplementalError(`${collectionPath}.name`, `duplicate collection '${collectionName}'`);
+      seenCollections.add(collectionName);
+      const collectionRefs = supplementalRefs(
+        repo, collection.refs, `${collectionPath}.refs`, knownFiles, lineCounts,
+      );
+      const seenFields = new Set();
+      const fields = supplementalArray(collection.fields, `${collectionPath}.fields`).map((field, fieldIndex) => {
+        const fieldPath = `${collectionPath}.fields[${fieldIndex}]`;
+        supplementalObject(field, fieldPath);
+        supplementalKeys(field, new Set(["name", "shape", "evidence_kind", "refs"]), fieldPath);
+        const fieldName = supplementalString(field.name, `${fieldPath}.name`);
+        if (seenFields.has(fieldName)) supplementalError(`${fieldPath}.name`, `duplicate field '${fieldName}'`);
+        seenFields.add(fieldName);
+        const shape = supplementalString(field.shape, `${fieldPath}.shape`);
+        const evidenceKind = supplementalString(field.evidence_kind, `${fieldPath}.evidence_kind`);
+        if (!SUPPLEMENT_EVIDENCE_KINDS.has(evidenceKind)) {
+          supplementalError(
+            `${fieldPath}.evidence_kind`,
+            `must be one of ${[...SUPPLEMENT_EVIDENCE_KINDS].join(", ")}`,
+          );
+        }
+        return {
+          name: fieldName,
+          shape,
+          evidence_kind: evidenceKind,
+          refs: supplementalRefs(repo, field.refs, `${fieldPath}.refs`, knownFiles, lineCounts),
+        };
+      });
+      return { name: collectionName, refs: collectionRefs, fields };
+    });
+    return {
+      fides_key: fidesKey,
+      name,
+      store_type: storeType,
+      ...(provider ? { provider } : {}),
+      refs,
+      system_references: [...systemReferences].sort(BY_PATH),
+      collections,
+    };
+  });
+  return normalized.sort((a, b) => BY_PATH(a.fides_key, b.fides_key));
+}
+
 function splitSqlStatements(text) {
+  // Drizzle uses this exact comment as an out-of-band statement delimiter. Removing only the
+  // marker, while preserving its newline, keeps the next statement's citation on its real line.
+  text = text.replace(/^[ \t]*-->[ \t]*statement-breakpoint[ \t]*\r?$/gmi, "");
   const out = [];
   let start = 0;
   let line = 1;
@@ -704,6 +1188,14 @@ function migrationOperation(statement, rel) {
   }
   if (/^alter\s+table\b/i.test(compact) && /,\s*(?:add|drop|rename|alter)\b/i.test(compact)) {
     return { kind: "unsupported", ref };
+  }
+  // Table constraints change validation or relationships, not the field inventory this replay
+  // computes. Their referenced columns already came from CREATE TABLE / ADD COLUMN operations.
+  if (
+    /^alter\s+table\s+[\s\S]+?\s+add\s+(?:constraint\s+[`"[]?[A-Za-z_][A-Za-z0-9_]*[`"\]]?\s+)?(?:foreign\s+key|check|unique|primary\s+key)\b/i
+      .test(compact)
+  ) {
+    return { kind: "non_structural", ref };
   }
   let match = compact.match(
     /^alter\s+table\s+(?:if\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+add\s+(?:column\s+)?(?:if\s+not\s+exists\s+)?(?!constraint\b)[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s+([\s\S]+?);?$/i,
@@ -807,8 +1299,8 @@ function mergeCanonical(observations) {
   return { collections: gaps.length === 0 ? [...tables.values()] : [], gaps };
 }
 
-function normalizedDataset(boundary, collections, sourceKinds) {
-  const datasetKey = fidesKeyFor(boundary || "repository");
+function normalizedDataset(boundary, collections, sourceKinds, explicitKey = null, explicitName = null) {
+  const datasetKey = explicitKey ?? fidesKeyFor(boundary || "repository");
   let fieldCount = 0;
   let classified = 0;
   let needsReview = 0;
@@ -845,7 +1337,7 @@ function normalizedDataset(boundary, collections, sourceKinds) {
   return {
     dataset: {
       fides_key: datasetKey,
-      name: boundary || "repository",
+      name: (explicitName ?? boundary) || "repository",
       source_kind: sourceKinds.length === 1 ? sourceKinds[0] : "normalized",
       source_kinds: sourceKinds,
       ref: normalizedCollections[0]?.ref ?? `${boundary || "."}:1`,
@@ -859,10 +1351,14 @@ function normalizedDataset(boundary, collections, sourceKinds) {
 
 const DEPLOYMENT_FILES = /^(?:Dockerfile(?:\..+)?|docker-compose\.ya?ml|compose\.ya?ml|serverless\.ya?ml|vercel\.json|fly\.toml|Procfile)$/i;
 const WORKLOAD_MARKER = /^\s*kind:\s*(?:Deployment|StatefulSet|DaemonSet|CronJob|Job)\s*$/m;
-const NON_RUNTIME_DIRS = new Set(["test", "tests", "fixture", "fixtures", "example", "examples"]);
+const NON_RUNTIME_DIRS = new Set([
+  "test", "tests", "__tests__", "fixture", "fixtures", "__fixtures__", "example", "examples",
+]);
+const NON_RUNTIME_FILE = /(?:^|\/)[^/]*\.(?:test|spec)\.[^/]+$/i;
 
 function isNonRuntimePath(rel) {
-  return rel.split("/").slice(0, -1).some((part) => NON_RUNTIME_DIRS.has(part.toLowerCase()));
+  return NON_RUNTIME_FILE.test(rel)
+    || rel.split("/").slice(0, -1).some((part) => NON_RUNTIME_DIRS.has(part.toLowerCase()));
 }
 
 function entrypointMatch(rel, text) {
@@ -887,11 +1383,13 @@ function safeText(repo, rel) {
 /** Package metadata is consulted only when an executable script points to an existing entrypoint. */
 export function discoverServices(repo, files) {
   const evidence = new Map();
-  const fileSet = new Set(files);
+  const runtimeFiles = files.filter((rel) => rel !== SUPPLEMENT_PATH);
+  const fileSet = new Set(runtimeFiles);
   const packageRoots = new Set(
-    files
+    runtimeFiles
       .filter((rel) =>
-        /(?:^|\/)(?:package\.json|pyproject\.toml|go\.mod|Cargo\.toml|pom\.xml|build\.gradle)$/.test(rel)
+        !isNonRuntimePath(rel)
+        && /(?:^|\/)(?:package\.json|pyproject\.toml|go\.mod|Cargo\.toml|pom\.xml|build\.gradle)$/.test(rel)
       )
       .map((rel) => dirname(rel) === "." ? "" : dirname(rel).split(sep).join("/")),
   );
@@ -908,7 +1406,7 @@ export function discoverServices(repo, files) {
     if (!evidence.has(root)) evidence.set(root, []);
     evidence.get(root).push({ ref, kind });
   };
-  for (const rel of files) {
+  for (const rel of runtimeFiles) {
     if (isNonRuntimePath(rel)) continue;
     const leaf = basename(rel);
     const root = dirname(rel) === "." ? "" : dirname(rel).split(sep).join("/");
@@ -951,7 +1449,10 @@ export function discoverServices(repo, files) {
     }
   }
   if (evidence.size === 0) {
-    evidence.set("", [{ ref: files.length > 0 ? `${files[0]}:1` : ".:1", kind: "repository_fallback" }]);
+    evidence.set("", [{
+      ref: runtimeFiles.length > 0 ? `${runtimeFiles[0]}:1` : `${SUPPLEMENT_PATH}:1`,
+      kind: "repository_fallback",
+    }]);
   }
   return [...evidence.entries()]
     .sort(([a], [b]) => BY_PATH(a, b))
@@ -976,17 +1477,31 @@ function assertUniqueKeys(kind, rows) {
 }
 
 export function collectFacts(repo) {
-  const { files, enumeratedBy } = listFiles(repo);
+  const listing = listFiles(repo);
+  const supplementalStores = loadSupplementalDatastores(
+    repo, listing.files, listing.enumeratedBy,
+  );
+  const files = existsSync(join(repo, SUPPLEMENT_PATH)) && !listing.files.includes(SUPPLEMENT_PATH)
+    ? [...listing.files, SUPPLEMENT_PATH].sort(BY_PATH)
+    : listing.files;
+  const enumeratedBy = listing.enumeratedBy;
+  const drizzleTopology = discoverDrizzleTopology(repo, files);
   const observations = [];
   const parsedFiles = new Set();
   const parsedByKind = {};
+  for (const configPath of drizzleTopology.parsedConfigs) parsedFiles.add(configPath);
+  if (drizzleTopology.parsedConfigs.length > 0) {
+    parsedByKind.drizzle_config = drizzleTopology.parsedConfigs.length;
+  }
   for (const rel of files) {
     const parser = PARSERS.find((candidate) => candidate.match(rel));
     if (!parser) continue;
     const text = safeText(repo, rel);
     if (text === null) continue;
     const parsed = parser.parse(text);
-    const migrationOnly = parser.kind === "sql_ddl" && isMigrationPath(rel);
+    const topology = drizzleTopology.byPath.get(rel);
+    const migrationOnly = parser.kind === "sql_ddl"
+      && (topology?.role === "migration" || isMigrationPath(rel));
     const hasMigrationDdl = migrationOnly && splitSqlStatements(text).some(
       (statement) => migrationOperation(statement, rel).kind !== "non_structural"
     );
@@ -995,10 +1510,11 @@ export function collectFacts(repo) {
     parsedByKind[parser.kind] = (parsedByKind[parser.kind] ?? 0) + 1;
     observations.push({
       path: rel,
-      boundary: datastoreBoundary(rel),
+      boundary: topology?.boundary ?? datastoreBoundary(rel),
       kind: parser.kind,
-      role: migrationOnly ? "migration" : "canonical",
+      role: topology?.role === "canonical" || !migrationOnly ? "canonical" : "migration",
       collections: cloneCollections(parsed, rel),
+      ...(topology ? { topology_ref: topology.ref } : {}),
       ...(migrationOnly ? { text } : {}),
     });
   }
@@ -1023,7 +1539,10 @@ export function collectFacts(repo) {
     schemaConflicts.push(...(canonical.length > 0 ? result.gaps : []));
     if (migration.length > 0) {
       const replay = replayMigrations(migration);
-      migrationGaps.push(...replay.gaps);
+      // Migration replay is structural coverage only when migrations are the current-state
+      // authority. With a canonical schema, migrations remain auditable history but an operation
+      // outside the safe replay subset cannot make the authoritative schema incomplete.
+      if (canonical.length === 0) migrationGaps.push(...replay.gaps);
       migrationOperations.push(...replay.operations.map((operation) => ({
         boundary,
         ...operation,
@@ -1039,19 +1558,76 @@ export function collectFacts(repo) {
     needsReview += normalized.counts.needsReview;
     specialRefs.push(...normalized.specialRefs);
   }
+  for (const store of supplementalStores) {
+    parsedFiles.add(SUPPLEMENT_PATH);
+    const normalized = normalizedDataset(
+      store.fides_key,
+      store.collections.map((collection) => ({
+        name: collection.name,
+        refs: collection.refs,
+        fields: collection.fields.map((field) => ({
+          name: field.name,
+          shape: field.shape,
+          refs: field.refs,
+        })),
+      })),
+      ["supplemental_datastore"],
+      store.fides_key,
+      store.name,
+    );
+    normalized.dataset.ref = store.refs[0];
+    normalized.dataset.refs = [...new Set([
+      ...store.refs, ...normalized.dataset.refs,
+    ])].sort(BY_PATH);
+    normalized.dataset.store_type = store.store_type;
+    if (store.provider) normalized.dataset.provider = store.provider;
+    normalized.dataset.system_references = store.system_references;
+    datasets.push(normalized.dataset);
+    observations.push({
+      path: SUPPLEMENT_PATH,
+      boundary: store.fides_key,
+      kind: "supplemental_datastore",
+      role: "supplemental",
+      refs: store.refs,
+      collections: store.collections,
+    });
+    fieldCount += normalized.counts.fieldCount;
+    classified += normalized.counts.classified;
+    needsReview += normalized.counts.needsReview;
+    specialRefs.push(...normalized.specialRefs);
+    parsedByKind.supplemental_datastore = (parsedByKind.supplemental_datastore ?? 0) + 1;
+  }
   assertUniqueKeys("dataset", datasets);
 
   const services = discoverServices(repo, files);
-  const systems = services.map(({ root, evidence }) => ({
-    fides_key: fidesKeyFor(root || "repository"),
-    name: root || "repository",
-    ref: evidence[0].ref,
-    refs: evidence.map((item) => item.ref),
-    runtime_evidence: evidence,
-    dataset_references: datasets
-      .filter((dataset) => root === "" || dataset.name === root || dataset.name.startsWith(`${root}/`))
-      .map((dataset) => dataset.fides_key).sort(BY_PATH),
-  }));
+  const systemKeys = new Set(services.map(({ root }) => fidesKeyFor(root || "repository")));
+  for (const dataset of datasets) {
+    for (const systemKey of dataset.system_references ?? []) {
+      if (!systemKeys.has(systemKey)) {
+        throw new Error(
+          `${SUPPLEMENT_PATH}: datastore '${dataset.fides_key}' references undiscovered system '${systemKey}'`,
+        );
+      }
+    }
+  }
+  const systems = services.map(({ root, evidence }) => {
+    const systemKey = fidesKeyFor(root || "repository");
+    return {
+      fides_key: systemKey,
+      name: root || "repository",
+      ref: evidence[0].ref,
+      refs: evidence.map((item) => item.ref),
+      runtime_evidence: evidence,
+      dataset_references: datasets
+        .filter((dataset) =>
+          root === ""
+          || dataset.name === root
+          || dataset.name.startsWith(`${root}/`)
+          || (dataset.system_references ?? []).includes(systemKey)
+        )
+        .map((dataset) => dataset.fides_key).sort(BY_PATH),
+    };
+  });
   assertUniqueKeys("system", systems);
 
   return {
@@ -1061,6 +1637,7 @@ export function collectFacts(repo) {
     datasets,
     systems,
     observations,
+    datastore_links: drizzleTopology.links,
     migration_operations: migrationOperations,
     counts: {
       datasets: datasets.length,
@@ -1085,7 +1662,12 @@ export function collectFacts(repo) {
       enumerated_by: enumeratedBy,
       files_parsed: parsedFiles.size,
       parsed_by_kind: Object.fromEntries(Object.entries(parsedByKind).sort()),
-      unparsed_candidates: findUnparsedCandidates(repo, files, parsedFiles),
+      unparsed_candidates: [...new Map([
+        ...findUnparsedCandidates(repo, files, parsedFiles),
+        ...drizzleTopology.gaps,
+      ].map((item) => [`${item.format}\0${item.ref}`, item])).values()].sort((a, b) =>
+        a.ref === b.ref ? BY_PATH(a.format, b.format) : BY_PATH(a.ref, b.ref)
+      ),
       migration_gaps: migrationGaps.sort((a, b) => BY_PATH(a.ref, b.ref)),
       schema_conflicts: schemaConflicts.sort((a, b) => BY_PATH(a.ref, b.ref)),
     },
@@ -1105,16 +1687,30 @@ export function collectFacts(repo) {
  * The validator recomputes this from the manifest, so the two implementations have to agree. They
  * are kept deliberately trivial for that reason: sorted dotted names, newline-joined, sha256.
  */
-export function structureDigest(fields) {
-  const names = [];
+export function structureDigest(fields, nonPersonalFields = []) {
+  const names = new Set(nonPersonalFields);
   const walkFields = (list, prefix) => {
     for (const field of list ?? []) {
-      names.push(prefix + field.name);
+      names.add(prefix + field.name);
       if (field.fields) walkFields(field.fields, `${prefix}${field.name}.`);
     }
   };
   walkFields(fields, "");
-  return createHash("sha256").update(names.sort().join("\n")).digest("hex");
+  return createHash("sha256").update([...names].sort().join("\n")).digest("hex");
+}
+
+/** Keep every newly observed field visible until a person accepts the collection decision. */
+export function reviewCollectionFields(fields) {
+  return (fields ?? []).map((field) => {
+    const out = {
+      name: field.name,
+      data_categories: field.data_categories ?? [],
+      refs: field.refs ?? [field.ref],
+    };
+    if (field.needs_review) out.needs_review = true;
+    if (field.fields?.length > 0) out.fields = reviewCollectionFields(field.fields);
+    return out;
+  });
 }
 
 export function digestOf(derived) {
@@ -1217,19 +1813,11 @@ export function buildSkeleton(derived, provenance) {
         name: collection.name,
         refs: collection.refs ?? [collection.ref],
         structure_digest: structureDigest(collection.fields),
-        // The collection is the claim unit: one owner signs for "these are the categories in this
-        // table". Per-field attribution would mean five hundred blocks on a five-hundred-column
-        // schema, which is a form nobody fills in.
+        // The collection is the claim unit. All new fields stay visible until an accountable owner
+        // accepts the grouped decisions; accepted non-personal names compact on reconciliation.
         needs_review: true,
-        fields: collection.fields.map((field) => {
-          const out = {
-            name: field.name,
-            data_categories: field.data_categories,
-            refs: field.refs ?? [field.ref],
-          };
-          if (field.needs_review) out.needs_review = true;
-          return out;
-        }),
+        fields: reviewCollectionFields(collection.fields),
+        non_personal_fields: [],
       })),
     })),
     system: derived.systems.map((system) => ({
@@ -1258,7 +1846,8 @@ const HEADER = `# .noru/privacy-datamap.yml — generated by ${GENERATED_BY}
 # needs_review: true, and a manifest carrying one cannot be pushed.
 #
 # What a person has to do, and sign for:
-#   * resolve every needs_review field to a data category, or delete the field if it holds none
+#   * resolve every needs_review field to a data category, or move its name to
+#     non_personal_fields if review confirms it holds none
 #   * name the purpose, data_use and data_subjects for each system's privacy declarations
 #   * add an interpretation block to each collection and each declaration: who decided, when,
 #     until when, and why
@@ -1295,9 +1884,9 @@ const FIDES_HEADER = `# .fides/datamap.yml — rendered by ${GENERATED_BY}
 # validated manifest, and it will not warn you, because it cannot tell your edit from its own
 # output.
 #
-# This is the same content that :push sends to Noru, with the review bookkeeping removed — the
-# citations, the interpretation blocks, the needs_review flags and the structure digests. What is
-# left is plain Fideslang, for \`fides push\` and anything else that reads a Fides manifest.
+# This is the same content that :push sends to Noru: privacy-relevant fields projected to plain
+# Fideslang. Review bookkeeping and compact non-personal fields stay local; empty collections and
+# datasets are removed and system dataset references are repaired.
 `;
 
 /** Render the Fides-CLI-shaped export. Declared in piece.json under outputs[]. */

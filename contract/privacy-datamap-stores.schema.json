@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/privacy-datamap-stores.schema.json",
+  "title": "Noru privacy data-map supplemental datastore declarations",
+  "description": "Evidence-backed structures for stores that cannot be derived from a supported declarative schema. Store integration citations establish the datastore; each field separately cites typed, serialization, upload-payload, or download-result evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "datastores"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": "1.0.0" },
+    "datastores": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/datastore" }
+    }
+  },
+  "$defs": {
+    "fides_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.<>-]+$"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[^:\\s][^:]*:[1-9][0-9]*$"
+    },
+    "refs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/ref" }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "shape", "evidence_kind", "refs"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "shape": { "type": "string", "minLength": 1 },
+        "evidence_kind": {
+          "enum": ["typed_contract", "serializer", "upload_payload", "download_result"]
+        },
+        "refs": { "$ref": "#/$defs/refs" }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "refs", "fields"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "refs": { "$ref": "#/$defs/refs" },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/field" }
+        }
+      }
+    },
+    "datastore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fides_key", "name", "store_type", "refs", "collections"],
+      "properties": {
+        "fides_key": { "$ref": "#/$defs/fides_key" },
+        "name": { "type": "string", "minLength": 1 },
+        "store_type": {
+          "enum": ["object_storage", "queue", "search_index", "third_party_store", "other"]
+        },
+        "provider": { "type": "string", "minLength": 1 },
+        "refs": { "$ref": "#/$defs/refs" },
+        "system_references": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/fides_key" }
+        },
+        "collections": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/collection" }
+        }
+      }
+    }
+  }
+}

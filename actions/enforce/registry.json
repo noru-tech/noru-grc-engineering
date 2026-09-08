@@ -209,11 +209,13 @@
       },
       "watch_paths": [
         "**/*.sql",
+        "**/drizzle.config.*",
         "**/*.prisma",
         "**/*.py",
         "**/*.proto",
         "**/*.graphql",
         "**/*.gql",
+        ".noru/privacy-datamap-stores.json",
         ".noru/privacy-datamap.yml"
       ]
     },

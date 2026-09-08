@@ -33,6 +33,8 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
   observation paired with that manifest
 - [`privacy-datamap-proposals.schema.json`](./privacy-datamap-proposals.schema.json) — the
   non-authoritative, cache-only work queue selected for agent analysis
+- [`privacy-datamap-stores.schema.json`](./privacy-datamap-stores.schema.json) — committed,
+  evidence-backed structures for stores that a supported declarative schema cannot describe
 - [`privacy-baseline.schema.json`](./privacy-baseline.schema.json) — `.noru/privacy-baseline.yml`,
   the agreed privacy taxonomy the CI policy gate is judged against. Not a piece artifact: a floor
   pinned from Noru so the gate can run with no credential
@@ -160,10 +162,11 @@ Every piece that carries claims now sits inside the rule, and each is stricter t
   calling it a false positive, gets a longer horizon and a hard requirement that the reasoning is
   written out — an acceptance nobody revisits is how a known misconfiguration becomes permanent.
 - `privacy-datamap` makes `expires_at` required and pairs it with a `structure_digest` on every
-  collection: a digest of the field *names* a signature was given for, not their categories, so
-  resolving a classification keeps the signature and adding a column breaks it. The validator
-  recomputes it rather than trusting the stamp, so editing the fields and editing the digest are
-  caught by the same check. Article 9 and Article 10 data gets half the horizon of everything else.
+  collection: a digest of the union of verbose field names and compact `non_personal_fields`, not
+  their categories, so resolving or compacting a classification keeps the signature and adding a
+  column breaks it. The validator recomputes it and compares the union with current derived facts,
+  so compaction cannot hide structure from drift detection. Article 9 and Article 10 data gets half
+  the horizon of everything else.
 - `audit-pack` makes `expires_at` required and measures it from the **end of the audit window**, not
   from the signature: a workpaper concludes about a period, and signing it late does not extend what
   it covers. It must also fall *after* the window — a conclusion that expires inside its own period

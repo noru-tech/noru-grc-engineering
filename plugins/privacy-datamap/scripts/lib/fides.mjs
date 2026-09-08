@@ -1,4 +1,4 @@
-// Projecting the manifest down to plain Fideslang.
+// Projecting the manifest down to privacy-relevant Fideslang.
 //
 // One implementation, used by both the renderer in collect.mjs and the plan builder in diff.mjs, so
 // that `.fides/datamap.yml` and the payload `ingestDatamap` receives are the same content by
@@ -9,9 +9,9 @@
  * Keys this piece adds for human review, stripped before anything leaves the repository.
  *
  * `refs` says which line produced a claim, `interpretation` says who stands behind it,
- * `needs_review` marks what nobody has resolved, and `structure_digest` pins the shape a signature
- * was given for. All four exist for the pull request. None is Fideslang, and a manifest carrying
- * them is one no other Fides tool can read.
+ * `needs_review` marks what nobody has resolved, `non_personal_fields` compactly records reviewed
+ * structural exclusions, and `structure_digest` pins the shape a signature was given for. These
+ * exist for review and drift detection. None is Fideslang.
  *
  * Adding a review field to the manifest means adding it here. The idempotency test does not check
  * this list — it checks the payload against the keys Fideslang actually defines — so forgetting is
@@ -21,6 +21,7 @@ export const BOOKKEEPING = new Set([
   "refs",
   "interpretation",
   "needs_review",
+  "non_personal_fields",
   "structure_digest",
 ]);
 
@@ -46,6 +47,16 @@ function ordered(entries) {
 }
 
 export function toFideslang(manifest) {
+  const assertResolved = (node) => {
+    if (Array.isArray(node)) {
+      for (const item of node) assertResolved(item);
+    } else if (node && typeof node === "object") {
+      if (node.needs_review === true) {
+        throw new Error("cannot project a privacy data map while needs_review is true");
+      }
+      for (const value of Object.values(node)) assertResolved(value);
+    }
+  };
   const strip = (node) => {
     if (Array.isArray(node)) return node.map(strip);
     if (node && typeof node === "object") {
@@ -57,8 +68,31 @@ export function toFideslang(manifest) {
     }
     return node;
   };
+  const projectField = (field) => {
+    const children = (field.fields ?? []).map(projectField).filter(Boolean);
+    const privacyRelevant = (field.data_categories ?? []).length > 0;
+    if (!privacyRelevant && children.length === 0) return null;
+    const projected = strip(field);
+    if (children.length > 0) projected.fields = children;
+    else delete projected.fields;
+    return projected;
+  };
+
+  assertResolved(manifest);
+  const datasets = (manifest.dataset ?? []).flatMap((dataset) => {
+    const collections = (dataset.collections ?? []).flatMap((collection) => {
+      const fields = (collection.fields ?? []).map(projectField).filter(Boolean);
+      return fields.length > 0 ? [{ ...strip(collection), fields }] : [];
+    });
+    return collections.length > 0 ? [{ ...strip(dataset), collections }] : [];
+  });
+  const datasetKeys = new Set(datasets.map((dataset) => dataset.fides_key));
+  const systems = (manifest.system ?? []).map((system) => ({
+    ...strip(system),
+    dataset_references: (system.dataset_references ?? []).filter((key) => datasetKeys.has(key)),
+  }));
   return {
-    dataset: strip(manifest.dataset ?? []),
-    system: strip(manifest.system ?? []),
+    dataset: datasets,
+    system: systems,
   };
 }

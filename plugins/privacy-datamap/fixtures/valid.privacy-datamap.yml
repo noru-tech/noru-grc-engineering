@@ -26,6 +26,8 @@ dataset:
             semantics enforced by the application layer, not just the column names.
           refs:
             - "db/migrations/0001_create_accounts.sql:2"
+        non_personal_fields:
+          - created_at
         fields:
           - name: email
             data_categories:
@@ -42,10 +44,6 @@ dataset:
               - user.device.ip_address
             refs:
               - "db/migrations/0001_create_accounts.sql:7"
-          - name: created_at
-            data_categories: []
-            refs:
-              - "db/migrations/0001_create_accounts.sql:9"
 system:
   - fides_key: web_app
     name: The customer-facing web application

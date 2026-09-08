@@ -1133,7 +1133,11 @@ DRIZZLE_FIXTURE = """import { pgTable, text, uuid } from "drizzle-orm/pg-core"
 
 export const members = pgTable("members", {
   id: uuid("id").primaryKey(),
-  email: text("email").notNull(),
+  email: text("email").notNull(), // comments after commas must not hide the next field
+  apiSecret: text("api_secret").notNull(),
+  /* comments between properties are trivia, not part of the next declaration */
+  displayName: text("display_name"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
 })
 """
 
@@ -1204,8 +1208,9 @@ def test_datamap_parses_drizzle_without_execution(results, tmp):
     derived, repo = datamap_repo(tmp, "drizzle", {"src/schema.ts": DRIZZLE_FIXTURE})
     candidates = derived["coverage"]["unparsed_candidates"]
     results.check(
-        "[privacy-datamap] a Drizzle schema is parsed into a logical collection",
-        set(fields_of(derived, "members")) == {"id", "email"},
+        "[privacy-datamap] every direct Drizzle field is parsed despite neighbouring comments",
+        set(fields_of(derived, "members"))
+        == {"id", "email", "api_secret", "display_name", "metadata"},
         fields_of(derived, "members"),
     )
     results.check(
@@ -1223,6 +1228,16 @@ def test_datamap_parses_drizzle_without_execution(results, tmp):
         imported["datasets"] == [],
         imported["datasets"],
     )
+    quoted, _ = datamap_repo(
+        tmp,
+        "drizzle-quoted-example",
+        {"src/example.ts": 'const example = \'pgTable("not_a_table", { id: text("id") })\'\n'},
+    )
+    results.check(
+        "[privacy-datamap] Drizzle syntax inside a string is not schema coverage",
+        quoted["datasets"] == [] and quoted["coverage"]["unparsed_candidates"] == [],
+        quoted["coverage"],
+    )
     dynamic, _ = datamap_repo(
         tmp,
         "drizzle-dynamic",
@@ -1239,6 +1254,26 @@ def test_datamap_parses_drizzle_without_execution(results, tmp):
         and [item["format"] for item in dynamic["coverage"]["unparsed_candidates"]]
         == ["drizzle"],
         dynamic["coverage"],
+    )
+    spread, _ = datamap_repo(
+        tmp,
+        "drizzle-spread",
+        {
+            "src/schema.ts": (
+                'const shared = { id: uuid("id") }\n'
+                'export const members = pgTable("members", {\n'
+                '  ...shared,\n'
+                '  email: text("email"),\n'
+                '})\n'
+            )
+        },
+    )
+    results.check(
+        "[privacy-datamap] a partially static Drizzle map is reported instead of silently complete",
+        set(fields_of(spread, "members")) == {"email"}
+        and [item["format"] for item in spread["coverage"]["unparsed_candidates"]]
+        == ["drizzle"],
+        spread["coverage"],
     )
 
 
@@ -1259,13 +1294,36 @@ def test_datamap_classifies_only_what_it_knows(results, tmp):
         and fields.get("weird_column", {}).get("data_categories") == [],
         fields.get("weird_column"),
     )
-    # Operational columns are not personal data and must not become review noise; a reviewer who has
-    # to dismiss `id` and `created_at` on every table stops reading the list.
+    # A creation timestamp is context-free bookkeeping. A generic identifier is not: it can name a
+    # person, an account or a non-person row, so the proposal stage must inspect its context.
     results.check(
-        "[privacy-datamap] an operational column is not review noise",
+        "[privacy-datamap] only context-free operational columns bypass proposal review",
         fields.get("created_at", {}).get("needs_review") is not True
-        and fields.get("id", {}).get("needs_review") is not True,
+        and fields.get("id", {}).get("needs_review") is True,
         [fields.get("id"), fields.get("created_at")],
+    )
+    contextual, _ = datamap_repo(
+        tmp,
+        "context-dependent-operational-names",
+        {
+            "db/schema.sql": (
+                "CREATE TABLE records (\n"
+                "  uuid UUID,\n"
+                "  status TEXT,\n"
+                "  enabled BOOLEAN,\n"
+                "  is_active BOOLEAN\n"
+                ");\n"
+            )
+        },
+    )
+    contextual_fields = fields_of(contextual, "records")
+    results.check(
+        "[privacy-datamap] context-sensitive identifiers and state enter proposal_required",
+        all(
+            contextual_fields.get(name, {}).get("needs_review") is True
+            for name in ("uuid", "status", "enabled", "is_active")
+        ),
+        contextual_fields,
     )
 
 
@@ -1433,6 +1491,246 @@ system:
 """
 
 
+def accepted_compact_datamap_text(digest):
+    names = ["id", "email", "password_hash", "weird_column", "created_at"]
+    structure = hashlib.sha256("\n".join(sorted(names)).encode("utf-8")).hexdigest()
+    return f"""version: 0.8.0
+piece: privacy-datamap
+source:
+  slug: fixture/privacy-map
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: privacy-datamap@0.8.0
+  derived_digest: {digest}
+dataset:
+  - fides_key: db
+    name: db
+    collections:
+      - name: accounts
+        refs: ["db/schema.sql:1"]
+        structure_digest: {structure}
+        interpretation:
+          owner: Dana Okafor
+          decided_at: "2026-08-20"
+          expires_at: "2027-08-20"
+          rationale: Reviewed the account schema and its application semantics.
+        non_personal_fields: [created_at, id, weird_column]
+        fields:
+          - name: email
+            data_categories: [user.contact.email]
+            refs: ["db/schema.sql:3"]
+          - name: password_hash
+            data_categories: [user.authorization.password]
+            refs: ["db/schema.sql:4"]
+system:
+  - fides_key: repository
+    name: repository
+    system_type: Application
+    dataset_references: [db]
+    privacy_declarations:
+      - name: Operate customer accounts
+        data_use: essential.service
+        data_subjects: [customer]
+        data_categories: [user.contact.email, user.authorization.password]
+        refs: ["db/schema.sql:1"]
+        interpretation:
+          owner: Dana Okafor
+          decided_at: "2026-08-20"
+          expires_at: "2027-08-20"
+          rationale: Account data is used to provide authentication and service access.
+"""
+
+
+def load_datamap_yaml(path):
+    validator = PRIVACY_DATAMAP / "scripts" / "validate_manifest.py"
+    spec = importlib.util.spec_from_file_location("privacy_datamap_validator", validator)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.load_yaml(path.read_text(encoding="utf-8"))[0]
+
+
+def test_datamap_compacts_non_personal_review_state(results, tmp):
+    """Review files stay small while derived facts and the lock retain every observed field."""
+    workflow = (PRIVACY_DATAMAP / "commands" / "scan.md").read_text(encoding="utf-8")
+    results.check(
+        "[privacy-datamap] agent workflow requires contextual grouped proposal review",
+        all(
+            phrase in workflow
+            for phrase in (
+                "Before asking the user",
+                "proposed personal",
+                "proposed non-personal",
+                "genuine ambiguities",
+                "special_category",
+                "accountable owner",
+                "collection-level acceptance",
+            )
+        ),
+        workflow[:400],
+    )
+    summary, derived = datamap_scan(
+        write_files(pathlib.Path(tmp) / "compact-non-personal", {"db/schema.sql": SQL_FIXTURE})
+    )
+    repo = pathlib.Path(summary["repo"])
+    manifest = repo / ".noru" / "privacy-datamap.yml"
+    skeleton = load_datamap_yaml(manifest)
+    collection = skeleton["dataset"][0]["collections"][0]
+    review_names = [field["name"] for field in collection["fields"]]
+    results.check(
+        "[privacy-datamap] new fields remain visible until the collection review is accepted",
+        collection["non_personal_fields"] == []
+        and review_names == ["created_at", "email", "id", "password_hash", "weird_column"],
+        collection,
+    )
+    observed_names = set(fields_of(derived, "accounts"))
+    represented_names = set(review_names) | set(collection["non_personal_fields"])
+    results.check(
+        "[privacy-datamap] compact manifests still represent the complete observed structure",
+        observed_names == represented_names,
+        {"observed": sorted(observed_names), "represented": sorted(represented_names)},
+    )
+    full_digest = hashlib.sha256("\n".join(sorted(observed_names)).encode("utf-8")).hexdigest()
+    results.check(
+        "[privacy-datamap] structure digest covers verbose and compact field names",
+        collection["structure_digest"] == full_digest,
+        collection["structure_digest"],
+    )
+
+    manifest.write_text(accepted_compact_datamap_text(summary["derived_digest"]), encoding="utf-8")
+    validator = PRIVACY_DATAMAP / "scripts" / "validate_manifest.py"
+    parsed = repo / ".noru" / ".cache" / "privacy-datamap.parsed.json"
+    validated = run(["python3", str(validator), str(manifest), f"--emit-parsed={parsed}", "--quiet"])
+    results.check(
+        "[privacy-datamap] validator accepts the union of review and compact fields",
+        validated.returncode == 0,
+        validated.stdout,
+    )
+
+    missing = accepted_compact_datamap_text(summary["derived_digest"]).replace(
+        "non_personal_fields: [created_at, id, weird_column]",
+        "non_personal_fields: [created_at, id]",
+    )
+    manifest.write_text(missing, encoding="utf-8")
+    incomplete = run(["python3", str(validator), str(manifest), "--quiet"])
+    results.check(
+        "[privacy-datamap] validator rejects an observed field omitted from both representations",
+        incomplete.returncode == 1 and "observed field(s) missing" in incomplete.stdout,
+        incomplete.stdout,
+    )
+    manifest.write_text(accepted_compact_datamap_text(summary["derived_digest"]), encoding="utf-8")
+    run(["python3", str(validator), str(manifest), f"--emit-parsed={parsed}", "--quiet"])
+
+    reconcile = PRIVACY_DATAMAP / "scripts" / "reconcile.py"
+    sealed = run(["python3", str(reconcile), f"--repo={repo}", "--seal", "--output=json", "--quiet"])
+    lock = json.loads((repo / ".noru" / "privacy-datamap.lock.json").read_text(encoding="utf-8"))
+    results.check(
+        "[privacy-datamap] accepted lock retains every field hidden by compaction",
+        sealed.returncode == 0
+        and {entity.rsplit("/", 1)[-1] for entity in lock["entities"]} == observed_names
+        and lock["entities"]["db/accounts/created_at"]["shape"] == "timestamptz"
+        and lock["entities"]["db/accounts/created_at"]["refs"] == ["db/schema.sql:6"],
+        lock.get("entities"),
+    )
+    unchanged = run(["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"])
+    unchanged_payload = json.loads(unchanged.stdout)
+    candidate = load_datamap_yaml(repo / ".noru" / ".cache" / "privacy-datamap.candidate.yml")
+    candidate_collection = candidate["dataset"][0]["collections"][0]
+    results.check(
+        "[privacy-datamap] unchanged compact non-personal decisions carry forward",
+        unchanged_payload["counts"]["proposal_required"] == 0
+        and candidate_collection["non_personal_fields"] == ["created_at", "id", "weird_column"],
+        unchanged_payload,
+    )
+    results.check(
+        "[privacy-datamap] scan and validation emit no external-write call file",
+        not (repo / ".noru" / ".cache" / "privacy-datamap.calls.json").exists(),
+        "scan or validation prepared an MCP write",
+    )
+
+    (repo / "db" / "schema.sql").write_text(
+        SQL_FIXTURE.replace("weird_column  TEXT", "weird_column  JSON"), encoding="utf-8"
+    )
+    datamap_scan(repo)
+    changed = run(["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"])
+    changed_payload = json.loads(changed.stdout)
+    changed_candidate = load_datamap_yaml(
+        repo / ".noru" / ".cache" / "privacy-datamap.candidate.yml"
+    )["dataset"][0]["collections"][0]
+    results.check(
+        "[privacy-datamap] a changed accepted non-personal field returns to review",
+        [row["field"] for row in changed_payload["proposal_required"]] == ["weird_column"]
+        and "weird_column" not in changed_candidate["non_personal_fields"]
+        and any(
+            field["name"] == "weird_column" and field.get("needs_review") is True
+            for field in changed_candidate["fields"]
+        ),
+        changed_payload,
+    )
+
+
+def test_datamap_fides_projection_is_privacy_only(results, tmp):
+    probe = pathlib.Path(tmp) / "privacy-fides-projection.mjs"
+    fides = PRIVACY_DATAMAP / "scripts" / "lib" / "fides.mjs"
+    probe.write_text(
+        f"""import {{ toFideslang }} from {json.dumps(str(fides))};
+const base = {{
+  dataset: [
+    {{ fides_key: "primary", name: "primary", collections: [{{
+      name: "profiles", non_personal_fields: ["row_version"], fields: [{{
+        name: "profile", data_categories: [], refs: ["schema.ts:1"], fields: [
+          {{ name: "email", data_categories: ["user.contact.email"], refs: ["schema.ts:2"] }},
+          {{ name: "timezone", data_categories: [], refs: ["schema.ts:3"] }},
+        ],
+      }}],
+    }}] }},
+    {{ fides_key: "logs", name: "logs", collections: [{{
+      name: "events", non_personal_fields: ["created_at"], fields: [],
+    }}] }},
+  ],
+  system: [{{
+    fides_key: "app", name: "app", dataset_references: ["primary", "logs", "absent"],
+    privacy_declarations: [{{
+      name: "accounts", data_use: "essential.service", data_subjects: ["customer"],
+      data_categories: ["user.contact.email"], refs: ["service.ts:1"],
+    }}],
+  }}],
+}};
+let blocked = false;
+try {{ toFideslang({{ dataset: [{{ fides_key: "x", collections: [{{ fields: [{{ name: "x", needs_review: true }}] }}] }}] }}); }}
+catch {{ blocked = true; }}
+console.log(JSON.stringify({{ projected: toFideslang(base), blocked }}));
+""",
+        encoding="utf-8",
+    )
+    executed = run(["node", str(probe)])
+    if not results.check(
+        "[privacy-datamap] privacy-only Fides projection runs", executed.returncode == 0,
+        executed.stderr,
+    ):
+        return
+    payload = json.loads(executed.stdout)
+    projected = payload["projected"]
+    fields = projected["dataset"][0]["collections"][0]["fields"]
+    results.check(
+        "[privacy-datamap] Fides keeps categorized nested fields and their parent only",
+        len(projected["dataset"]) == 1
+        and [field["name"] for field in fields] == ["profile"]
+        and [field["name"] for field in fields[0]["fields"]] == ["email"]
+        and "non_personal_fields" not in json.dumps(projected),
+        projected,
+    )
+    results.check(
+        "[privacy-datamap] empty collections and datasets are removed and references repaired",
+        projected["system"][0]["dataset_references"] == ["primary"],
+        projected["system"],
+    )
+    results.check(
+        "[privacy-datamap] unresolved review state cannot reach Fides projection",
+        payload["blocked"] is True,
+        payload,
+    )
+
+
 def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
     """The agent queue is selected by facts, not by a fresh model pass over the repository."""
     repo = write_files(pathlib.Path(tmp) / "privacy-reconcile", {"db/schema.sql": SQL_FIXTURE})
@@ -1450,8 +1748,9 @@ def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
         return
     bootstrap_payload = json.loads(bootstrap.stdout)
     results.check(
-        "[privacy-datamap] bootstrap sends only ambiguous fields to the agent",
-        [row["field"] for row in bootstrap_payload["proposal_required"]] == ["weird_column"],
+        "[privacy-datamap] bootstrap sends every context-dependent field to the agent",
+        [row["field"] for row in bootstrap_payload["proposal_required"]]
+        == ["id", "weird_column"],
         bootstrap_payload["proposal_required"],
     )
 
@@ -1577,6 +1876,84 @@ def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
         validate_json_schema(proposals_document, proposals_schema, proposals_schema) == [],
         validate_json_schema(proposals_document, proposals_schema, proposals_schema),
     )
+    review_report = (
+        repo / ".noru" / ".cache" / "privacy-datamap.review.md"
+    ).read_text(encoding="utf-8")
+    results.check(
+        "[privacy-datamap] proposal review is compact and grouped by collection and field family",
+        "## db / accounts" in review_report
+        and "content and structured values" in review_report
+        and "profile_notes" in review_report
+        and "observation_digest" not in review_report
+        and "shape" not in review_report,
+        review_report[:1000],
+    )
+
+
+def test_datamap_bootstrap_ignores_invalid_manifest_baseline(results, tmp):
+    repo = write_files(pathlib.Path(tmp) / "bootstrap-baseline", {"db/schema.sql": SQL_FIXTURE})
+    summary, _derived = datamap_scan(repo)
+    manifest = repo / ".noru" / "privacy-datamap.yml"
+    manifest.write_text(
+        f"""version: 0.8.0
+piece: privacy-datamap
+source:
+  slug: fixture/bootstrap
+  commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
+  branch: main
+  generated_by: privacy-datamap@0.8.0
+  derived_digest: {summary["derived_digest"]}
+dataset:
+  - fides_key: db
+    name: contaminated dataset name
+    description: UNTRUSTED_DATASET_DESCRIPTION
+    collections:
+      - name: accounts
+        description: UNTRUSTED_COLLECTION_DESCRIPTION
+        refs: ["old/schema.sql:1"]
+        structure_digest: {"0" * 64}
+        fields: []
+system:
+  - fides_key: repository
+    name: contaminated system name
+    description: UNTRUSTED_SYSTEM_DESCRIPTION
+    system_type: Third Party
+    dataset_references: [stale_dataset]
+    privacy_declarations:
+      - name: UNTRUSTED_DECLARATION
+        data_use: essential.service
+        data_subjects: [customer]
+        data_categories: [user.contact.email]
+        refs: ["old/service.ts:1"]
+""",
+        encoding="utf-8",
+    )
+    reconcile = PRIVACY_DATAMAP / "scripts" / "reconcile.py"
+    completed = run(
+        ["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"]
+    )
+    payload = json.loads(completed.stdout)
+    candidate_path = repo / ".noru" / ".cache" / "privacy-datamap.candidate.yml"
+    candidate_text = candidate_path.read_text(encoding="utf-8")
+    candidate = load_datamap_yaml(candidate_path)
+    declaration = candidate["system"][0]["privacy_declarations"][0]
+    results.check(
+        "[privacy-datamap] bootstrap candidate ignores every invalid manifest semantic",
+        completed.returncode == 0
+        and payload["mode"] == "bootstrap"
+        and "UNTRUSTED_" not in candidate_text
+        and "old/" not in candidate_text
+        and "stale_dataset" not in candidate_text
+        and candidate["dataset"][0]["name"] == "db"
+        and "description" not in candidate["dataset"][0]
+        and "description" not in candidate["dataset"][0]["collections"][0]
+        and candidate["system"][0]["name"] == "repository"
+        and candidate["system"][0]["system_type"] == "Application"
+        and candidate["system"][0]["dataset_references"] == ["db"]
+        and declaration["name"] == ""
+        and declaration["needs_review"] is True,
+        candidate_text[:2000],
+    )
 
 
 def test_datamap_normalizes_logical_topology(results, tmp):
@@ -1664,8 +2041,140 @@ def test_datamap_normalizes_logical_topology(results, tmp):
     implementation = (PRIVACY_DATAMAP / "scripts" / "collect.mjs").read_text(encoding="utf-8")
     results.check(
         "[privacy-datamap] generic topology code contains no synthetic repository identifiers",
-        not any(name in implementation for name in ("apps/gateway", "apps/jobs", "packages/storage", "packages/helpers")),
+        not any(name in implementation for name in (
+            "apps/gateway", "apps/jobs", "packages/storage", "packages/helpers",
+            "apps/portal", "packages/persistence", "analytics",
+        )),
         "a fixture-specific topology identifier leaked into the collector",
+    )
+
+
+def test_datamap_uses_drizzle_config_for_cross_directory_topology(results, tmp):
+    repo = git_repo(
+        pathlib.Path(tmp) / "drizzle-config-topology",
+        {
+            "apps/portal/drizzle.config.ts": (
+                'import { defineConfig } from "drizzle-kit"\n'
+                "export default defineConfig({\n"
+                '  schema: "../../packages/persistence/src/schema/*",\n'
+                '  out: "./generated-migrations",\n'
+                "})\n"
+            ),
+            "packages/persistence/src/schema/accounts.ts": (
+                'export const accounts = pgTable("accounts", {\n'
+                '  id: uuid("id"),\n'
+                '  email: text("email"),\n'
+                "})\n"
+            ),
+            "packages/persistence/src/schema/projects.ts": (
+                'export const projects = pgTable("projects", {\n'
+                '  id: uuid("id"),\n'
+                '  title: text("title"),\n'
+                "})\n"
+            ),
+            "apps/portal/generated-migrations/001.sql": (
+                "CREATE TABLE accounts (\n  id UUID,\n  legacy_contact TEXT\n);\n"
+                "CREATE TABLE projects (\n  id UUID,\n  title TEXT\n);\n"
+                "CREATE TABLE retired_records (\n  id UUID\n);\n"
+            ),
+            "analytics/schema/accounts.ts": (
+                'export const accounts = pgTable("accounts", {\n'
+                '  event_count: integer("event_count"),\n'
+                "})\n"
+            ),
+        },
+    )
+    _summary, derived = datamap_scan(repo)
+    datasets = {dataset["fides_key"]: dataset for dataset in derived["datasets"]}
+    linked = datasets.get("packages_persistence_src", {})
+    linked_collections = {
+        collection["name"]: collection for collection in linked.get("collections", [])
+    }
+    results.check(
+        "[privacy-datamap] tracked Drizzle config joins cross-directory schema and migration paths",
+        set(datasets) == {"analytics", "packages_persistence_src"}
+        and derived["datastore_links"] == [
+            {
+                "config_ref": "apps/portal/drizzle.config.ts:3",
+                "boundary": "packages/persistence/src",
+                "schema_patterns": ["packages/persistence/src/schema/*"],
+                "output_path": "apps/portal/generated-migrations",
+            }
+        ],
+        {"datasets": datasets, "links": derived["datastore_links"]},
+    )
+    results.check(
+        "[privacy-datamap] cross-directory canonical Drizzle schema wins over migration history",
+        set(linked_collections) == {"accounts", "projects"}
+        and {field["name"] for field in linked_collections["accounts"]["fields"]}
+        == {"id", "email"}
+        and "retired_records" not in linked_collections,
+        linked_collections,
+    )
+    results.check(
+        "[privacy-datamap] table-name overlap never merges an unlinked datastore",
+        "accounts" in {
+            collection["name"] for collection in datasets["analytics"]["collections"]
+        }
+        and datasets["analytics"]["name"] == "analytics",
+        datasets["analytics"],
+    )
+    linked_observations = {
+        observation["path"]: (observation["boundary"], observation["role"])
+        for observation in derived["observations"]
+        if observation["path"].startswith("apps/portal/generated-migrations/")
+        or observation["path"].startswith("packages/persistence/src/schema/")
+    }
+    results.check(
+        "[privacy-datamap] linked migrations remain cited history under the canonical boundary",
+        linked_observations
+        == {
+            "apps/portal/generated-migrations/001.sql": (
+                "packages/persistence/src", "migration"
+            ),
+            "packages/persistence/src/schema/accounts.ts": (
+                "packages/persistence/src", "canonical"
+            ),
+            "packages/persistence/src/schema/projects.ts": (
+                "packages/persistence/src", "canonical"
+            ),
+        },
+        linked_observations,
+    )
+
+
+def test_datamap_canonical_schema_makes_migration_replay_non_blocking(results, tmp):
+    derived, _repo = datamap_repo(
+        tmp,
+        "canonical-with-unsupported-migration",
+        {
+            "db/schema/accounts.ts": (
+                'export const accounts = pgTable("accounts", {\n'
+                '  id: uuid("id"),\n'
+                '  email: text("email"),\n'
+                "})\n"
+            ),
+            "db/migrations/001.sql": (
+                "CREATE TABLE accounts (\n  id UUID,\n  email TEXT\n);\n"
+            ),
+            "db/migrations/002.sql": (
+                "ALTER TABLE accounts ALTER COLUMN email TYPE VARCHAR(320);\n"
+            ),
+        },
+    )
+    results.check(
+        "[privacy-datamap] canonical-backed migration replay failures are not coverage gaps",
+        derived["coverage"]["migration_gaps"] == []
+        and set(fields_of(derived, "accounts")) == {"id", "email"},
+        derived["coverage"],
+    )
+    results.check(
+        "[privacy-datamap] canonical-backed migrations remain auditable history",
+        any(
+            operation["ref"] == "db/migrations/002.sql:1"
+            for operation in derived["migration_operations"]
+        ),
+        derived["migration_operations"],
     )
 
 
@@ -1692,6 +2201,30 @@ def test_datamap_separates_datastores_and_falls_back_for_runtime(results, tmp):
         "[privacy-datamap] a library package alone is not a system and root fallback references every dataset",
         [system["name"] for system in derived["systems"]] == ["repository"]
         and sorted(refs) == keys,
+        derived["systems"],
+    )
+
+
+def test_datamap_runtime_discovery_ignores_test_files(results, tmp):
+    derived, _repo = datamap_repo(
+        tmp,
+        "test-runtime-markers",
+        {
+            "db/schema.sql": SQL_FIXTURE,
+            "__tests__/server.ts": "serve(() => 'test')\n",
+            "src/__fixtures__/worker.ts": "new Worker('fixture.js')\n",
+            "src/http.test.ts": "createServer(() => {}).listen(3000)\n",
+            "src/http.spec.js": "app.listen(3001)\n",
+        },
+    )
+    results.check(
+        "[privacy-datamap] test and fixture runtime markers do not create systems",
+        [system["name"] for system in derived["systems"]] == ["repository"]
+        and [
+            evidence["kind"]
+            for evidence in derived["systems"][0]["runtime_evidence"]
+        ]
+        == ["repository_fallback"],
         derived["systems"],
     )
 
@@ -1726,6 +2259,37 @@ def test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, t
         fields_of(supported, "customers")["phone_number"],
     )
 
+    constraints, _repo = datamap_repo(
+        tmp,
+        "migration-constraints",
+        {
+            "db/migrations/001.sql": (
+                "CREATE TABLE audit_events (\n"
+                "  operation TEXT,\n"
+                "  related_record_id TEXT,\n"
+                "  CHECK (\n"
+                "    operation = 'created'\n"
+                "    OR\n"
+                "    (operation = 'updated' AND related_record_id IS NOT NULL)\n"
+                "  )\n"
+                ");\n"
+                "--> statement-breakpoint\n"
+                "ALTER TABLE audit_events ADD CONSTRAINT audit_events_operation_fk\n"
+                "  FOREIGN KEY (related_record_id) REFERENCES records(id);\n"
+            ),
+        },
+    )
+    results.check(
+        "[privacy-datamap] migration delimiters and field-neutral constraints create no coverage gaps",
+        constraints["coverage"]["migration_gaps"] == [],
+        constraints["coverage"],
+    )
+    results.check(
+        "[privacy-datamap] multiline CHECK bodies do not become SQL columns",
+        set(fields_of(constraints, "audit_events")) == {"operation", "related_record_id"},
+        fields_of(constraints, "audit_events"),
+    )
+
     unsafe, _repo = datamap_repo(
         tmp,
         "migration-gap",
@@ -1754,6 +2318,170 @@ def test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, t
         conflict["datasets"] == []
         and len(conflict["coverage"]["schema_conflicts"]) == 1,
         conflict["coverage"],
+    )
+
+    duplicate, _repo = datamap_repo(
+        tmp,
+        "migration-duplicate-table",
+        {
+            "db/migrations/001.sql": "CREATE TABLE records (\n  id INTEGER\n);\n",
+            "db/migrations/002.sql": "CREATE TABLE records (\n  id INTEGER\n);\n",
+        },
+    )
+    results.check(
+        "[privacy-datamap] duplicate migration tables remain explicit coverage gaps",
+        duplicate["datasets"] == []
+        and [gap["reason"] for gap in duplicate["coverage"]["migration_gaps"]]
+        == ["table 'records' already exists during replay"],
+        duplicate["coverage"],
+    )
+
+
+def test_datamap_reads_evidence_backed_supplemental_stores(results, tmp):
+    supplement = {
+        "$schema": "https://raw.githubusercontent.com/noru-tech/noru-grc-engineering/v0/contract/privacy-datamap-stores.schema.json",
+        "version": "1.0.0",
+        "datastores": [
+            {
+                "fides_key": "customer_objects",
+                "name": "Customer object storage",
+                "store_type": "object_storage",
+                "provider": "gcs",
+                "refs": ["src/storage.ts:5"],
+                "system_references": ["src"],
+                "collections": [
+                    {
+                        "name": "uploaded_files",
+                        "refs": ["src/storage.ts:1"],
+                        "fields": [
+                            {
+                                "name": "object_key",
+                                "shape": "string",
+                                "evidence_kind": "typed_contract",
+                                "refs": ["src/storage.ts:2"],
+                            },
+                            {
+                                "name": "content_type",
+                                "shape": "string",
+                                "evidence_kind": "upload_payload",
+                                "refs": ["src/storage.ts:3"],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    schema = json.loads(
+        (ROOT / "contract" / "privacy-datamap-stores.schema.json").read_text(encoding="utf-8")
+    )
+    results.check(
+        "[privacy-datamap] the supplemental datastore fixture satisfies its public contract",
+        validate_json_schema(supplement, schema, schema) == [],
+        validate_json_schema(supplement, schema, schema),
+    )
+    derived, _repo = datamap_repo(
+        tmp,
+        "supplemental-store",
+        {
+            "src/storage.ts": (
+                "export type StoredObject = {\n"
+                "  object_key: string\n"
+                "  content_type: string\n"
+                "}\n"
+                "const bucket = storage.bucket('uploads')\n"
+                "export const upload = (value: StoredObject) => bucket.upload(value)\n"
+                "serve(() => 'ok')\n"
+            ),
+            ".noru/privacy-datamap-stores.json": json.dumps(supplement, indent=2) + "\n",
+        },
+    )
+    dataset = derived["datasets"][0]
+    results.check(
+        "[privacy-datamap] an evidence-backed non-schema store joins the logical topology",
+        dataset["fides_key"] == "customer_objects"
+        and dataset["store_type"] == "object_storage"
+        and dataset["provider"] == "gcs"
+        and set(fields_of(derived, "uploaded_files")) == {"object_key", "content_type"},
+        dataset,
+    )
+    results.check(
+        "[privacy-datamap] supplemental system references attach the store to discovered runtime evidence",
+        derived["systems"][0]["fides_key"] == "src"
+        and derived["systems"][0]["dataset_references"] == ["customer_objects"],
+        derived["systems"],
+    )
+
+    sdk_only, _repo = datamap_repo(
+        tmp,
+        "object-sdk-only",
+        {"src/storage.ts": "const bucket = storage.bucket('uploads')\n"},
+    )
+    results.check(
+        "[privacy-datamap] a bucket client call alone never invents object fields or a dataset",
+        sdk_only["datasets"] == [],
+        sdk_only["datasets"],
+    )
+
+    collector = PRIVACY_DATAMAP / "scripts" / "collect.mjs"
+    bad_citation = json.loads(json.dumps(supplement))
+    bad_citation["datastores"][0]["collections"][0]["fields"][0]["refs"] = [
+        "src/storage.ts:99"
+    ]
+    bad_repo = write_files(
+        pathlib.Path(tmp) / "supplement-bad-citation",
+        {
+            "src/storage.ts": (
+                "export type StoredObject = {\n"
+                "  object_key: string\n"
+                "  content_type: string\n"
+                "}\n"
+                "const bucket = storage.bucket('uploads')\n"
+                "export const upload = (value: StoredObject) => bucket.upload(value)\n"
+                "serve(() => 'ok')\n"
+            ),
+            ".noru/privacy-datamap-stores.json": json.dumps(bad_citation),
+        },
+    )
+    bad_result = run(["node", str(collector), f"--repo={bad_repo}", "--quiet"])
+    results.check(
+        "[privacy-datamap] a supplemental field citation beyond the source file stops the scan",
+        bad_result.returncode == 2 and "cites line 99" in bad_result.stderr,
+        bad_result.stderr,
+    )
+
+    unknown_system = json.loads(json.dumps(supplement))
+    unknown_system["datastores"][0]["system_references"] = ["missing_runtime"]
+    unknown_repo = write_files(
+        pathlib.Path(tmp) / "supplement-unknown-system",
+        {
+            "src/storage.ts": (
+                "export type StoredObject = {\n"
+                "  object_key: string\n"
+                "  content_type: string\n"
+                "}\n"
+                "const bucket = storage.bucket('uploads')\n"
+            ),
+            ".noru/privacy-datamap-stores.json": json.dumps(unknown_system),
+        },
+    )
+    unknown_result = run(["node", str(collector), f"--repo={unknown_repo}", "--quiet"])
+    results.check(
+        "[privacy-datamap] a supplemental link to an undiscovered runtime stops the scan",
+        unknown_result.returncode == 2 and "references undiscovered system" in unknown_result.stderr,
+        unknown_result.stderr,
+    )
+
+    tracked_repo = git_repo(
+        pathlib.Path(tmp) / "supplement-untracked",
+        {"src/storage.ts": "export const storage = true\n"},
+        then={".noru/privacy-datamap-stores.json": json.dumps(supplement)},
+    )
+    untracked_result = run(["node", str(collector), f"--repo={tracked_repo}", "--quiet"])
+    results.check(
+        "[privacy-datamap] an untracked supplemental declaration stops a git-backed scan",
+        untracked_result.returncode == 2 and "exists but is not tracked" in untracked_result.stderr,
+        untracked_result.stderr,
     )
 
 
@@ -1972,16 +2700,12 @@ def test_datamap_render_is_gated_and_matches_the_push(results, tmp):
         "an unvalidated manifest produced a Fides export",
     )
 
-    fixture = (piece / "fixtures" / "valid.privacy-datamap.yml").read_text(encoding="utf-8")
     manifest = repo / ".noru" / "privacy-datamap.yml"
     collector = piece / "scripts" / "collect.mjs"
     digest = json.loads(
         run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"]).stdout
     )["derived_digest"]
-    manifest.write_text(
-        re.sub(r"derived_digest: [0-9a-f]{64}", f"derived_digest: {digest}", fixture),
-        encoding="utf-8",
-    )
+    manifest.write_text(accepted_datamap_text(digest), encoding="utf-8")
     validator = piece / "scripts" / "validate_manifest.py"
     parsed = repo / ".noru" / ".cache" / "privacy-datamap.parsed.json"
     validated = run(["python3", str(validator), str(manifest), f"--emit-parsed={parsed}", "--quiet"])
@@ -2608,9 +3332,16 @@ def main(argv):
             test_datamap_surfaces_special_category_data(results, tmp)
             test_datamap_never_overwrites_a_reviewed_manifest(results, tmp)
             test_datamap_reconciles_only_the_privacy_delta(results, tmp)
+            test_datamap_bootstrap_ignores_invalid_manifest_baseline(results, tmp)
+            test_datamap_compacts_non_personal_review_state(results, tmp)
+            test_datamap_fides_projection_is_privacy_only(results, tmp)
             test_datamap_normalizes_logical_topology(results, tmp)
+            test_datamap_uses_drizzle_config_for_cross_directory_topology(results, tmp)
+            test_datamap_canonical_schema_makes_migration_replay_non_blocking(results, tmp)
             test_datamap_separates_datastores_and_falls_back_for_runtime(results, tmp)
+            test_datamap_runtime_discovery_ignores_test_files(results, tmp)
             test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, tmp)
+            test_datamap_reads_evidence_backed_supplemental_stores(results, tmp)
             test_datamap_keys_are_unique_or_fail_actionably(results, tmp)
             test_datamap_output_is_byte_deterministic(results, tmp)
             test_datamap_reconciles_file_ids_to_logical_ids(results, tmp)
