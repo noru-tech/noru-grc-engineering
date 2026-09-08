@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.8.1 — 2026-09-08
+
 ### Changed
 
 - `privacy-datamap` now records established non-personal fields as compact collection-level names
