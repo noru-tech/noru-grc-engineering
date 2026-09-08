@@ -30,6 +30,11 @@ import json
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import dependencies
+import relationships
+import analysis_cache
+
 # --- BEGIN VENDORED yaml_mini ---
 # Canonical copy: contract/lib/yaml_mini.py. Every piece validator embeds this block verbatim so
 # that an installed plugin is self-contained (no sibling imports, no package). scripts/check_vendored_lib.py
@@ -382,7 +387,7 @@ FIDES_KEY_RE = re.compile(r"^[A-Za-z0-9_.<>-]+$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
-TOP_LEVEL_KEYS = {"version", "piece", "source", "dataset", "system"}
+TOP_LEVEL_KEYS = {"version", "piece", "source", "dataset", "system", "evidence_dependencies", "relationship_graph"}
 SOURCE_KEYS = {"slug", "commit_sha", "branch", "generated_by", "derived_digest"}
 INTERPRETATION_KEYS = {"owner", "decided_at", "expires_at", "rationale", "refs"}
 DATASET_KEYS = {"fides_key", "name", "description", "collections"}
@@ -893,7 +898,7 @@ def check_observed_structure(rep, doc, derived):
             rep.err(identity, f"unobserved field(s) present in fields/non_personal_fields: {', '.join(extra)}")
 
 
-def validate(doc, vocab, as_of=None, observed=None):
+def validate(doc, vocab, as_of=None, observed=None, repo=None, allow_discovery_review=False):
     rep = Report()
     counts = {
         "datasets": 0,
@@ -922,6 +927,37 @@ def validate(doc, vocab, as_of=None, observed=None):
     check_systems(rep, doc, vocab, dataset_keys, counts, as_of)
     if isinstance(observed, dict):
         check_observed_structure(rep, doc, observed)
+    if "relationship_graph" in doc:
+        for error in relationships.validate(doc["relationship_graph"], doc.get("evidence_dependencies", [])):
+            rep.err("relationship_graph", error)
+    if "evidence_dependencies" in doc and not rep.errors:
+        targets = {"system:" + row["fides_key"] for row in doc.get("system", []) if isinstance(row, dict) and isinstance(row.get("fides_key"), str)}
+        for dataset in doc.get("dataset", []):
+            for collection in dataset.get("collections", []):
+                prefix = f"{dataset.get('fides_key')}/{collection.get('name')}"
+                targets.add(prefix)
+                def add_fields(fields, parent):
+                    for field in fields:
+                        targets.add(parent + field["name"])
+                        add_fields(field.get("fields", []), parent + field["name"] + ".")
+                add_fields(collection.get("fields", []), prefix + "/")
+                targets.update(prefix + "/" + name for name in collection.get("non_personal_fields", []))
+        targets.update(relationships.targets(doc.get("relationship_graph")))
+        specs = doc.get("evidence_dependencies", [])
+        dependency_errors = dependencies.validate_specs(specs, targets)
+        for error in dependency_errors:
+            rep.err("evidence_dependencies", error)
+        if repo is not None and not dependency_errors:
+            _observations, changes = dependencies.reconcile(repo, specs, {})
+            for change in changes:
+                if change["action"] != "refresh_evidence":
+                    rep.err("evidence_dependencies", f"{change['id']}: {change['action']} — inspect the evidence and record its reviewed fingerprint")
+    if repo is not None:
+        try:
+            for change in analysis_cache.check_accepted_discovery(repo, doc.get("evidence_dependencies", []), allow_discovery_review):
+                rep.err("discovery", f"{change['path']}: investigate new code/configuration scope and seal the reviewed baseline before export")
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            rep.err("discovery", f"cannot verify discovery baseline: {error}")
     counts["datasets"] = len(doc.get("dataset") or [])
     return rep, counts
 
@@ -991,7 +1027,7 @@ def main(argv):
             sys.stderr.write(f"error: could not load current derived facts ({exc})\n")
             return 2
 
-    rep, counts = validate(doc, vocab, as_of, observed)
+    rep, counts = validate(doc, vocab, as_of, observed, path.resolve().parent.parent)
     ok = not rep.errors
 
     if ok and emit_parsed:

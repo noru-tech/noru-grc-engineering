@@ -424,6 +424,26 @@ def test_as_of_expiry(results):
     )
 
 
+def test_bundled_import_audit(results):
+    spec = importlib.util.spec_from_file_location("contract_import_audit", ROOT / "scripts" / "contract_test.py")
+    contract = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(contract)
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        entry = root / "validate_manifest.py"
+        helper = root / "dependencies.py"
+        entry.write_text("import dependencies\n")
+        helper.write_text("import ast, json\nimport validate_manifest\n")
+        results.check("bundled stdlib helpers and import cycles pass the recursive audit", not contract.check_python_imports(entry, root))
+        helper.write_text("import ast, requests\n")
+        results.check("a transitive third-party import cannot bypass the validator contract",
+                      any("requests" in error for error in contract.check_python_imports(entry, root)))
+        helper.write_text("import json\n")
+        (root / "json.py").write_text("import requests\n")
+        results.check("a bundled module shadowing stdlib is also audited",
+                      any("requests" in error for error in contract.check_python_imports(entry, root)))
+
+
 def main(argv):
     output_json = False
     quiet = False
@@ -446,6 +466,7 @@ def main(argv):
         return 2
 
     results = Results()
+    test_bundled_import_audit(results)
     test_fallback_loader(results)
     test_loader_agreement(results)
     test_suggestions(results)

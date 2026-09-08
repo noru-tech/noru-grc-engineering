@@ -1731,6 +1731,895 @@ console.log(JSON.stringify({{ projected: toFideslang(base), blocked }}));
     )
 
 
+def test_datamap_enrichment_gate(results, tmp):
+    repo = write_files(pathlib.Path(tmp) / "privacy-enrichment", {"db/schema.sql": SQL_FIXTURE})
+    datamap_scan(repo)
+    scripts = PRIVACY_DATAMAP / "scripts"
+    setup = run(["python3", str(scripts / "reconcile.py"), f"--repo={repo}", "--output=json"])
+    results.check("[privacy-datamap] reconciliation reports structure collected",
+                  setup.returncode == 0 and json.loads(setup.stdout)["status"] == "structure collected")
+    cache = repo / ".noru" / ".cache"
+    proposals = cache / "privacy-datamap.proposals.json"
+    command = ["python3", str(scripts / "review.py"), f"--repo={repo}", "--output=json"]
+    incomplete = run(command)
+    results.check("[privacy-datamap] skeleton is enrichment incomplete",
+                  incomplete.returncode == 1 and json.loads(incomplete.stdout)["status"] == "enrichment incomplete")
+    document = json.loads(proposals.read_text())
+    document["decisions"] = {"classify": {"decision_summary": "Establish the use of the unresolved account fields."}}
+    for row in document["proposals"]:
+        row.update(decision_id="classify", proposal_kind="ambiguous", rationale="Schema establishes storage but no service code establishes use.",
+                   confidence="low", unresolved_question="Which business process uses this field?",
+                   decision_impact="Determines whether the value identifies a person.",
+                   resolution_needed="Name the process and explain how it uses this value.",
+                   analysis={"schema": "Read the SQL definition.", "relationships": "No foreign key in this fixture.",
+                             "service_or_serialization": "No runtime consumer exists in this fixture."})
+    for row in document["system_proposals"]:
+        row.update(rationale="Only a repository fallback boundary is available.", refs=["db/schema.sql:1"],
+                   confidence="low", processing_activities=[{
+                       "activity_id": "unknown", "purpose": "Processing purpose not established by this fixture",
+                       "decision_summary": "Establish the account processing purpose.",
+                       "decision_impact": "Determines the purpose and subject classification.",
+                       "rationale": "No runtime consumer is present.", "refs": ["db/schema.sql:1"], "confidence": "low",
+                       "proposed_data_uses": [], "proposed_data_subjects": [], "dataset_references": [],
+                       "unresolved_question": "What process and subjects does the runtime serve?",
+                       "relationship_rationale": "Schema exists but runtime access is not established.",
+                       "business_context_question": "Confirm actual processing intent.",
+                       "resolution_needed": "Name each business process, its subjects and accessed stores."}])
+    document["store_investigation"].update(search_scope="Inspected all tracked SQL and runtime files.",
+        rationale="The fixture has only a SQL schema and no other persistent integration.",
+        refs=["db/schema.sql:1"], confidence="high")
+    protected = [repo / ".noru" / "privacy-datamap.yml", cache / "privacy-datamap.candidate.yml",
+                 repo / ".noru" / "privacy-datamap.lock.json", repo / ".fides" / "datamap.yml"]
+    before = {str(p): p.read_bytes() if p.exists() else None for p in protected}
+    proposals.write_text(json.dumps(document))
+    ready = run(command)
+    results.check("[privacy-datamap] supported unresolved questions are ready for human review",
+                  ready.returncode == 0 and json.loads(ready.stdout)["status"] == "ready for human review", ready.stderr or ready.stdout)
+    review = (cache / "privacy-datamap.review.md").read_text()
+    results.check("[privacy-datamap] review leads with meaning and includes questions and coverage",
+                  all(value in review for value in ["ambiguous", "Which business process", "Systems and processing",
+                      "Possible Article 9 or Article 10", "Changes"]))
+    results.check("[privacy-datamap] enrichment never accepts or exports decisions",
+                  before == {str(p): p.read_bytes() if p.exists() else None for p in protected})
+    mutations = {
+        "missing queue item": lambda d: d["proposals"].pop(),
+        "duplicate queue item": lambda d: d["proposals"].append(d["proposals"][0]),
+        "stale observation": lambda d: d.update(observation_digest="stale"),
+        "invalid category": lambda d: d["proposals"][0].update(proposed_categories=["invented.category"]),
+        "hidden special category": lambda d: d["proposals"][0].update(proposal_kind="personal", proposed_categories=["user.health_and_medical"]),
+        "missing analysis": lambda d: d["proposals"][0].update(analysis={}),
+        "missing resolution": lambda d: d["proposals"][0].update(resolution_needed=""),
+        "missing activities": lambda d: d["system_proposals"][0].update(processing_activities=[]),
+        "duplicate activities": lambda d: d["system_proposals"][0]["processing_activities"].append(d["system_proposals"][0]["processing_activities"][0]),
+        "missing ambiguity question": lambda d: d["proposals"][0].update(unresolved_question=""),
+        "invalid citation": lambda d: d["proposals"][0].update(refs=["db/schema.sql:999999"]),
+        "escaping citation": lambda d: d["proposals"][0].update(refs=["../outside.sql:1"]),
+        "missing store investigation": lambda d: d.pop("store_investigation"),
+        "missing systems": lambda d: d.update(system_proposals=[]),
+        "invalid use": lambda d: d["system_proposals"][0]["processing_activities"][0].update(proposed_data_uses=["invented.use"]),
+        "invalid subject": lambda d: d["system_proposals"][0]["processing_activities"][0].update(proposed_data_subjects=["invented.subject"]),
+        "invalid relationship": lambda d: d["system_proposals"][0]["processing_activities"][0].update(dataset_references=["missing"]),
+    }
+    for name, mutate in mutations.items():
+        changed = json.loads(json.dumps(document))
+        mutate(changed)
+        proposals.write_text(json.dumps(changed))
+        rejected = run(command)
+        results.check(f"[privacy-datamap] enrichment rejects {name}", rejected.returncode == 1,
+                      rejected.stderr or rejected.stdout)
+    document["store_investigation"]["findings"] = [{"store": "archive", "status": "gap",
+        "rationale": "Payload contract is absent.", "refs": ["db/schema.sql:1"], "confidence": "low",
+        "unresolved_question": "Provide the archive payload contract.", "resolution_needed": "Supply the typed upload payload.",
+        "decision_summary": "Establish archive coverage.", "decision_impact": "Determines which stored fields need classification."}]
+    proposals.write_text(json.dumps(document))
+    gap = run(command)
+    results.check("[privacy-datamap] explicit store gaps remain visible at review readiness",
+                  gap.returncode == 0 and "Provide the archive payload contract" in (cache / "privacy-datamap.review.md").read_text())
+    document["proposals"][0]["proposed_categories"] = ["user.health_and_medical"]
+    proposals.write_text(json.dumps(document))
+    special = run(command)
+    special_section = (cache / "privacy-datamap.review.md").read_text().split("## Possible Article 9 or Article 10 data")[1]
+    results.check("[privacy-datamap] ambiguous special categories appear in the dedicated review section",
+                  special.returncode == 0 and document["proposals"][0]["entity_id"] in special_section)
+
+
+    evidence = json.loads((cache / "privacy-datamap.evidence.json").read_text())
+    schema = json.loads((ROOT / "contract" / "privacy-datamap-review.schema.json").read_text())
+    results.check("[privacy-datamap] three review outputs satisfy the public contract",
+                  not validate_json_schema(evidence, schema) and (cache / "privacy-datamap.map.md").exists())
+    derived = json.loads((cache / "privacy-datamap.derived.json").read_text())
+    observed_count = sum(len(c["fields"]) for d in derived["datasets"] for c in d["collections"])
+    results.check("[privacy-datamap] evidence retains every observed field including deterministic fields",
+                  len(evidence["evidence_record"]["fields"]) == observed_count)
+    for row in document["proposals"]:
+        row.update(proposal_kind="personal", proposed_categories=["user.unique_id"], unresolved_question="",
+                   resolution_needed="", decision_impact="", reasoning_group="identifiers", rationale="", analysis={})
+    document["decisions"]["classify"]["decision_summary"] = "Treat account identifiers as personal data."
+    document["reasoning_groups"] = {"identifiers": {"summary": "Account identifiers", "rationale": "Shared account linkage rationale.",
+        "confidence": "medium", "refs": ["db/schema.sql:1"], "analysis": {"schema": "Identifier columns.",
+        "relationships": "Linkage remains a proposal.", "service_or_serialization": "No service code is present."}}}
+    proposals.write_text(json.dumps(document))
+    grouped = run(command)
+    review = (cache / "privacy-datamap.review.md").read_text()
+    results.check("[privacy-datamap] shared decision summary appears once and full reasoning stays in evidence",
+                  grouped.returncode == 0 and review.count("Treat account identifiers as personal data.") == 1
+                  and "Shared account linkage rationale." not in review
+                  and "Shared account linkage rationale." in (cache / "privacy-datamap.evidence.json").read_text(), grouped.stdout or grouped.stderr)
+    document["proposals"][0].update(proposal_kind="non_personal", proposed_categories=[], reasoning_group="",
+                                    rationale="Technical row counter.")
+    document["proposals"][0]["analysis"] = document["reasoning_groups"]["identifiers"]["analysis"]
+    activity = document["system_proposals"][0]["processing_activities"][0]
+    document["system_proposals"][0]["processing_activities"] = [dict(activity, activity_id=name, purpose=name)
+        for name in ("Authentication", "Training", "Billing", "Provider sharing")]
+    proposals.write_text(json.dumps(document))
+    technical = run(command)
+    review = (cache / "privacy-datamap.review.md").read_text()
+    map_text = (cache / "privacy-datamap.map.md").read_text()
+    results.check("[privacy-datamap] technical fields collapse and distinct processing descriptions survive",
+                  technical.returncode == 0 and "<details><summary>Technical field coverage" in review
+                  and "Technical row counter." not in review and all(name in map_text for name in
+                  ("Authentication", "Training", "Billing", "Provider sharing")))
+    document["structural_errors"] = [{"kind": "datastore boundary", "detail": "Two distinct catalog databases were combined.",
+                                     "resolution_needed": "Correct the supplemental dataset identities and rescan."}]
+    proposals.write_text(json.dumps(document))
+    blocked = run(command)
+    review = (cache / "privacy-datamap.review.md").read_text()
+    results.check("[privacy-datamap] structural errors defer privacy decisions without dropping evidence",
+                  blocked.returncode == 1 and "Fix structure before privacy review" in review
+                  and "Changes requiring decisions" not in review
+                  and len(json.loads((cache / "privacy-datamap.evidence.json").read_text())["evidence_record"]["fields"]) == observed_count)
+
+    document["structural_errors"] = []
+    proposals.write_text(json.dumps(document))
+    for gap_kind in ("schema_conflicts", "migration_gaps"):
+        changed_derived = json.loads(json.dumps(derived))
+        changed_derived.setdefault("coverage", {})[gap_kind] = [{"ref": "db/schema.sql:1", "reason": "Conflicting structure."}]
+        (cache / "privacy-datamap.derived.json").write_text(json.dumps(changed_derived))
+        failed_structure = run(command)
+        results.check(f"[privacy-datamap] observed {gap_kind} block privacy readiness",
+                      failed_structure.returncode == 1 and json.loads(failed_structure.stdout)["structural_blockers"])
+
+    # Compare a concise reference decision set against the same complete fixture inventory.
+    (cache / "privacy-datamap.derived.json").write_text(json.dumps(derived))
+    document["store_investigation"]["findings"] = []
+    for index, row in enumerate(document["proposals"]):
+        row.update(proposal_kind="personal", proposed_categories=["user.unique_id"], reasoning_group="",
+                   rationale=f"Field-specific explanation {index}: " + "Detailed evidence retained for audit. " * 30,
+                   analysis={"schema": "Read the column definition.", "relationships": "Inspected account relationships.",
+                             "service_or_serialization": "Inspected runtime use."})
+    for activity in document["system_proposals"][0]["processing_activities"]:
+        activity.update(decision_summary=f"Use account data for {activity['purpose'].lower()}.",
+                        proposed_data_uses=["essential.service"], proposed_data_subjects=["customer"],
+                        dataset_references=[derived["datasets"][0]["fides_key"]],
+                        unresolved_question="", business_context_question="", resolution_needed="", decision_impact="",
+                        rationale="Detailed processing explanation. " * 30)
+    proposals.write_text(json.dumps(document))
+    precise = run(command)
+    review = (cache / "privacy-datamap.review.md").read_text()
+    evidence = json.loads((cache / "privacy-datamap.evidence.json").read_text())
+    groups = evidence["review_queue"]["field_groups"]
+    results.check("[privacy-datamap] concise reference decisions preserve categories, scope and all evidence",
+                  precise.returncode == 0 and len(groups) == 1
+                  and groups[0]["data_categories"] == ["user.unique_id"]
+                  and set(groups[0]["field_ids"]) == {row["entity_id"] for row in document["proposals"]}
+                  and len(evidence["evidence_record"]["fields"]) == observed_count
+                  and len(review.split()) <= 230, f"{len(review.split())} words; {precise.stderr or precise.stdout}")
+    results.check("[privacy-datamap] different field reasoning groups by decision and stays out of the review",
+                  review.count("Treat account identifiers as personal data.") == 1
+                  and "Field-specific explanation" not in review and "Detailed processing explanation" not in review
+                  and all(row["rationale"] in (cache / "privacy-datamap.evidence.json").read_text() for row in document["proposals"]))
+    results.check("[privacy-datamap] supported activities need no artificial questions or repeated instructions",
+                  "Unknown:" not in review and "To resolve:" not in review
+                  and review.count("Accept or amend") == 1 and review.count("[Full evidence]") == 1
+                  and "## Coverage and identity questions" not in review)
+    proposal_contract = json.loads((ROOT / "contract" / "privacy-datamap-proposals.schema.json").read_text())
+    results.check("[privacy-datamap] question-free proposals satisfy both output contracts",
+                  not validate_json_schema(document, proposal_contract) and not validate_json_schema(evidence, schema))
+    for name, mutate in {
+        "unknown decision": lambda d: d["proposals"][0].update(decision_id="absent"),
+        "verbose summary": lambda d: d["decisions"]["classify"].update(decision_summary="x" * 241),
+        "multiline summary": lambda d: d["decisions"]["classify"].update(decision_summary="One line\nAnother line"),
+        "question without impact": lambda d: d["system_proposals"][0]["processing_activities"][0].update(
+            unresolved_question="Are events used for analytics?", resolution_needed="Identify the analytics consumer."),
+        "conflicting grouped questions": lambda d: d["proposals"][0].update(
+            unresolved_question="Does this identifier belong to an employee?", resolution_needed="Identify the principal type.",
+            decision_impact="Determines the data subject."),
+    }.items():
+        changed = json.loads(json.dumps(document))
+        mutate(changed)
+        proposals.write_text(json.dumps(changed))
+        failed = run(command)
+        results.check(f"[privacy-datamap] precise review rejects {name}", failed.returncode == 1,
+                      failed.stderr or failed.stdout)
+    activity = document["system_proposals"][0]["processing_activities"][-1]
+    activity.update(unresolved_question="Does the provider retain account payloads?",
+                    resolution_needed="Provide the provider retention configuration.",
+                    decision_impact="Determines whether the flow includes persistent provider storage.")
+    proposals.write_text(json.dumps(document))
+    unresolved = run(command)
+    review = (cache / "privacy-datamap.review.md").read_text()
+    results.check("[privacy-datamap] one material unknown produces exactly one actionable question",
+                  unresolved.returncode == 0 and review.count("Unknown:") == 1
+                  and "provider retention configuration" in review and "persistent provider storage" in review)
+
+    module_spec = importlib.util.spec_from_file_location("proposal_relationship_workflow", scripts / "reconcile.py")
+    workflow = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(workflow)
+
+    graph = {"nodes": [
+        {"id": "runtime", "kind": "runtime", "key": "repository"},
+        {"id": "client", "kind": "client"},
+        {"id": "connection", "kind": "connection", "unresolved_question": "Which deployed database is selected?",
+         "resolution_needed": "Provide the deployed connection configuration."},
+        {"id": "schema", "kind": "schema", "paths": ["db/schema.sql"]},
+    ], "edges": []}
+    mapping_specs = []
+    for source, target in (("runtime", "client"), ("client", "connection"), ("client", "schema")):
+        identity = source + "_" + target
+        spec = {"id": identity, "path": "db/schema.sql", "method": "text", "targets": ["relationship:" + identity]}
+        # Synthetic evidence for the proposal gate, without accepting a mapping.
+        spec["fingerprint"] = workflow.dependencies.observe(repo, spec)["fingerprint"]
+        mapping_specs.append(spec)
+        graph["edges"].append({"id": identity, "source": source, "target": target, "dependencies": [identity],
+                               "rationale": "Synthetic relationship evidence for the validator fixture.", "confidence": "low"})
+    document["relationship_proposal"] = {"graph": graph, "evidence_dependencies": mapping_specs,
+                                          "decision_summary": "Keep the connection separate until its destination is known."}
+    proposals.write_text(json.dumps(document))
+    mapped = run(command)
+    rendered = (cache / "privacy-datamap.review.md").read_text()
+    results.check("[privacy-datamap] mapping proposals require a collected preview before acceptance",
+                  mapped.returncode == 1 and "--candidate" in mapped.stdout and "Keep the connection separate" in rendered
+                  and "Provide the deployed connection configuration" in rendered, mapped.stderr or mapped.stdout)
+    mapping_specs[0]["fingerprint"] = "0" * 64
+    proposals.write_text(json.dumps(document))
+    stale = run(command)
+    results.check("[privacy-datamap] review rejects stale relationship proposal evidence", stale.returncode == 1, stale.stderr or stale.stdout)
+
+
+def test_discovery_acceptance_gate(results, tmp):
+    scripts = PRIVACY_DATAMAP / "scripts"
+    spec = importlib.util.spec_from_file_location("discovery_workflow", scripts / "reconcile.py")
+    workflow = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(workflow)
+    repo = write_files(pathlib.Path(tmp) / "discovery-gate", {"db/schema.sql": SQL_FIXTURE})
+    summary, _ = datamap_scan(repo)
+    manifest = repo / ".noru/privacy-datamap.yml"
+    manifest.write_text(accepted_datamap_text(summary["derived_digest"]))
+    command = ["python3", str(scripts / "reconcile.py"), f"--repo={repo}", "--output=json"]
+    assert run(command + ["--seal"]).returncode == 0
+    assert run(command).returncode == 0
+    lock = repo / ".noru/privacy-datamap.lock.json"
+    before = lock.read_bytes()
+    parsed = repo / ".noru/.cache/privacy-datamap.parsed.json"
+    assert run(["python3", str(scripts / "validate_manifest.py"), str(manifest), f"--emit-parsed={parsed}", "--quiet"]).returncode == 0
+    (repo / "src").mkdir()
+    (repo / "src/labels.ts").write_text('export const label = (value: string) => value;\n')
+    summary, _ = datamap_scan(repo)
+    pending = json.loads(run(command).stdout)
+    results.check("[privacy-datamap] new unregistered scope blocks acceptance and stale export without schema drift",
+                  summary["rendered"] is None and not pending["drift"] and pending["agent_required"]
+                  and not pending["accepted_current"] and run(command + ["--seal"]).returncode == 1 and lock.read_bytes() == before)
+    path = repo / ".noru/.cache/privacy-datamap.proposals.json"
+    document = json.loads(path.read_text())
+    change = document["discovery_required"][0]
+    answer = {"path": change["path"], "observation_digest": workflow.dependencies.digest(change), "outcome": "no_new_scope",
+              "decision_summary": "The unused identity formatter adds no datastore or processing flow.",
+              "rationale": "The only new declaration returns its argument and has no callers, imports, persistence or service calls.",
+              "confidence": "high", "refs": ["missing.ts:1"]}
+    document["discovery_proposals"] = [answer]
+    path.write_text(json.dumps(document))
+    results.check("[privacy-datamap] discovery acceptance rejects unsupported answers", run(command + ["--seal"]).returncode == 1 and lock.read_bytes() == before)
+    answer["refs"] = ["src/labels.ts:1"]
+    path.write_text(json.dumps(document))
+    sealed = run(command + ["--seal"])
+    current = json.loads(run(command).stdout)
+    results.check("[privacy-datamap] explicit reviewed discovery establishes a clean future baseline",
+                  sealed.returncode == 0 and not current["discovery_required"] and current["accepted_current"], sealed.stderr)
+
+
+def test_scoped_reconciliation_cli(results, tmp):
+    scripts = PRIVACY_DATAMAP / "scripts"
+    spec = importlib.util.spec_from_file_location("scoped_cli", scripts / "reconcile.py")
+    workflow = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(workflow)
+    text = 'export function serialize(user: User) { return {email:user.email}; }\nexport function independent(value: string) { return value; }\n'
+    repo = write_files(pathlib.Path(tmp) / "scoped-cli", {"db/schema.sql": 'CREATE TABLE accounts (\n  alpha_token TEXT,\n  beta_token TEXT\n);\n',
+                                                       "src/payload.ts": text})
+    datamap_scan(repo)
+    command = ["python3", str(scripts / "reconcile.py"), f"--repo={repo}", "--output=json"]
+    assert run(command).returncode == 0
+    path = repo / ".noru/.cache/privacy-datamap.proposals.json"
+    document = json.loads(path.read_text())
+    document["evidence_dependencies"] = []
+    for row, selector in zip(document["proposals"], ["serialize", "independent"]):
+        row["rationale"] = "Preserve the inspected meaning of " + selector
+        row["refs"] = ["src/payload.ts:1"]
+        dependency = {"id": selector, "path": "src/payload.ts", "method": "typescript_ast", "selector": selector, "targets": [row["entity_id"]]}
+        dependency["fingerprint"] = workflow.dependencies.observe(repo, dependency)["fingerprint"]
+        document["evidence_dependencies"].append(dependency)
+    path.write_text(json.dumps(document))
+    assert run(command).returncode == 0
+    bound = json.loads(path.read_text())
+    (repo / "README.md").write_text('Unrelated prose changed.\n')
+    datamap_scan(repo)
+    assert run(command).returncode == 0
+    after_doc = json.loads(path.read_text())
+    results.check("[privacy-datamap] CLI reconciliation preserves unaccepted analysis after README edits",
+                  after_doc["proposals"] == bound["proposals"] and not after_doc["discovery_required"])
+    (repo / "src/payload.ts").write_text('// comment\n\n' + text.replace('{email:user.email}', '{ email: user.email, }'))
+    datamap_scan(repo)
+    assert run(command).returncode == 0
+    after_format = json.loads(path.read_text())
+    results.check("[privacy-datamap] CLI reconciliation refreshes citations without invalidating TypeScript analysis",
+                  all(state["status"] == "current" for state in after_format["evidence_state"].values())
+                  and after_format["proposals"][0]["refs"] == ["src/payload.ts:3"]
+                  and not after_format["discovery_required"])
+    (repo / "src/payload.ts").write_text(text.replace('email:user.email', 'email:user.email, phone:user.phone'))
+    datamap_scan(repo)
+    assert run(command).returncode == 0
+    changed = json.loads(path.read_text())
+    alpha, beta = [row["entity_id"] for row in changed["proposals"]]
+    results.check("[privacy-datamap] CLI reconciliation preserves independent proposals and flags only affected evidence",
+                  changed["evidence_state"][alpha]["status"] == "investigate" and changed["evidence_state"][beta]["status"] == "current"
+                  and changed["proposals"][1]["rationale"] == bound["proposals"][1]["rationale"]
+                  and not changed["discovery_required"])
+    (repo / "src/payload.ts").write_text(text + 'export const newArchive = new Storage();\n')
+    datamap_scan(repo)
+    assert run(command).returncode == 0
+    new_scope = json.loads(path.read_text())
+    results.check("[privacy-datamap] CLI discovery queues new integration scope without deleting existing analysis",
+                  [row["path"] for row in new_scope["discovery_required"]] == ["src/payload.ts"]
+                  and new_scope["proposals"][1]["rationale"] == bound["proposals"][1]["rationale"])
+
+
+def test_typescript_and_scoped_analysis(results, tmp):
+    scripts = PRIVACY_DATAMAP / "scripts"
+    spec = importlib.util.spec_from_file_location("scoped_workflow", scripts / "reconcile.py")
+    workflow = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(workflow)
+    dependencies, analysis = workflow.dependencies, workflow.analysis_cache
+    source = 'import { format } from "./helper";\nexport function serialize(user: User): Payload { return { email: format(user.email) }; }\nexport function unrelated() { return 1; }\n'
+    repo = write_files(pathlib.Path(tmp) / "scoped-analysis", {
+        "src/payload.ts": source,
+        "src/helper.ts": 'export function format(value: string): string { return value; }\n',
+        "src/region.ts": 'export function region(value: string): string { return value; }\n',
+        "src/client.ts": 'export const client = connect(settings.PRIMARY);\n',
+        "README.md": 'Unrelated documentation.\n',
+    })
+    def observe(text, selector="serialize"):
+        (repo / "src/payload.ts").write_text(text)
+        return dependencies.observe(repo, {"path": "src/payload.ts", "method": "typescript_ast", "selector": selector, "targets": ["field"]})
+    initial = observe(source)
+    formatted = 'import {format} from \'./helper\'\n// shifted citation\n\nexport function serialize( user:User ):Payload {\n return {\n email:format(user.email),\n }\n}\nexport function unrelated(){return 999}\n'
+    same = observe(formatted)
+    results.check("[privacy-datamap] TypeScript AST ignores comments, layout, quotes, trailing commas and unrelated declarations",
+                  same["fingerprint"] == initial["fingerprint"] and same["refs"] != initial["refs"])
+    for name, modified in {
+        "personal property": source.replace('email: format(user.email)', 'email: format(user.email), phone: user.phone'),
+        "property name": source.replace('email: format', 'address: format'),
+        "literal value": source.replace('return 1', 'return 2').replace('format(user.email)', '"new-value"'),
+        "call": source.replace('format(user.email)', 'other(user.email)'),
+        "condition": source.replace('return { email:', 'if (user.active) return { email:'),
+        "type": source.replace('user: User', 'user: OtherUser'),
+    }.items():
+        results.check(f"[privacy-datamap] TypeScript AST preserves {name}", observe(modified)["fingerprint"] != initial["fingerprint"])
+    results.check("[privacy-datamap] TypeScript AST retains significant return line breaks",
+                  observe('function serialize() { return value; }')["fingerprint"] != observe('function serialize() { return\nvalue; }')["fingerprint"])
+    results.check("[privacy-datamap] TypeScript AST retains optional-chain grouping",
+                  observe('function serialize() { return a?.b.c; }')["fingerprint"] != observe('function serialize() { return (a?.b).c; }')["fingerprint"])
+    results.check("[privacy-datamap] TypeScript AST retains async line-break semantics",
+                  observe('async function serialize() { return 1; }')["fingerprint"] != observe('async\nfunction serialize() { return 1; }')["fingerprint"])
+    results.check("[privacy-datamap] TypeScript AST retains prototype shorthand semantics",
+                  observe('function serialize() { return {__proto__}; }')["fingerprint"] != observe('function serialize() { return {__proto__:__proto__}; }')["fingerprint"])
+    results.check("[privacy-datamap] TypeScript object return types and semicolonless type aliases normalize consistently",
+                  observe('type Payload = {email: string;};\nfunction serialize(user: User): {email: string} { return {email:user.email}; }')["fingerprint"]
+                  == observe('type Payload = {email:string}\nfunction serialize(user:User):{email:string}{return { email:user.email, }}')["fingerprint"])
+    results.check("[privacy-datamap] TypeScript generic client calls preserve type arguments",
+                  observe('function serialize() { return client<User>(config.url); }')["fingerprint"]
+                  != observe('function serialize() { return client<Admin>(config.url); }')["fingerprint"])
+    failed = False
+    try:
+        observe('function serialize() { return <Widget />; }')
+    except ValueError:
+        failed = True
+    results.check("[privacy-datamap] unsupported TypeScript syntax is an explicit evidence gap", failed)
+    observe(source)
+    original_import = dependencies.observe(repo, {"path": "src/payload.ts", "method": "typescript_ast", "selector": "import:format", "targets": ["field"]})
+    (repo / "src/payload.ts").write_text(source.replace('./helper','./other-helper'))
+    changed_import = dependencies.observe(repo, {"path": "src/payload.ts", "method": "typescript_ast", "selector": "import:format", "targets": ["field"]})
+    results.check("[privacy-datamap] explicit imported binding dependencies detect changed helper sources", original_import["fingerprint"] != changed_import["fingerprint"])
+    observe(source)
+    document = {"proposals": [{"entity_id": "db/accounts/email", "refs": ["src/payload.ts:2"], "rationale": "Email is serialized for the account flow."},
+                              {"entity_id": "db/accounts/region", "refs": ["src/region.ts:1"], "rationale": "Region is independent."}],
+                "system_proposals": [{"entity_id": "api", "refs": ["src/client.ts:1"], "rationale": "The API uses this client.",
+                    "processing_activities": [{"activity_id": "send", "refs": ["src/payload.ts:2", "src/client.ts:1"], "purpose": "Send account payloads"}]}],
+                "reasoning_groups": {}, "dependency_proposals": [], "evidence_dependencies": [],
+                "relationship_proposal": {"graph": {"edges": [{"id": "connection", "rationale": "Client binding"}]}, "evidence_dependencies": []}}
+    def register(identity, path, selector, targets):
+        spec = {"id": identity, "path": path, "method": "typescript_ast", "selector": selector, "targets": targets}
+        spec["fingerprint"] = dependencies.observe(repo, spec)["fingerprint"]
+        document["evidence_dependencies"].append(spec)
+    register("serializer", "src/payload.ts", "serialize", ["db/accounts/email", "activity:api/send"])
+    register("import", "src/payload.ts", "import:format", ["db/accounts/email", "activity:api/send"])
+    register("helper", "src/helper.ts", "format", ["db/accounts/email", "activity:api/send"])
+    register("region", "src/region.ts", "region", ["db/accounts/region"])
+    register("client", "src/client.ts", "client", ["system:api", "activity:api/send", "relationship:connection"])
+    results.check("[privacy-datamap] proposal evidence binds fields, activities and relationships independently", not analysis.refresh(document, repo))
+    discovery = analysis.discover(repo)
+    analysis.refresh_discovery(document, discovery)
+    independent = json.loads(json.dumps(document["proposals"][1]))
+    (repo / "README.md").write_text('Changed only the README.\n')
+    results.check("[privacy-datamap] unrelated documentation preserves scoped analysis and discovery state",
+                  not analysis.refresh(document, repo) and not analysis.refresh_discovery(document, analysis.discover(repo))
+                  and document["proposals"][1] == independent)
+    (repo / "src/payload.ts").write_text(formatted.replace('return 999','return 1'))
+    results.check("[privacy-datamap] moved TypeScript citations refresh without an investigation",
+                  not analysis.refresh(document, repo) and document["proposals"][0]["refs"] == ["src/payload.ts:4"]
+                  and not analysis.refresh_discovery(document, analysis.discover(repo)))
+    (repo / "src/payload.ts").write_text(source.replace('email: format(user.email)', 'email: format(user.email), phone: user.phone'))
+    analysis.refresh(document, repo)
+    states = document["evidence_state"]
+    results.check("[privacy-datamap] serializer changes investigate only dependent fields and payload flows",
+                  states["db/accounts/email"]["status"] == states["activity:api/send"]["status"] == "investigate"
+                  and states["db/accounts/region"]["status"] == states["relationship:connection"]["status"] == "current"
+                  and document["proposals"][1] == independent)
+    results.check("[privacy-datamap] registered declaration changes need no duplicate new-scope review",
+                  not analysis.refresh_discovery(document, analysis.discover(repo)))
+    observe(source)
+    (repo / "src/client.ts").write_text('export const client = connect(settings.SECONDARY);\n')
+    analysis.refresh(document, repo)
+    states = document["evidence_state"]
+    results.check("[privacy-datamap] connection changes investigate datastore relationships and affected activities",
+                  states["relationship:connection"]["status"] == states["activity:api/send"]["status"] == "investigate"
+                  and states["db/accounts/email"]["status"] == states["db/accounts/region"]["status"] == "current")
+    (repo / "src/client.ts").write_text('export const client = connect(settings.PRIMARY);\n')
+    (repo / "src/new-integration.ts").write_text('import { Storage } from "object-store";\nexport const archive = new Storage();\n')
+    pending = analysis.refresh_discovery(document, analysis.discover(repo))
+    results.check("[privacy-datamap] broad discovery finds a new unregistered integration while preserving existing analysis",
+                  [row["path"] for row in pending] == ["src/new-integration.ts"] and not analysis.refresh(document, repo))
+    (repo / "src/payload.ts").write_text(source + 'export const archive = connect(settings.ARCHIVE);\n')
+    pending = analysis.refresh_discovery(document, analysis.discover(repo))
+    results.check("[privacy-datamap] broad discovery finds new declarations even in a registered source file",
+                  "src/payload.ts" in [row["path"] for row in pending])
+    results.check("[privacy-datamap] whole-file dependencies do not hide newly added declarations",
+                  "src/payload.ts" in [row["path"] for row in analysis.discovery_changes(discovery, analysis.discover(repo),
+                     [{"path": "src/payload.ts", "method": "typescript_ast"}])])
+
+    observe(source)
+    (repo / "src/helper.ts").rename(repo / "src/moved-helper.ts")
+    results.check("[privacy-datamap] unique helper moves refresh proposal citations and dependencies",
+                  not analysis.refresh(document, repo)
+                  and next(s for s in document["evidence_dependencies"] if s["id"] == "helper")["path"] == "src/moved-helper.ts")
+    (repo / "src/moved-helper.ts").unlink()
+    analysis.refresh(document, repo)
+    results.check("[privacy-datamap] missing dependencies mark only their dependent proposals unresolved",
+                  document["evidence_state"]["db/accounts/email"]["status"] == "unresolved"
+                  and document["evidence_state"]["db/accounts/region"]["status"] == "current")
+    helper = 'export function format(value: string): string { return value; }\n'
+    (repo / "src/copy-a.ts").write_text(helper)
+    (repo / "src/copy-b.ts").write_text(helper)
+    analysis.refresh(document, repo)
+    results.check("[privacy-datamap] ambiguous dependency moves remain unresolved on repeated reconciliation",
+                  any(i["action"] == "identity_ambiguity" for i in document["evidence_state"]["db/accounts/email"]["issues"])
+                  and bool(analysis.refresh(document, repo)))
+
+
+def test_datamap_candidate_collection(results, tmp):
+    scripts = PRIVACY_DATAMAP / "scripts"
+    module_spec = importlib.util.spec_from_file_location("candidate_workflow", scripts / "reconcile.py")
+    workflow = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(workflow)
+    repo = write_files(pathlib.Path(tmp) / "candidate-collection", {
+        "db/schema.sql": SQL_FIXTURE,
+        "src/connection.py": 'SCHEMA_PATH = "db/schema.sql"\nDATASTORE = "primary_store"\n',
+    })
+    summary, _ = datamap_scan(repo)
+    manifest = repo / ".noru/privacy-datamap.yml"
+    manifest.write_text(accepted_datamap_text(summary["derived_digest"]))
+    reconcile_command = ["python3", str(scripts / "reconcile.py"), f"--repo={repo}", "--output=json"]
+    review_command = ["python3", str(scripts / "review.py"), f"--repo={repo}", "--output=json"]
+    assert run(reconcile_command + ["--seal"]).returncode == 0
+    assert run(reconcile_command).returncode == 0
+    assert run(review_command).returncode == 0
+    cache = repo / ".noru/.cache"
+    proposals_path = cache / "privacy-datamap.proposals.json"
+    proposals = json.loads(proposals_path.read_text())
+    graph = {"nodes": [
+        {"id": "runtime", "kind": "runtime", "key": "repository"},
+        {"id": "client", "kind": "client"}, {"id": "connection", "kind": "connection"},
+        {"id": "store", "kind": "datastore", "key": "primary_store"},
+        {"id": "schema", "kind": "schema", "paths": ["db/schema.sql"]},
+    ], "edges": []}
+    specs = []
+    for source, target in (("runtime", "client"), ("client", "connection"), ("connection", "store"), ("client", "schema")):
+        identity = source + "_" + target
+        spec = {"id": identity, "method": "python_ast", "path": "src/connection.py", "targets": ["relationship:" + identity]}
+        spec["fingerprint"] = workflow.dependencies.observe(repo, spec)["fingerprint"]
+        specs.append(spec)
+        graph["edges"].append({"id": identity, "source": source, "target": target, "dependencies": [identity],
+                               "rationale": "The synthetic connection configuration selects this schema and store.", "confidence": "high"})
+    proposals["relationship_proposal"] = {"graph": graph, "evidence_dependencies": specs,
+                                           "decision_summary": "Assign account storage to the configured primary store."}
+    proposals_path.write_text(json.dumps(proposals))
+    assert run(["python3", str(scripts / "validate_manifest.py"), str(manifest),
+                f"--emit-parsed={cache / 'privacy-datamap.parsed.json'}", "--quiet"]).returncode == 0
+    protected = {p: p.read_bytes() for p in (repo / ".noru").rglob("*") if p.is_file()}
+    (repo / ".fides").mkdir(exist_ok=True)
+    export = repo / ".fides/datamap.yml"
+    export.write_text("Existing accepted export remains unchanged.\n")
+    protected[export] = export.read_bytes()
+    candidate_command = ["node", str(scripts / "collect.mjs"), f"--repo={repo}", "--candidate", "--output=json"]
+    preview = cache / "privacy-datamap-preview"
+    collected = run(candidate_command)
+    results.check("[privacy-datamap] candidate collection consumes proposals without acceptance", collected.returncode == 0, collected.stderr)
+    derived = json.loads((preview / "privacy-datamap.derived.json").read_text())
+    results.check("[privacy-datamap] proposed connection corrects candidate collection and runtime datastore boundaries",
+                  [d["fides_key"] for d in derived["datasets"]] == ["primary_store"]
+                  and derived["datasets"][0]["collections"][0]["name"] == "accounts"
+                  and derived["systems"][0]["dataset_references"] == ["primary_store"])
+    first_observations = (preview / "privacy-datamap.derived.json").read_bytes()
+    repeated = run(candidate_command)
+    results.check("[privacy-datamap] unchanged candidate collection is byte-identical",
+                  repeated.returncode == 0 and (preview / "privacy-datamap.derived.json").read_bytes() == first_observations)
+    reconciled = run(reconcile_command + ["--candidate"])
+    results.check("[privacy-datamap] candidate reconciliation generates a separate review queue",
+                  reconciled.returncode == 0 and not json.loads(reconciled.stdout)["accepted_current"], reconciled.stderr)
+    candidate_path = preview / "privacy-datamap.candidate.yml"
+    candidate = load_datamap_yaml(candidate_path)
+    results.check("[privacy-datamap] candidate manifest contains proposed graph and corrected fields",
+                  candidate["relationship_graph"] == graph and candidate["dataset"][0]["fides_key"] == "primary_store"
+                  and bool(candidate["evidence_dependencies"]))
+    incomplete = run(review_command + ["--candidate"])
+    results.check("[privacy-datamap] corrected preview still requires complete enrichment",
+                  incomplete.returncode == 1 and json.loads(incomplete.stdout)["status"] == "enrichment incomplete")
+    preview_proposals_path = preview / "privacy-datamap.proposals.json"
+    document = json.loads(preview_proposals_path.read_text())
+    document["decisions"] = {"meaning": {"decision_summary": "Establish the remaining field meanings."}}
+    for row in document["proposals"]:
+        row.update(decision_id="meaning", proposal_kind="ambiguous", proposed_categories=[],
+                   rationale="Storage is established; business use is absent from this fixture.", confidence="low",
+                   unresolved_question="Which business process uses these values?",
+                   resolution_needed="Identify the process and its subjects.", decision_impact="Determines personal-data categories.",
+                   analysis={"schema": "Read the SQL definition.", "relationships": "Traced the explicit client binding.",
+                             "service_or_serialization": "Only connection configuration is present."})
+    for row in document["system_proposals"]:
+        row.update(rationale="The connection selects the primary store.", refs=["src/connection.py:1"], confidence="high",
+                   processing_activities=[{"activity_id": "accounts", "purpose": "Account processing purpose remains unresolved",
+                       "decision_summary": "Establish the account processing purpose.", "proposed_data_uses": [], "proposed_data_subjects": [],
+                       "dataset_references": ["primary_store"], "relationship_rationale": "The proposed connection targets the primary store.",
+                       "rationale": "The fixture establishes a destination but no business process.", "refs": ["src/connection.py:1"], "confidence": "low",
+                       "unresolved_question": "What process uses this account store?", "resolution_needed": "Identify the process and its subjects.",
+                       "decision_impact": "Determines purpose and subject classifications."}])
+    document["store_investigation"].update(search_scope="Read the schema and connection configuration.",
+        rationale="No additional persistent integration exists in this synthetic fixture.", refs=["src/connection.py:1"], confidence="high", findings=[])
+    preview_proposals_path.write_text(json.dumps(document))
+    reviewed = run(review_command + ["--candidate"])
+    evidence = json.loads((preview / "privacy-datamap.evidence.json").read_text())
+    results.check("[privacy-datamap] human review sees the corrected candidate map with unresolved business context",
+                  reviewed.returncode == 0 and json.loads(reviewed.stdout)["status"] == "ready for human review"
+                  and evidence["data_map"]["stores"][0]["id"] == "primary_store"
+                  and "Candidate collection" in (preview / "privacy-datamap.map.md").read_text(), reviewed.stderr or reviewed.stdout)
+    results.check("[privacy-datamap] candidate flow preserves accepted files, normal review artifacts and export",
+                  all(p.read_bytes() == content for p, content in protected.items()))
+    del document["relationship_proposal"]
+    preview_proposals_path.write_text(json.dumps(document))
+    missing_mapping = run(review_command + ["--candidate"])
+    results.check("[privacy-datamap] candidate review cannot omit the mapping decision",
+                  missing_mapping.returncode == 1 and "requires the collected relationship_proposal" in missing_mapping.stdout)
+    document["relationship_proposal"] = proposals["relationship_proposal"]
+    preview_proposals_path.write_text(json.dumps(document))
+    assert run(review_command + ["--candidate"]).returncode == 0
+
+    completed_analysis = json.loads(preview_proposals_path.read_text())
+    completed_review = (preview / "privacy-datamap.review.md").read_bytes()
+    repeat_collection = run(candidate_command)
+    repeat_reconciliation = run(reconcile_command + ["--candidate"])
+    results.check("[privacy-datamap] repeated candidate scans preserve completed analysis and review",
+                  repeat_collection.returncode == 0 and repeat_reconciliation.returncode == 0
+                  and json.loads(preview_proposals_path.read_text()) == completed_analysis
+                  and (preview / "privacy-datamap.review.md").read_bytes() == completed_review)
+    results.check("[privacy-datamap] candidate mode cannot seal or run acceptance checks",
+                  run(reconcile_command + ["--candidate", "--seal"]).returncode == 2
+                  and run(candidate_command + ["--check"]).returncode == 2)
+    preview_before = {p: p.read_bytes() for p in preview.iterdir() if p.is_file()}
+    preview_derived_path = preview / "privacy-datamap.derived.json"
+    preview_derived_path.write_text(first_observations.decode().replace('"primary_store"', '"edited_store"'))
+    results.check("[privacy-datamap] edited candidate observations cannot reach review",
+                  run(review_command + ["--candidate"]).returncode != 0)
+    preview_derived_path.write_bytes(preview_before[preview_derived_path])
+    original_manifest = manifest.read_bytes()
+    manifest.write_bytes(original_manifest + b"\n")
+    results.check("[privacy-datamap] accepted baseline changes require a fresh candidate collection",
+                  run(reconcile_command + ["--candidate"]).returncode != 0)
+    manifest.write_bytes(original_manifest)
+    proposals["relationship_proposal"]["decision_summary"] = "Changed mapping proposal requires a fresh preview."
+    proposals_path.write_text(json.dumps(proposals))
+    results.check("[privacy-datamap] changed source proposal invalidates cached candidate review",
+                  run(review_command + ["--candidate"]).returncode != 0
+                  and all(p.read_bytes() == content for p, content in preview_before.items()))
+    proposals["relationship_proposal"]["decision_summary"] = "Assign account storage to the configured primary store."
+    proposals_path.write_text(json.dumps(proposals))
+    (repo / "src/connection.py").write_text('SCHEMA_PATH = "db/schema.sql"\nDATASTORE = "different_store"\n')
+    rejected = run(candidate_command)
+    results.check("[privacy-datamap] stale candidate evidence fails before overwriting existing preview artifacts",
+                  rejected.returncode != 0 and "evidence changed" in rejected.stderr
+                  and run(reconcile_command + ["--candidate"]).returncode != 0
+                  and all(p.read_bytes() == content for p, content in preview_before.items()), rejected.stderr)
+    (repo / "src/connection.py").write_text('SCHEMA_PATH = "db/schema.sql"\nDATASTORE = "primary_store"\n')
+    specs[0]["path"] = "missing.py"
+    proposals_path.write_text(json.dumps(proposals))
+    results.check("[privacy-datamap] missing candidate evidence never falls back to accepted bindings", run(candidate_command).returncode != 0)
+    specs[0]["path"] = "src/connection.py"
+    graph["edges"][0]["target"] = "unknown"
+    proposals_path.write_text(json.dumps(proposals))
+    results.check("[privacy-datamap] malformed candidate graph is rejected without changing the accepted map", run(candidate_command).returncode != 0)
+    graph["edges"][0]["target"] = "client"
+    proposals_path.write_text(json.dumps(proposals))
+    graph["nodes"][3]["key"] = "db"
+    proposals_path.write_text(json.dumps(proposals))
+    unchanged_preview = run(candidate_command)
+    unchanged_reconciliation = run(reconcile_command + ["--candidate"])
+    results.check("[privacy-datamap] structurally unchanged proposed mappings still require review and never export",
+                  unchanged_preview.returncode == 0 and json.loads(unchanged_preview.stdout)["rendered"] is None
+                  and unchanged_reconciliation.returncode == 0
+                  and not json.loads(unchanged_reconciliation.stdout)["accepted_current"]
+                  and json.loads(unchanged_reconciliation.stdout)["agent_required"]
+                  and export.read_bytes() == protected[export])
+    manifest.unlink()
+    results.check("[privacy-datamap] candidate collection works before any accepted manifest exists",
+                  run(candidate_command).returncode == 0 and not manifest.exists())
+
+
+def test_datamap_connection_graph(results, tmp):
+    scripts = PRIVACY_DATAMAP / "scripts"
+    spec = importlib.util.spec_from_file_location("relationship_workflow", scripts / "reconcile.py")
+    workflow = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(workflow)
+    repo = write_files(pathlib.Path(tmp) / "connection-graph", {
+        "models/schema.sql": "CREATE TABLE accounts (\n    email TEXT\n);\n",
+        "src/connect.py": 'PRIMARY = "first"\nSECONDARY = "second"\n',
+    })
+    graph = {"nodes": [
+        {"id": "runtime", "kind": "runtime", "key": "repository"},
+        {"id": "schema", "kind": "schema", "paths": ["models/schema.sql"]},
+    ], "edges": []}
+    specs = []
+    for name in ("primary", "secondary"):
+        graph["nodes"].extend([
+            {"id": name, "kind": "client"},
+            {"id": name + "_connection", "kind": "connection", "unresolved_question": "Which database does this connection reach?",
+             "resolution_needed": "Identify the deployed connection destination."},
+        ])
+        for suffix, source, target in (("runtime", "runtime", name), ("connection", name, name + "_connection"), ("schema", name, "schema")):
+            identity = name + "_" + suffix
+            dependency = {"id": identity, "path": "src/connect.py", "method": "python_ast", "targets": ["relationship:" + identity]}
+            dependency["fingerprint"] = workflow.dependencies.observe(repo, dependency)["fingerprint"]
+            specs.append(dependency)
+            graph["edges"].append({"id": identity, "source": source, "target": target, "dependencies": [identity],
+                                   "rationale": "Synthetic client construction binds this connection and schema.", "confidence": "high"})
+    results.check("[privacy-datamap] generic graph validates evidence-backed connection bindings", not workflow.relationships.validate(graph, specs))
+    manifest = repo / ".noru" / "privacy-datamap.yml"
+    manifest.parent.mkdir(exist_ok=True)
+    document = {"relationship_graph": graph, "evidence_dependencies": specs}
+    manifest.write_text(workflow.to_yaml(document))
+    summary, derived = datamap_scan(repo)
+    keys = {d["fides_key"] for d in derived["datasets"]}
+    results.check("[privacy-datamap] shared schema preserves two unresolved connection identities",
+                  keys == {"connection_primary_connection", "connection_secondary_connection"}
+                  and len(derived["relationship_mapping"]["questions"]) == 2, str(keys) + str(derived["relationship_mapping"]["questions"]))
+    results.check("[privacy-datamap] explicit runtime client flows survive a cross-directory schema",
+                  set(derived["systems"][0]["dataset_references"]) == keys)
+    graph["nodes"].reverse()
+    graph["edges"].reverse()
+    manifest.write_text(workflow.to_yaml(document))
+    repeated, _ = datamap_scan(repo)
+    results.check("[privacy-datamap] graph order does not change structural identity", summary["derived_digest"] == repeated["derived_digest"])
+    broken = json.loads(json.dumps(graph))
+    broken["edges"][0]["target"] = "missing"
+    results.check("[privacy-datamap] graph rejects dangling endpoints", bool(workflow.relationships.validate(broken, specs)))
+    broken = json.loads(json.dumps(graph))
+    broken["edges"][0]["dependencies"] = []
+    results.check("[privacy-datamap] graph rejects unmonitored relationship claims", bool(workflow.relationships.validate(broken, specs)))
+    (repo / "src/connect.py").write_text('PRIMARY = "changed"\nSECONDARY = "second"\n')
+    _, changes = workflow.dependencies.reconcile(repo, specs, {})
+    results.check("[privacy-datamap] relationship source changes queue affected edges",
+                  len(changes) == 6 and all(c["action"] == "investigate" and c["targets"][0].startswith("relationship:") for c in changes))
+    graph["nodes"].append({"id": "destination", "kind": "datastore", "key": "shared_store"})
+    for name in ("primary", "secondary"):
+        node = next(n for n in graph["nodes"] if n["id"] == name + "_connection")
+        node.pop("unresolved_question")
+        node.pop("resolution_needed")
+        identity = name + "_destination"
+        dependency = {"id": identity, "path": "src/connect.py", "method": "python_ast", "targets": ["relationship:" + identity]}
+        dependency["fingerprint"] = workflow.dependencies.observe(repo, dependency)["fingerprint"]
+        specs.append(dependency)
+        graph["edges"].append({"id": identity, "source": name + "_connection", "target": "destination", "dependencies": [identity],
+                               "rationale": "Both synthetic connections explicitly use the same database.", "confidence": "high"})
+    manifest.write_text(workflow.to_yaml(document))
+    _, shared = datamap_scan(repo)
+    results.check("[privacy-datamap] shared destination requires explicit connection edges",
+                  [d["fides_key"] for d in shared["datasets"]] == ["shared_store"] and not shared["relationship_mapping"]["questions"], str([d["fides_key"] for d in shared["datasets"]]) + json.dumps(shared["relationship_mapping"]))
+    (repo / "models/schema.sql").unlink()
+    (repo / "models/schema.ts").write_text('export const accounts = pgTable("accounts", {\n  email: text("email"),\n});\n')
+    next(n for n in graph["nodes"] if n["id"] == "schema")["paths"] = ["models/schema.ts"]
+    (repo / "drizzle.config.ts").write_text('export default { schema: "./models/*.ts", out: "./migrations" };\n')
+    (repo / "migrations").mkdir()
+    (repo / "migrations/001.sql").write_text('CREATE TABLE accounts (\n  legacy_email TEXT\n);\n')
+    manifest.write_text(workflow.to_yaml(document))
+    _, migrated = datamap_scan(repo)
+    results.check("[privacy-datamap] explicit bindings retain linked migrations as history of the same store",
+                  [d["fides_key"] for d in migrated["datasets"]] == ["shared_store"]
+                  and set(fields_of(migrated, "accounts")) == {"email"})
+    (repo / "models/other.ts").write_text('export const events = pgTable("events", {\n  id: text("id"),\n});\n')
+    _, incomplete = datamap_scan(repo)
+    results.check("[privacy-datamap] mixed migration connection bindings expose a coverage gap",
+                  any(g["format"] == "relationship_migrations" for g in incomplete["coverage"]["unparsed_candidates"]))
+    graph["nodes"].append({"id": "second_destination", "kind": "datastore", "key": "another_store"})
+    edge = dict(graph["edges"][-1], id="conflict", target="second_destination", dependencies=["conflict"])
+    dependency = dict(specs[-1], id="conflict", targets=["relationship:conflict"])
+    results.check("[privacy-datamap] a connection cannot silently combine multiple destinations",
+                  bool(workflow.relationships.validate({"nodes": graph["nodes"], "edges": graph["edges"] + [edge]}, specs + [dependency])))
+
+
+def test_datamap_repeatable_evidence_baseline(results, tmp):
+    scripts = PRIVACY_DATAMAP / "scripts"
+    spec = importlib.util.spec_from_file_location("repeatable_datamap", scripts / "reconcile.py")
+    workflow = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(workflow)
+    source = 'def serialize(value):\n    return {"account": value}\n\ndef unrelated():\n    return 1\n'
+    repo = write_files(pathlib.Path(tmp) / "repeatable-evidence", {"db/schema.sql": SQL_FIXTURE, "src/payload.py": source})
+    summary, derived = datamap_scan(repo)
+    manifest_path = repo / ".noru" / "privacy-datamap.yml"
+    cache = repo / ".noru" / ".cache"
+    lock_path = repo / ".noru" / "privacy-datamap.lock.json"
+    dependency = {"id": "account-payload", "path": "src/payload.py", "method": "python_ast", "selector": "serialize",
+                  "targets": ["db/accounts/weird_column", "system:repository"]}
+    dependency["fingerprint"] = workflow.dependencies.observe(repo, dependency)["fingerprint"]
+    document = workflow.VALIDATOR.load_yaml(accepted_datamap_text(summary["derived_digest"]))[0]
+    graph = {"nodes": [
+        {"id": "runtime", "kind": "runtime", "key": "repository"},
+        {"id": "client", "kind": "client"}, {"id": "connection", "kind": "connection"},
+        {"id": "datastore", "kind": "datastore", "key": "db"},
+        {"id": "schema", "kind": "schema", "paths": ["db/schema.sql"]},
+    ], "edges": []}
+    for source_id, target_id in (("runtime", "client"), ("client", "connection"), ("connection", "datastore"), ("client", "schema")):
+        identity = source_id + "_" + target_id
+        dependency["targets"].append("relationship:" + identity)
+        graph["edges"].append({"id": identity, "source": source_id, "target": target_id,
+                               "dependencies": [dependency["id"]], "rationale": "Reviewed synthetic fixture binding.", "confidence": "high"})
+    dependency["targets"].sort()
+    document["relationship_graph"] = graph
+    document["evidence_dependencies"] = [dependency]
+    manifest_path.write_text(workflow.to_yaml(document))
+    command = ["python3", str(scripts / "reconcile.py"), f"--repo={repo}", "--output=json", "--quiet"]
+    sealed = run(command + ["--seal"])
+    results.check("[privacy-datamap] sealing records reviewed code dependencies and runtime topology", sealed.returncode == 0, sealed.stderr)
+    baseline_lock = lock_path.read_bytes()
+    baseline_manifest = manifest_path.read_bytes()
+    before = json.loads(run(command).stdout)
+    proposal_path = cache / "privacy-datamap.proposals.json"
+    proposals = json.loads(proposal_path.read_text())
+    proposals["store_investigation"]["rationale"] = "Completed analysis is retained on identical input."
+    proposal_path.write_text(json.dumps(proposals))
+    datamap_scan(repo)
+    after = json.loads(run(command).stdout)
+    results.check("[privacy-datamap] repeated scans preserve the comparison and completed proposal cache",
+                  before == after and json.loads(proposal_path.read_text()) == proposals)
+    results.check("[privacy-datamap] accepted unchanged evidence requires no investigation", not after["drift"] and not after["blocked"] and not after["agent_required"])
+    accepted_review = run(["python3", str(scripts / "review.py"), f"--repo={repo}", "--output=json"])
+    results.check("[privacy-datamap] unchanged accepted scans need neither fresh enrichment nor human review",
+                  accepted_review.returncode == 0 and json.loads(accepted_review.stdout)["status"] == "accepted", accepted_review.stderr or accepted_review.stdout)
+
+    # Schema citation movement, AST formatting and unrelated code do not alter observed meaning.
+    (repo / "db/schema.sql").write_text("\n\n" + SQL_FIXTURE)
+    (repo / "src/payload.py").write_text('# comment\n\ndef serialize( value ):\n    return { "account" : value }\n\ndef unrelated():\n    return 999\n')
+    (repo / "README.md").write_text("Unrelated documentation.\n")
+    moved_summary, moved_derived = datamap_scan(repo)
+    moved = json.loads(run(command).stdout)
+    results.check("[privacy-datamap] formatting, line movement, unrelated code and file counts do not reopen decisions",
+                  moved_summary["derived_digest"] == summary["derived_digest"] and not moved["drift"]
+                  and [row["path"] for row in moved["discovery_required"]] == ["src/payload.py"]
+                  and not moved["proposal_required"] and not moved["investigation_required"])
+    results.check("[privacy-datamap] moved evidence citations refresh mechanically",
+                  moved["dependency_changes"][0]["action"] == "refresh_evidence" and moved["counts"]["citation_only"] == 5)
+    reordered = json.loads(json.dumps(moved_derived))
+    reordered["datasets"].reverse()
+    for dataset in reordered["datasets"]:
+        dataset["collections"].reverse()
+        for collection in dataset["collections"]:
+            collection["fields"].reverse()
+    data = pathlib.Path(tmp) / "reordered-datamap.json"
+    data.write_text(json.dumps(reordered))
+    js = f'import {{digestOf}} from {json.dumps((scripts / "collect.mjs").as_uri())}; import {{readFileSync}} from "node:fs"; console.log(digestOf(JSON.parse(readFileSync({json.dumps(str(data))}, "utf8"))));'
+    results.check("[privacy-datamap] structural digest ignores enumeration order", run(["node", "--input-type=module", "-e", js]).stdout.strip() == summary["derived_digest"])
+    parsed_path = cache / "privacy-datamap.parsed.json"
+    valid = run(["python3", str(scripts / "validate_manifest.py"), str(manifest_path), f"--emit-parsed={parsed_path}", "--quiet"])
+    results.check("[privacy-datamap] unregistered changed code blocks export without reopening known field decisions", valid.returncode == 1)
+    (repo / "src/payload.py").write_text("# moved citation\n" + source)
+    datamap_scan(repo)
+    valid = run(["python3", str(scripts / "validate_manifest.py"), str(manifest_path), f"--emit-parsed={parsed_path}", "--quiet"])
+    results.check("[privacy-datamap] unchanged evidence validates before export", valid.returncode == 0, valid.stderr)
+    (repo / "src/payload.py").write_text(source.replace('"account"', '"external_account"'))
+    code_summary, _ = datamap_scan(repo)
+    changed = json.loads(run(command).stdout)
+    results.check("[privacy-datamap] processing changes are scoped investigations rather than confirmed privacy changes",
+                  not changed["drift"] and changed["blocked"] and changed["agent_required"]
+                  and changed["investigation_required"][0]["targets"] == dependency["targets"]
+                  and changed["investigation_required"][0]["previous"]["fingerprint"] == dependency["fingerprint"]
+                  and changed["investigation_required"][0]["current"]["fingerprint"] != dependency["fingerprint"])
+    results.check("[privacy-datamap] changed evidence cannot render an old parsed cache or seal unchanged decisions",
+                  code_summary["rendered"] is None and run(command + ["--seal"]).returncode == 1)
+    ci = run(["python3", str(ROOT / "scripts/ci_check.py"), "--piece=privacy-datamap", f"--repo={repo}", "--as-of=2026-09-08", "--output=json", "--quiet"])
+    findings = json.loads(ci.stdout)["findings"]
+    results.check("[privacy-datamap] CI blocks evidence investigations without labeling them schema drift",
+                  ci.returncode != 0 and any(row["kind"] == "invalid" for row in findings) and not any(row["kind"] == "drift" for row in findings), ci.stdout[:300])
+    results.check("[privacy-datamap] investigation never modifies accepted files", lock_path.read_bytes() == baseline_lock and manifest_path.read_bytes() == baseline_manifest)
+    # An explicit reviewed fixture update establishes the next baseline, not an agent proposal.
+    document["evidence_dependencies"][0]["fingerprint"] = workflow.dependencies.observe(repo, dependency)["fingerprint"]
+    manifest_path.write_text(workflow.to_yaml(document))
+    accepted = run(command + ["--seal"])
+    accepted_result = json.loads(run(command).stdout)
+    results.check("[privacy-datamap] accepting the reviewed fingerprint clears the next scan", accepted.returncode == 0 and not accepted_result["blocked"] and not accepted_result["drift"], accepted.stderr)
+    # Unique exact evidence continuity is a refresh; multiple possible destinations are not guessed.
+    path = repo / "src/payload.py"
+    path.rename(repo / "src/moved.py")
+    datamap_scan(repo)
+    renamed = json.loads(run(command).stdout)
+    candidate = load_datamap_yaml(cache / "privacy-datamap.candidate.yml")
+    results.check("[privacy-datamap] unique code moves preserve decisions and refresh the candidate path",
+                  not renamed["blocked"] and not renamed["drift"] and candidate["evidence_dependencies"][0]["path"] == "src/moved.py")
+    (repo / "src/duplicate.py").write_text((repo / "src/moved.py").read_text())
+    ambiguous = json.loads(run(command).stdout)
+    results.check("[privacy-datamap] ambiguous evidence moves require investigation", ambiguous["blocked"] and ambiguous["investigation_required"][0]["action"] == "identity_ambiguity")
+    (repo / "src/duplicate.py").unlink()
+    (repo / "src/moved.py").rename(path)
+    shape_js = f'import {{normalizeShape}} from {json.dumps((scripts / "collect.mjs").as_uri())}; console.log(JSON.stringify([normalizeShape(\'text ( ) . notNull ( )\'), normalizeShape(\'text().notNull()\'), normalizeShape(\'text().default("two  spaces")\'), normalizeShape(\'text().default("two spaces")\')]));'
+    shapes = json.loads(run(["node", "--input-type=module", "-e", shape_js]).stdout)
+    results.check("[privacy-datamap] shape normalization ignores punctuation spacing but preserves literal values",
+                  shapes[0] == shapes[1] and shapes[2] != shapes[3])
+    # JSON formatting is structural; changing a configuration value is observable.
+    config = repo / "settings.json"
+    config.write_text('{"provider": "archive", "training": false}')
+    config_spec = {"path": "settings.json", "method": "json", "targets": ["system:repository"]}
+    first = workflow.dependencies.observe(repo, config_spec)["fingerprint"]
+    config.write_text('{\n "training": false, "provider": "archive"\n}')
+    same = workflow.dependencies.observe(repo, config_spec)["fingerprint"]
+    config.write_text('{"provider": "archive", "training": true}')
+    results.check("[privacy-datamap] JSON key order and formatting are ignored but configuration values are tracked",
+                  first == same and same != workflow.dependencies.observe(repo, config_spec)["fingerprint"])
+    # Collector changes and taxonomy changes get their own maintenance classification.
+    lock = json.loads(lock_path.read_text())
+    lock["taxonomy_digest"] = "0" * 64
+    lock_path.write_text(json.dumps(lock))
+    taxonomy = json.loads(run(command).stdout)
+    results.check("[privacy-datamap] taxonomy changes are separate from confirmed repository drift",
+                  not taxonomy["drift"] and taxonomy["blocked"] and any(row["kind"] == "taxonomy_changed" for row in taxonomy["control_changes"]))
+    lock["taxonomy_digest"] = workflow.taxonomy_digest()
+    lock["dependencies"]["account-payload"]["normalizer"] = "python_ast:previous"
+    lock_path.write_text(json.dumps(lock))
+    upgrade = json.loads(run(command).stdout)
+    results.check("[privacy-datamap] evidence normalizer upgrades are maintenance rather than code investigations",
+                  not upgrade["drift"] and not upgrade["investigation_required"] and any(row["kind"] == "evidence_normalizer_changed" for row in upgrade["control_changes"]))
+    lock["dependencies"]["account-payload"]["normalizer"] = workflow.dependencies.observe(repo, dependency)["normalizer"]
+    lock_path.write_text(json.dumps(lock))
+    (repo / "db/schema.sql").write_text(SQL_FIXTURE.replace("weird_column  TEXT,", "weird_column  JSON,"))
+    stale_seal = run(command + ["--seal"])
+    structural = json.loads(run(command).stdout)
+    results.check("[privacy-datamap] seal recollects live schemas and real shape changes include before and after",
+                  stale_seal.returncode == 1 and structural["drift"] and any(row["action"] == "material_change" and row["previous"]["shape"] != row["current"]["shape"] for row in structural["actions"]))
+    (repo / "db/schema.sql").write_text(SQL_FIXTURE)
+    (repo / "db/oversized.sql").write_text(" " * 1_000_001)
+    _, oversized = datamap_scan(repo)
+    results.check("[privacy-datamap] oversized schema files are explicit coverage gaps",
+                  any(row["ref"] == "db/oversized.sql:1" for row in oversized["coverage"]["unparsed_candidates"]))
+    (repo / "db/oversized.sql").unlink()
+    (repo / "src/unsupported.ts").write_text('const records = new mongoose.Schema({ label: String });\n')
+    datamap_scan(repo)
+    coverage = json.loads(run(command).stdout)
+    results.check("[privacy-datamap] missing structural coverage blocks a clean result and cannot be sealed away",
+                  coverage["blocked"] and bool(coverage["coverage_gaps"]["unparsed_candidates"]) and run(command + ["--seal"]).returncode == 1)
+
+
 def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
     """The agent queue is selected by facts, not by a fresh model pass over the repository."""
     repo = write_files(pathlib.Path(tmp) / "privacy-reconcile", {"db/schema.sql": SQL_FIXTURE})
@@ -1807,8 +2696,7 @@ def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
         unchanged_payload["counts"],
     )
 
-    # Moving every declaration down a line changes citations and the global freshness digest, but
-    # not the meaning-bearing shape. No model should be asked to reconsider the fields.
+    # Citation movement preserves the structural digest and requires no model reinterpretation.
     (repo / "db" / "schema.sql").write_text("\n" + SQL_FIXTURE, encoding="utf-8")
     datamap_scan(repo)
     citation = run(
@@ -3331,6 +4219,13 @@ def main(argv):
             test_datamap_citations_point_at_the_real_line(results, tmp)
             test_datamap_surfaces_special_category_data(results, tmp)
             test_datamap_never_overwrites_a_reviewed_manifest(results, tmp)
+            test_discovery_acceptance_gate(results, tmp)
+            test_scoped_reconciliation_cli(results, tmp)
+            test_typescript_and_scoped_analysis(results, tmp)
+            test_datamap_candidate_collection(results, tmp)
+            test_datamap_connection_graph(results, tmp)
+            test_datamap_repeatable_evidence_baseline(results, tmp)
+            test_datamap_enrichment_gate(results, tmp)
             test_datamap_reconciles_only_the_privacy_delta(results, tmp)
             test_datamap_bootstrap_ignores_invalid_manifest_baseline(results, tmp)
             test_datamap_compacts_non_personal_review_state(results, tmp)

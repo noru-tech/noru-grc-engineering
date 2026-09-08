@@ -25,7 +25,7 @@ arriving next week, and it cannot see the line of code that put them there.
 /privacy-datamap:push   land it, once, idempotently                 (writes — needs confirmation)
 ```
 
-Always in that order.
+Scan includes mandatory agent enrichment. Diff and push each require a separate user request.
 
 ## Structure is derived, meaning is judged
 
@@ -51,6 +51,18 @@ Everything else is a judgement, and the collector marks it `needs_review: true` 
 
 **A manifest with any `needs_review: true` cannot be pushed.** That is the mechanism. Your job is to
 help the user resolve those flags, not to clear them so the push works.
+
+## Trace connection bindings
+
+Use the framework-independent model `runtime → client → connection → datastore`, with
+`client → schema/payload`. Follow actual construction and configuration through wrappers; directory
+placement and schema similarity cannot establish datastore identity. Keep distinct connections
+separate when their destination is unknown. Read the scan command's “Connection relationships”
+and the README's “Connection relationship contract” when proposing or updating these bindings.
+The collector's directory fallback is provisional; automatic runtime client tracing is not yet
+implemented. Complete the wrapper/configuration investigation, then use `--candidate` collection,
+reconciliation and review to show the proposed mapping's actual stores and fields before acceptance.
+Finish the preview queue's enrichment and resolve discovered boundary errors before privacy review.
 
 ## Reconcile before you reason
 
@@ -108,6 +120,70 @@ When you resolve one, read `references/classification-guide.md` and use the surr
 the table's name, the other columns, what the service does. If you genuinely cannot tell, say so and
 ask. A confidently wrong data category is worse than a gap, because the gap gets reviewed and the
 wrong answer gets signed.
+
+## Compare observations, not new interpretations
+
+The same repository state and accepted baseline must yield the same structural comparison and
+proposal queue. Keep accepted meaning when evidence is unchanged; refresh moved citations
+mechanically. Register the relevant service, serialization, configuration and transfer code as
+`evidence_dependencies` in the proposed manifest, then seal their fingerprints only after acceptance.
+Follow `commands/scan.md` for the offline fingerprint helper, supported TypeScript/Python selectors,
+and proposal-local dependency targets. Preserve unaffected unaccepted proposals, refresh moved
+citations, and reanalyse only targets marked by `evidence_state`. Complete `discovery_required`
+separately: dependency tracking must never hide a new store, client or processing path.
+
+A changed code fingerprint triggers an investigation of its declared targets, not an automatic
+privacy reclassification. Inspect whether the change affects meaning, propose retain/amend/unresolved,
+and preserve the previous accepted decision until reviewed. Track imported helpers and configuration
+explicitly. Unregistered code and unsupported semantic normalization remain monitoring limitations
+that must be reported; never describe a structural-only baseline as complete processing coverage.
+
+Separate structural changes, evidence investigations, coverage gaps and baseline/tooling maintenance.
+Formatting of supported Python/JSON evidence and citation-only moves must not reopen decisions.
+For other languages, text differences are conservative investigation signals. Repeated scans preserve
+completed proposal work only while its source snapshot, baseline and taxonomy binding match.
+
+## Keep the review focused on meaningful decisions
+
+The core scan outputs are a concise data map (`privacy-datamap.map.md`), a human decision queue
+(`privacy-datamap.review.md`), and a full evidence record (`privacy-datamap.evidence.json`), all in
+the cache. Follow the output contracts and `commands/scan.md`; do not recreate ad hoc field-by-field
+reports. The map summarizes stores, categories, subjects, distinct processing purposes and flows.
+The queue asks about proposed changes, actual ambiguities and human acceptance. Evidence preserves
+every observed field and its citations, reasoning, confidence or carried decision state.
+
+Group the review by explicit `decision_id`, not identical prose or field names. Give each decision
+a single-line `decision_summary` (at most 240 characters); the renderer keeps full rationale in
+evidence. Fields can share one decision while retaining different field-level reasoning. Shared
+`reasoning_groups` are an evidence convenience, not the identity of a human decision.
+
+Collapse non-personal technical fields into coverage counts and collection acceptance. Keep
+authentication, training, billing and provider sharing separate when evidenced. Do not require a
+question for an evidence-backed proposal. Ask only when a missing fact changes a privacy decision;
+state the unknown, the answer needed and the `decision_impact`. Acceptance and the accountable
+owner are requested once for the affected scope, independently of any uncertainty.
+
+Fix incorrect datastore boundaries, collection identities and relationships before privacy review.
+Record unresolved structural errors explicitly and rerun collection/reconciliation after corrections.
+Do not ask a human to approve a structural mistake as a privacy judgment. A blocked review still
+preserves independent analysis and identifies the missing evidence or capability.
+
+## Scan completion
+
+Follow `commands/scan.md` through enrichment, not just collection and reconciliation. Investigate
+all queued fields, processing purposes, subjects, system-to-datastore access, and persistent stores
+outside supported schemas. Populate the separate proposal cache with citations, rationale,
+confidence and explicit unresolved questions, then run `scripts/review.py --repo=<repo> --output=json`.
+Use its generated review to present proposed meaning and outstanding questions by datastore and
+collection. Deterministic checks establish completeness and valid taxonomy values; the agent still
+has to assess whether the evidence supports each proposal.
+
+Report `structure collected` after extraction and reconciliation, `enrichment incomplete` while
+required analysis remains, and `ready for human review` only after the enrichment gate passes with
+coverage gaps visible. Report `accepted` only after human decisions are recorded and the manifest
+validates. A blocked scan names missing evidence or capability and completes independent analysis;
+it must not silently stop at the skeleton. Never invent legal basis, ownership, sign-off or approval.
+Fides export remains limited to an accepted, valid manifest; diff and publication are separate tasks.
 
 ## What must never happen
 

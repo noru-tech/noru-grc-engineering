@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/privacy-datamap-review.schema.json",
+  "title": "Privacy scan data map, review queue and evidence record",
+  "description": "Cache-only review outputs. Proposed meaning never constitutes acceptance. Markdown views render data_map and review_queue; the evidence JSON preserves all three.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "status",
+    "observation_digest",
+    "data_map",
+    "review_queue",
+    "evidence_record",
+    "collection_mode"
+  ],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "enrichment incomplete",
+        "ready for human review",
+        "accepted"
+      ]
+    },
+    "observation_digest": {
+      "type": "string"
+    },
+    "data_map": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stores",
+        "processing_activities"
+      ],
+      "properties": {
+        "stores": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "collections",
+              "data_categories",
+              "field_count"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "collections": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "data_categories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "field_count": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "processing_activities": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "monitoring_scope": {
+          "type": "object"
+        },
+        "connection_questions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "relationship_proposal": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "review_queue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "structural_blockers",
+        "analysis_errors",
+        "changes",
+        "collection_decisions",
+        "field_groups",
+        "technical_coverage",
+        "processing_decisions"
+      ],
+      "properties": {
+        "structural_blockers": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "analysis_errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "collection_decisions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "field_groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "decision_id",
+              "collections",
+              "summary",
+              "proposal_kinds",
+              "data_categories",
+              "unresolved_question",
+              "resolution_needed",
+              "decision_impact",
+              "field_ids"
+            ]
+          }
+        },
+        "technical_coverage": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "processing_decisions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "dependency_decisions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "control_changes": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "system_changes": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "evidence_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fields",
+        "reasoning_groups",
+        "agent_analysis",
+        "candidate_manifest",
+        "coverage",
+        "special_category_refs"
+      ],
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "reasoning_groups": {
+          "type": "object"
+        },
+        "agent_analysis": {
+          "type": "object"
+        },
+        "candidate_manifest": {
+          "type": "object"
+        },
+        "coverage": {
+          "type": "object"
+        },
+        "special_category_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reconciliation": {
+          "type": "object"
+        },
+        "relationship_mapping": {
+          "type": "object"
+        }
+      }
+    },
+    "collection_mode": {
+      "enum": [
+        "manifest",
+        "candidate"
+      ],
+      "description": "Whether reviewed observations use manifest bindings or a separately validated proposed graph."
+    }
+  }
+}

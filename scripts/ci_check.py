@@ -488,6 +488,15 @@ def step_scan(report, piece_dir, decl, repo, manifest_path, on_missing_prereq):
             report.step("scan", "error", detail="reconciler did not return a JSON object")
             return "tooling"
 
+    if reconciliation is not None:
+        investigations = reconciliation.get("investigation_required") or []
+        controls = reconciliation.get("control_changes") or []
+        if investigations or controls:
+            report.find("invalid", "decision evidence or baseline metadata needs review; this is not a confirmed privacy change",
+                        manifest=decl["artifact"], explanation={"investigations": investigations, "control_changes": controls})
+            report.step("scan", "fail", derived_digest=(summary or {}).get("derived_digest"))
+            return "finding"
+
     if (
         completed.returncode == 0
         and reconciliation is not None
