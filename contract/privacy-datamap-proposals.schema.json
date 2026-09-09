@@ -473,6 +473,10 @@
         },
         "decision_impact": {
           "type": "string"
+        },
+        "finding_id": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

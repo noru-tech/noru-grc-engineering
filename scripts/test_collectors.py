@@ -2010,6 +2010,20 @@ def test_discovery_acceptance_gate(results, tmp):
     path.write_text(json.dumps(document))
     results.check("[privacy-datamap] discovery acceptance rejects unsupported answers", run(command + ["--seal"]).returncode == 1 and lock.read_bytes() == before)
     answer["refs"] = ["src/labels.ts:1"]
+    answer.update(outcome="unresolved", unresolved_question="Who receives this data?",
+                  resolution_needed="Identify the recipient", decision_impact="Sharing is unresolved")
+    path.write_text(json.dumps(document))
+    results.check("[privacy-datamap] unresolved discovery is review-complete but cannot seal or clear acceptance",
+                  not workflow.analysis_cache.refresh_discovery(document, pending["discovery_sources"])
+                  and run(command + ["--seal"]).returncode == 1 and lock.read_bytes() == before
+                  and not json.loads(run(command).stdout)["accepted_current"])
+    answer["outcome"] = "analysed"
+    path.write_text(json.dumps(document))
+    results.check("[privacy-datamap] relabeling discovery cannot conceal an outstanding question",
+                  run(command + ["--seal"]).returncode == 1 and lock.read_bytes() == before)
+    answer["outcome"] = "no_new_scope"
+    for key in ("unresolved_question", "resolution_needed", "decision_impact"):
+        del answer[key]
     path.write_text(json.dumps(document))
     sealed = run(command + ["--seal"])
     current = json.loads(run(command).stdout)
@@ -2089,6 +2103,13 @@ def test_typescript_and_scoped_analysis(results, tmp):
     def observe(text, selector="serialize"):
         (repo / "src/payload.ts").write_text(text)
         return dependencies.observe(repo, {"path": "src/payload.ts", "method": "typescript_ast", "selector": selector, "targets": ["field"]})
+    for terminator in ("\n", "\r\n", "\r", "\u2028", "\u2029"):
+        continued = 'function serialize() { return "a' + chr(92) + terminator + 'b"; }'
+        plain = 'function serialize() { return "ab"; }'
+        escaped = 'function serialize() { return "a' + chr(92) + 'nb"; }'
+        results.check("[privacy-datamap] string continuation preserves runtime value " + repr(terminator),
+                      observe(continued)["fingerprint"] == observe(plain)["fingerprint"]
+                      and observe(continued)["fingerprint"] != observe(escaped)["fingerprint"])
     initial = observe(source)
     formatted = 'import {format} from \'./helper\'\n// shifted citation\n\nexport function serialize( user:User ):Payload {\n return {\n email:format(user.email),\n }\n}\nexport function unrelated(){return 999}\n'
     same = observe(formatted)
@@ -2202,6 +2223,45 @@ def test_typescript_and_scoped_analysis(results, tmp):
     results.check("[privacy-datamap] ambiguous dependency moves remain unresolved on repeated reconciliation",
                   any(i["action"] == "identity_ambiguity" for i in document["evidence_state"]["db/accounts/email"]["issues"])
                   and bool(analysis.refresh(document, repo)))
+
+
+
+def test_store_finding_evidence(results, tmp):
+    sys.path.insert(0, str(PRIVACY_DATAMAP / "scripts"))
+    import analysis_cache as analysis
+    import dependencies
+    repo = write_files(pathlib.Path(tmp) / "store-evidence", {
+        "scope.md": "Inspected persistence.\n",
+        "payload.ts": "export function payload() { return {email: user.email}; }\n",
+        "other.md": "Independent finding.\n"})
+    document = {"store_investigation": {"refs": ["scope.md:1"], "findings": [
+        {"finding_id": "archive", "store": "archive", "refs": ["payload.ts:1"]},
+        {"finding_id": "other", "store": "other", "refs": ["other.md:1"]}]}}
+    spec = {"id": "payload", "path": "payload.ts", "method": "typescript_ast", "selector": "payload", "targets": ["store_finding:archive"]}
+    spec["fingerprint"] = dependencies.observe(repo, spec)["fingerprint"]
+    document["evidence_dependencies"] = [spec]
+    assert not analysis.refresh(document, repo)
+    document["store_investigation"]["findings"].reverse()
+    (repo / "payload.ts").write_text("// shifted\nexport function payload() { return {email: user.email}; }\n")
+    results.check("[privacy-datamap] store finding citations refresh under stable identities after reordering",
+                  not analysis.refresh(document, repo) and document["store_investigation"]["findings"][1]["refs"] == ["payload.ts:2"])
+    (repo / "payload.ts").write_text("export function payload() { return {email: user.email, phone: user.phone}; }\n")
+    analysis.refresh(document, repo)
+    results.check("[privacy-datamap] changed child evidence investigates only its store finding",
+                  document["evidence_state"]["store_finding:archive"]["status"] == "investigate"
+                  and document["evidence_state"]["store_finding:other"]["status"] == "current")
+    (repo / "payload.ts").unlink()
+    analysis.refresh(document, repo)
+    results.check("[privacy-datamap] missing child evidence stays unresolved on repeated reconciliation",
+                  bool(analysis.refresh(document, repo)) and document["evidence_state"]["store_finding:archive"]["status"] == "unresolved")
+    document["store_investigation"]["findings"].append(dict(document["store_investigation"]["findings"][0]))
+    results.check("[privacy-datamap] duplicate store finding identities cannot overwrite evidence state",
+                  any("Duplicate" in error for error in analysis.refresh(document, repo)))
+    legacy = {"store_investigation": {"refs": ["scope.md:1"], "findings": [{"store": "other", "refs": ["other.md:1"]}]}}
+    assert not analysis.refresh(legacy, repo)
+    (repo / "other.md").write_text("Changed cited evidence.\n")
+    results.check("[privacy-datamap] legacy child citations receive independent conservative evidence tracking",
+                  bool(analysis.refresh(legacy, repo)) and legacy["evidence_state"]["store_finding:other"]["status"] == "investigate")
 
 
 def test_datamap_candidate_collection(results, tmp):
@@ -4222,6 +4282,7 @@ def main(argv):
             test_discovery_acceptance_gate(results, tmp)
             test_scoped_reconciliation_cli(results, tmp)
             test_typescript_and_scoped_analysis(results, tmp)
+            test_store_finding_evidence(results, tmp)
             test_datamap_candidate_collection(results, tmp)
             test_datamap_connection_graph(results, tmp)
             test_datamap_repeatable_evidence_baseline(results, tmp)

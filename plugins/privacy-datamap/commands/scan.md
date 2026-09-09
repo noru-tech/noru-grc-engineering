@@ -339,7 +339,10 @@ Unaccepted proposals use a separate top-level `evidence_dependencies` registry i
 cache. Generate specs with `dependencies.py`; include every helper, import binding and configuration
 that supports the analysis. Targets are field entity IDs, `group:<reasoning_group>`,
 `system:<system_key>` (runtime boundary), `activity:<system_key>/<activity_id>`, or
-`relationship:<edge_id>`. Relationship proposals can retain their own dependency registry.
+`relationship:<edge_id>`, or `store_finding:<finding_id>`. Give supplemental-store findings stable,
+unique `finding_id` values; legacy findings use their store name as the identity. Their evidence
+and citation refresh are tracked independently, including findings that only supply file citations.
+Relationship proposals can retain their own dependency registry.
 
 For example, use `--method=typescript_ast --selector=serialize --target=<field_entity_id>` for a
 serializer and register `import:format` plus the helper's own declaration as separate specs. The
@@ -369,3 +372,5 @@ An unresolved outcome also needs an actionable question, resolution and decision
 and enrich actual new stores/clients/processing paths rather than merely acknowledging the queue.
 The accepted lock records discovery scope. Unreviewed discovery changes prevent sealing and export;
 only a reviewed baseline can establish that new code needs no privacy-map change.
+An explicit unresolved discovery answer completes the review queue but still blocks acceptance.
+Resolve its question and remove the outstanding question/impact fields before sealing.

@@ -102,7 +102,7 @@ def observe(repo, spec):
         raise ValueError("unsupported evidence fingerprint method")
     return {"fingerprint": digest({"method": method, "selector": spec.get("selector", ""), "value": value}),
             "path": spec["path"], "refs": [f"{spec['path']}:{line}"], "method": method,
-            "normalizer": f"python_ast:{sys.version_info.major}.{sys.version_info.minor}" if method == "python_ast" else f"{method}:v1",
+            "normalizer": f"python_ast:{sys.version_info.major}.{sys.version_info.minor}" if method == "python_ast" else "typescript_ast:v2" if method == "typescript_ast" else f"{method}:v1",
             "selector": spec.get("selector", ""), "targets": sorted(spec["targets"])}
 
 

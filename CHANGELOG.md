@@ -13,6 +13,10 @@ one version number; the release workflow fails if they disagree.
 
 ### Changed
 
+- Keep unresolved discovery answers reviewable while blocking acceptance, including answers relabeled
+  as analysed with outstanding questions. Track supplemental-store finding evidence independently.
+  Correct TypeScript escaped-line-continuation fingerprints and advance the normalizer to v2.
+
 - Add a stdlib TypeScript syntax fingerprint with declaration selectors and explicit unsupported-
   syntax gaps. Proposal evidence now reconciles per field, activity and relationship; formatting,
   unrelated documentation and citation movement preserve supported analysis. Broad discovery still

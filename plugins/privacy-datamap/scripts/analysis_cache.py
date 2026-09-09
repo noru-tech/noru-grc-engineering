@@ -101,6 +101,8 @@ def rows(document):
             yield "relationship:" + edge["id"], edge
     if isinstance(document.get("store_investigation"), dict):
         yield "store_investigation", document["store_investigation"]
+        for finding in document["store_investigation"].get("findings", []):
+            yield "store_finding:" + finding.get("finding_id", finding.get("store", "")), finding
 
 
 def merge(prior, fresh):
@@ -136,7 +138,10 @@ def refresh(document, repo):
     """Refresh evidence independently for each analysis target; never alter proposed meanings."""
     prior = document.get("evidence_state", {})
     registry = list(document.get("evidence_dependencies", [])) + (document.get("relationship_proposal") or {}).get("evidence_dependencies", [])
-    entries = dict(rows(document))
+    targets = list(rows(document))
+    entries = dict(targets)
+    if len(entries) != len(targets):
+        return ["Duplicate evidence targets; give store findings distinct, stable finding_id values"]
     allowed = set(entries) | set(document.get("retired_analysis", {}))
     errors = dependencies.validate_specs(registry, allowed)
     if errors:
@@ -199,7 +204,10 @@ def refresh(document, repo):
     return [f"{identity}: {state['status']} — {issue['reason']}" for identity, state in states.items() for issue in state["issues"]]
 
 
-def discovery_answer_valid(answer, change, repo=None):
+def discovery_answer_valid(answer, change, repo=None, *, for_acceptance=False):
+    if for_acceptance and (answer.get("outcome") == "unresolved" or any(
+            answer.get(key) for key in ("unresolved_question", "business_context_question", "resolution_needed", "decision_impact"))):
+        return False
     if answer.get("observation_digest") != dependencies.digest(change) or answer.get("outcome") not in {"no_new_scope", "analysed", "unresolved"}:
         return False
     summary = answer.get("decision_summary", "")
@@ -235,7 +243,7 @@ def check_accepted_discovery(repo, specs, allow_review=False):
         proposal_path = repo / ".noru" / ".cache" / "privacy-datamap.proposals.json"
         document = json.loads(proposal_path.read_text()) if proposal_path.is_file() else {}
         answers = {row.get("path"): row for row in document.get("discovery_proposals", [])}
-        changes = [change for change in changes if not discovery_answer_valid(answers.get(change["path"], {}), change, repo)]
+        changes = [change for change in changes if not discovery_answer_valid(answers.get(change["path"], {}), change, repo, for_acceptance=True)]
     return changes
 
 

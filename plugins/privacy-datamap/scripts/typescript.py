@@ -42,6 +42,13 @@ def lex(text):
                     if i >= len(text):
                         raise ValueError("unterminated string escape")
                     escape = text[i]
+                    if escape in "\r\n\u2028\u2029":
+                        # JavaScript removes escaped physical line terminators from the value.
+                        if escape == "\r" and i + 1 < len(text) and text[i + 1] == "\n":
+                            i += 1
+                        line += 1
+                        i += 1
+                        continue
                     if escape in "uUx":
                         raise ValueError("hex/unicode string escapes are outside the supported TypeScript grammar")
                     value += {"n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f", "v": "\v", "0": "\0"}.get(escape, escape)
