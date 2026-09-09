@@ -9,6 +9,7 @@ Usage:
     python3 scripts/contract_test.py [--piece=<name>] [--output=json] [--quiet]
 Exit codes: 0 = every piece satisfies the contract, 1 = at least one failure, 2 = usage / setup error.
 """
+import ast
 import json
 import os
 import pathlib
@@ -34,7 +35,7 @@ NETWORK_TOKENS = [
 
 # Every module a validator is allowed to import. Requirement 3: Python standard library only.
 ALLOWED_PY_IMPORTS = {
-    "argparse", "base64", "collections", "csv", "datetime", "difflib", "functools", "hashlib",
+    "argparse", "ast", "base64", "collections", "copy", "csv", "datetime", "difflib", "functools", "hashlib",
     "io", "itertools", "json", "math", "os", "pathlib", "re", "shutil", "string", "subprocess",
     "sys", "tempfile", "textwrap", "time", "typing", "unicodedata", "urllib", "uuid",
     # yaml is imported inside a try/except ImportError and is never required.
@@ -270,6 +271,40 @@ def check_item_2(piece, decl, fail, workdir):
                 )
 
 
+def check_python_imports(entrypoint, piece):
+    """Audit bundled helpers transitively without importing or executing them."""
+    errors = []
+    visited = set()
+
+    def walk(path):
+        path = path.resolve()
+        if path in visited:
+            return
+        visited.add(path)
+        if not path.is_relative_to(piece.resolve()):
+            errors.append(f"helper escapes the plugin: {path.name}")
+            return
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    errors.append(f"{path.name}: relative imports are not supported by the standalone validator contract")
+                    continue
+                modules = [node.module or ""]
+            else:
+                continue
+            for module in modules:
+                name = module.split(".")[0]
+                local = path.parent / (module.replace(".", "/") + ".py")
+                if local.is_file():
+                    walk(local)
+                elif name not in ALLOWED_PY_IMPORTS:
+                    errors.append(f"{path.name} imports '{module}', which is neither an audited bundled helper nor an allowed standard-library module")
+    walk(entrypoint)
+    return errors
+
+
 def check_item_3(piece, decl, fail):
     """Stdlib-only validator with did-you-mean hints and 0/1/2 exit codes, proven on fixtures."""
     validator = piece / decl["validator"]["entrypoint"]
@@ -278,13 +313,8 @@ def check_item_3(piece, decl, fail):
         return
 
     source = validator.read_text(encoding="utf-8")
-    for match in re.finditer(r"^\s*(?:import|from)\s+([A-Za-z_][\w.]*)", source, re.M):
-        module = match.group(1).split(".")[0]
-        if module not in ALLOWED_PY_IMPORTS:
-            fail.add(
-                piece.name, 3,
-                f"validator imports '{module}', which is not in the allowed standard-library set",
-            )
+    for error in check_python_imports(validator, piece):
+        fail.add(piece.name, 3, error)
     if "difflib" not in source or "get_close_matches" not in source:
         fail.add(piece.name, 3, "validator has no difflib 'did you mean ...?' hint")
     for vocab in decl["validator"].get("vocabulary", []):

@@ -5,7 +5,7 @@
 // scripts/contract_test.py runs this twice and diffs the result, so a timestamp or an unsorted
 // directory listing anywhere in here will fail the build.
 //
-// Usage: node collect.mjs [--repo=<path>] [--check] [--output=json|text] [--quiet]
+// Usage: node collect.mjs [--repo=<path>] [--check | --candidate] [--output=json|text] [--quiet]
 // Exit codes: 0 ok, 1 drift against the manifest (--check), 2 usage/IO error.
 
 import { createHash } from "node:crypto";
@@ -40,19 +40,21 @@ const SKIP_DIRS = new Set([
   "vendor", "target", ".venv", "venv", "__pycache__", ".noru",
 ]);
 const USAGE =
-  "usage: collect.mjs [--repo=<path>] [--check] [--output=json|text] [--quiet]\n";
+  "usage: collect.mjs [--repo=<path>] [--check | --candidate] [--output=json|text] [--quiet]\n";
 
 function parseArgs(argv) {
-  const opts = { repo: process.cwd(), check: false, json: false, quiet: false };
+  const opts = { repo: process.cwd(), check: false, candidate: false, json: false, quiet: false };
   for (const arg of argv) {
     if (arg.startsWith("--repo=")) opts.repo = arg.slice(7);
     else if (arg === "--check") opts.check = true;
+    else if (arg === "--candidate") opts.candidate = true;
     else if (arg === "--output=json") opts.json = true;
     else if (arg === "--output=text") opts.json = false;
     else if (arg === "--quiet") opts.quiet = true;
     else if (arg === "-h" || arg === "--help") return { help: true };
     else return { error: `unknown option '${arg}'` };
   }
+  if (opts.check && opts.candidate) return { error: "--candidate cannot be used with --check" };
   return opts;
 }
 
@@ -190,10 +192,11 @@ export function repoProvenance(repo) {
 // and the collector will stand behind it; what `email` means is a judgement and lives below.
 
 export function normalizeShape(value) {
-  return String(value ?? "")
-    .trim()
-    .replace(/,$/, "")
-    .replace(/\s+/g, " ");
+  // Preserve literal contents: spaces in enum/default values are data, not formatting.
+  const input = String(value ?? "").trim().replace(/,$/, "");
+  const pieces = input.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|[^"'`]+/g) ?? [];
+  return pieces.map((piece) => /^["'`]/.test(piece) ? piece : piece.replace(/\s+/g, " ")
+    .replace(/\s*([()[\]{},.:])\s*/g, "$1")).join("").trim();
 }
 
 export function normalizeSqlShape(value) {
@@ -1476,7 +1479,7 @@ function assertUniqueKeys(kind, rows) {
   }
 }
 
-export function collectFacts(repo) {
+export function collectFacts(repo, { candidate = false } = {}) {
   const listing = listFiles(repo);
   const supplementalStores = loadSupplementalDatastores(
     repo, listing.files, listing.enumeratedBy,
@@ -1485,10 +1488,19 @@ export function collectFacts(repo) {
     ? [...listing.files, SUPPLEMENT_PATH].sort(BY_PATH)
     : listing.files;
   const enumeratedBy = listing.enumeratedBy;
+  const discovery = JSON.parse(execFileSync("python3", [join(HERE, "dependencies.py"), "--discover", `--repo=${repo}`],
+    { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
   const drizzleTopology = discoverDrizzleTopology(repo, files);
+  const manifestPath = join(repo, ".noru", "privacy-datamap.yml");
+  const relationships = candidate
+    ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), "--candidate", repo], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }))
+    : existsSync(manifestPath)
+    ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), manifestPath], { encoding: "utf8" }))
+    : { bindings: {}, flows: {}, questions: [], errors: [] };
   const observations = [];
   const parsedFiles = new Set();
   const parsedByKind = {};
+  const sourceReadGaps = [];
   for (const configPath of drizzleTopology.parsedConfigs) parsedFiles.add(configPath);
   if (drizzleTopology.parsedConfigs.length > 0) {
     parsedByKind.drizzle_config = drizzleTopology.parsedConfigs.length;
@@ -1497,7 +1509,10 @@ export function collectFacts(repo) {
     const parser = PARSERS.find((candidate) => candidate.match(rel));
     if (!parser) continue;
     const text = safeText(repo, rel);
-    if (text === null) continue;
+    if (text === null) {
+      sourceReadGaps.push({ format: parser.kind, ref: `${rel}:1`, reason: "Source is unreadable or exceeds the collector size limit." });
+      continue;
+    }
     const parsed = parser.parse(text);
     const topology = drizzleTopology.byPath.get(rel);
     const migrationOnly = parser.kind === "sql_ddl"
@@ -1508,9 +1523,25 @@ export function collectFacts(repo) {
     if (parsed.length === 0 && !hasMigrationDdl) continue;
     parsedFiles.add(rel);
     parsedByKind[parser.kind] = (parsedByKind[parser.kind] ?? 0) + 1;
-    observations.push({
+    let bindings = relationships.bindings[rel];
+    if (!bindings && topology?.role === "migration") {
+      const configPath = topology.ref.slice(0, topology.ref.lastIndexOf(":"));
+      const canonicalPaths = [...drizzleTopology.byPath].filter(([, claim]) =>
+        claim.role === "canonical" && claim.ref.slice(0, claim.ref.lastIndexOf(":")) === configPath).map(([path]) => path);
+      const mapped = canonicalPaths.map((path) => relationships.bindings[path]);
+      if (mapped.some(Boolean)) {
+        if (!mapped.every((value) => value && JSON.stringify(value) === JSON.stringify(mapped[0]))) {
+          sourceReadGaps.push({ format: "relationship_migrations", ref: topology.ref,
+            reason: "Linked schemas have different or incomplete connection bindings; resolve migration ownership." });
+          continue;
+        }
+        bindings = mapped[0];
+      }
+    }
+    for (const boundary of bindings ?? [topology?.boundary ?? datastoreBoundary(rel)]) observations.push({
       path: rel,
-      boundary: topology?.boundary ?? datastoreBoundary(rel),
+      boundary,
+      ...(bindings ? { relationship_bound: true } : {}),
       kind: parser.kind,
       role: topology?.role === "canonical" || !migrationOnly ? "canonical" : "migration",
       collections: cloneCollections(parsed, rel),
@@ -1521,8 +1552,9 @@ export function collectFacts(repo) {
 
   const groups = new Map();
   for (const observation of observations) {
-    if (!groups.has(observation.boundary)) groups.set(observation.boundary, []);
-    groups.get(observation.boundary).push(observation);
+    const identity = `${observation.relationship_bound ? "binding" : "directory"}:${observation.boundary}`;
+    if (!groups.has(identity)) groups.set(identity, []);
+    groups.get(identity).push(observation);
   }
   const datasets = [];
   const migrationGaps = [];
@@ -1532,7 +1564,8 @@ export function collectFacts(repo) {
   let classified = 0;
   let needsReview = 0;
   const specialRefs = [];
-  for (const [boundary, group] of [...groups.entries()].sort(([a], [b]) => BY_PATH(a, b))) {
+  for (const [, group] of [...groups.entries()].sort(([a], [b]) => BY_PATH(a, b))) {
+    const boundary = group[0].boundary;
     const canonical = group.filter((item) => item.role === "canonical");
     const migration = group.filter((item) => item.role === "migration");
     const result = canonical.length > 0 ? mergeCanonical(canonical) : replayMigrations(migration);
@@ -1551,7 +1584,8 @@ export function collectFacts(repo) {
     }
     if (result.collections.length === 0) continue;
     const sourceKinds = [...new Set(group.map((item) => item.kind))].sort(BY_PATH);
-    const normalized = normalizedDataset(boundary, result.collections, sourceKinds);
+    const normalized = normalizedDataset(boundary, result.collections, sourceKinds,
+      group.some((item) => item.relationship_bound) ? boundary : null);
     datasets.push(normalized.dataset);
     fieldCount += normalized.counts.fieldCount;
     classified += normalized.counts.classified;
@@ -1620,7 +1654,9 @@ export function collectFacts(repo) {
       runtime_evidence: evidence,
       dataset_references: datasets
         .filter((dataset) =>
-          root === ""
+          Object.hasOwn(relationships.flows, dataset.fides_key)
+          ? relationships.flows[dataset.fides_key].includes(systemKey)
+          : root === ""
           || dataset.name === root
           || dataset.name.startsWith(`${root}/`)
           || (dataset.system_references ?? []).includes(systemKey)
@@ -1638,6 +1674,8 @@ export function collectFacts(repo) {
     systems,
     observations,
     datastore_links: drizzleTopology.links,
+    relationship_mapping: relationships,
+    discovery,
     migration_operations: migrationOperations,
     counts: {
       datasets: datasets.length,
@@ -1665,6 +1703,14 @@ export function collectFacts(repo) {
       unparsed_candidates: [...new Map([
         ...findUnparsedCandidates(repo, files, parsedFiles),
         ...drizzleTopology.gaps,
+        ...sourceReadGaps,
+        ...relationships.errors.map((reason) => ({ format: "relationship_graph", ref: ".noru/privacy-datamap.yml:1", reason })),
+        ...Object.keys(relationships.bindings).filter((path) => !observations.some((o) => o.path === path)
+          && !relationships.bindings[path].every((key) => supplementalStores.some((store) => store.fides_key === key
+            && store.collections.some((collection) => collection.fields.some((field) => field.refs.some((ref) => ref.slice(0, ref.lastIndexOf(":")) === path))))))
+          .map((path) => ({ format: "relationship_payload", ref: `${path}:1`, reason: "Bound schema/payload has no supported extracted structure; supply typed supplemental evidence." })),
+        ...Object.values(relationships.flows).flat().filter((key) => !systems.some((s) => s.fides_key === key))
+          .map((key) => ({ format: "relationship_runtime", ref: ".noru/privacy-datamap.yml:1", reason: `Runtime '${key}' is not discovered; supply runtime evidence.` })),
       ].map((item) => [`${item.format}\0${item.ref}`, item])).values()].sort((a, b) =>
         a.ref === b.ref ? BY_PATH(a.format, b.format) : BY_PATH(a.ref, b.ref)
       ),
@@ -1713,7 +1759,7 @@ export function reviewCollectionFields(fields) {
   });
 }
 
-export function digestOf(derived) {
+export function previousDigestOf(derived) {
   // `generated_by` is deliberately NOT hashed. This digest answers one question — has the
   // repository changed since the manifest was written? — and the version of the tool that read it
   // is not a fact about the repository.
@@ -1735,6 +1781,23 @@ export function digestOf(derived) {
   return createHash("sha256").update(JSON.stringify(facts, null, 0)).digest("hex");
 }
 
+/** Structural identity excludes citations, classification lookups and discovery counters. */
+export function digestOf(derived) {
+  return canonicalDigest({
+    datasets: (derived.datasets ?? []).map((dataset) => ({
+      key: dataset.fides_key,
+      collections: (dataset.collections ?? []).map((collection) => ({
+        name: collection.name,
+        fields: (collection.fields ?? []).map((field) => ({ name: field.name, shape: field.shape ?? "" }))
+          .sort((a, b) => BY_PATH(a.name, b.name)),
+      })).sort((a, b) => BY_PATH(a.name, b.name)),
+    })).sort((a, b) => BY_PATH(a.key, b.key)),
+    systems: (derived.systems ?? []).map((system) => ({
+      key: system.fides_key, datasets: [...(system.dataset_references ?? [])].sort(BY_PATH),
+    })).sort((a, b) => BY_PATH(a.key, b.key)),
+  });
+}
+
 /**
  * The digest emitted before per-entity reconciliation existed. It is retained only as a migration
  * bridge: an already reviewed 0.5.x manifest can prove that it describes the current repository
@@ -1753,7 +1816,7 @@ export function legacyDigestOf(derived) {
       }
     }
   }
-  return digestOf(legacy);
+  return previousDigestOf(legacy);
 }
 
 const PLAIN_SAFE = /^[A-Za-z0-9_][A-Za-z0-9 _./@-]*$/;
@@ -1923,7 +1986,7 @@ function main(argv) {
   let digest;
   let legacyDigest;
   try {
-    derived = collectFacts(opts.repo);
+    derived = collectFacts(opts.repo, { candidate: opts.candidate });
     provenance = repoProvenance(opts.repo);
     digest = digestOf(derived);
     legacyDigest = legacyDigestOf(derived);
@@ -1932,38 +1995,56 @@ function main(argv) {
     return 2;
   }
   const manifestPath = join(opts.repo, ".noru", "privacy-datamap.yml");
-  const derivedPath = join(opts.repo, ".noru", ".cache", "privacy-datamap.derived.json");
-  const scanStatePath = join(opts.repo, ".noru", ".cache", "privacy-datamap.scan.json");
+  const cachePath = join(opts.repo, ".noru", ".cache", ...(opts.candidate ? ["privacy-datamap-preview"] : []));
+  const derivedPath = join(cachePath, "privacy-datamap.derived.json");
+  const scanStatePath = join(cachePath, "privacy-datamap.scan.json");
 
   let wroteSkeleton = false;
   let drift = false;
   let rendered = null;
   try {
-    mkdirSync(join(opts.repo, ".noru", ".cache"), { recursive: true });
+    mkdirSync(cachePath, { recursive: true });
     writeFileSync(derivedPath, `${JSON.stringify(derived, null, 2)}\n`, "utf8");
     const existing = readManifestDigest(manifestPath);
-    if (existing === null) {
+    if (opts.candidate) {
+      drift = false;
+    } else if (existing === null) {
       if (opts.check) drift = true;
       else {
         writeFileSync(manifestPath, HEADER + toYaml(buildSkeleton(derived, provenance)), "utf8");
         wroteSkeleton = true;
       }
     } else if (existing !== digest) {
-      drift = true;
+      drift = ![previousDigestOf(derived), legacyDigest].includes(existing);
     }
     // Only ever from a manifest that validated against this exact repository state. No validated
     // manifest yet is the ordinary case on a first scan, and is not an error: there is simply
     // nothing to render until a human has resolved the review flags and the validator has passed.
+    // A parsed cache is not acceptance: revalidate the current manifest and watched evidence.
+    let exportValidated = false;
+    if (!opts.candidate && !opts.check && existsSync(join(opts.repo, ".noru", ".cache", `${PIECE}.parsed.json`))) {
+      try {
+        execFileSync("python3", [join(dirname(fileURLToPath(import.meta.url)), "validate_manifest.py"), manifestPath,
+          `--emit-parsed=${join(opts.repo, ".noru", ".cache", `${PIECE}.parsed.json`)}`, "--quiet"], { stdio: "pipe" });
+        exportValidated = true;
+      } catch {
+        // Keep prior artifacts for inspection, but never render them after failed validation.
+        rendered = null;
+      }
+    }
     const parsed = readParsedManifest(opts.repo, digest);
-    if (parsed && !opts.check) {
+    if (parsed && exportValidated && !opts.check) {
       rendered = relative(opts.repo, renderFides(opts.repo, parsed)).split(sep).join("/");
     }
     writeFileSync(
       scanStatePath,
       `${JSON.stringify({
         piece: PIECE,
+        ...(opts.candidate ? { candidate_context: derived.relationship_mapping.candidate_context,
+          candidate_artifact_sha256: createHash("sha256").update(`${JSON.stringify(derived, null, 2)}\n`).digest("hex") } : {}),
         derived_digest: digest,
         legacy_derived_digest: legacyDigest,
+        previous_derived_digest: previousDigestOf(derived),
         provenance,
       }, null, 2)}\n`,
       "utf8",
@@ -1976,6 +2057,7 @@ function main(argv) {
   const summary = {
     piece: PIECE,
     ok: !(opts.check && drift),
+    ...(opts.candidate ? { mode: "candidate", status: "structure collected" } : {}),
     repo: opts.repo,
     manifest: relative(opts.repo, manifestPath).split(sep).join("/"),
     derived_facts: relative(opts.repo, derivedPath).split(sep).join("/"),

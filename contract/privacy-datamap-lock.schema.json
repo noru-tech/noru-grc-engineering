@@ -5,51 +5,136 @@
   "description": "Machine-generated structural observations accepted with .noru/privacy-datamap.yml. It records what was reviewed, never what the data means.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "piece", "source", "taxonomy_digest", "accepted_manifest_sha256", "collections", "entities"],
+  "required": [
+    "version",
+    "piece",
+    "source",
+    "taxonomy_digest",
+    "accepted_manifest_sha256",
+    "collections",
+    "entities"
+  ],
   "properties": {
-    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
-    "piece": { "const": "privacy-datamap" },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "piece": {
+      "const": "privacy-datamap"
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["slug", "derived_digest"],
+      "required": [
+        "slug",
+        "derived_digest"
+      ],
       "properties": {
-        "slug": { "type": "string", "minLength": 1 },
-        "derived_digest": { "$ref": "#/$defs/digest" }
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "derived_digest": {
+          "$ref": "#/$defs/digest"
+        }
       }
     },
-    "taxonomy_digest": { "$ref": "#/$defs/digest" },
-    "accepted_manifest_sha256": { "$ref": "#/$defs/digest" },
+    "taxonomy_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "accepted_manifest_sha256": {
+      "$ref": "#/$defs/digest"
+    },
     "collections": {
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/observation" }
+      "additionalProperties": {
+        "$ref": "#/$defs/observation"
+      }
     },
     "entities": {
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/entity" }
+      "additionalProperties": {
+        "$ref": "#/$defs/entity"
+      }
+    },
+    "observation_format": {
+      "const": "structural-v2"
+    },
+    "systems": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "discovery_sources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
     }
   },
   "$defs": {
-    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "ref": { "type": "string", "pattern": "^[^:\\s][^:]*:[0-9]+$" },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[^:\\s][^:]*:[0-9]+$"
+    },
     "observation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["semantic_digest", "refs"],
+      "required": [
+        "semantic_digest",
+        "refs"
+      ],
       "properties": {
-        "semantic_digest": { "$ref": "#/$defs/digest" },
-        "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } }
+        "semantic_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        }
       }
     },
     "entity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "shape", "semantic_digest", "refs"],
+      "required": [
+        "kind",
+        "shape",
+        "semantic_digest",
+        "refs"
+      ],
       "properties": {
-        "kind": { "const": "field" },
-        "shape": { "type": "string" },
-        "semantic_digest": { "$ref": "#/$defs/digest" },
-        "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } }
+        "kind": {
+          "const": "field"
+        },
+        "shape": {
+          "type": "string"
+        },
+        "semantic_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        }
       }
     }
   }

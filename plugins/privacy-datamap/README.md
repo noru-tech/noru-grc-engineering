@@ -208,6 +208,26 @@ wrong answer gets signed.
 
 ## Incremental reconciliation
 
+A repeatable scan compares normalized observations with the accepted baseline. Citation locations,
+file counts, discovery order and classification lookup changes do not change the structural digest.
+The manifest can register `evidence_dependencies` on processing code and configuration; the lock
+records their reviewed fingerprints. Changed evidence queues a scoped investigation, while baseline
+and taxonomy maintenance remain separate from confirmed structural drift. See the scan command for
+`dependencies.py`, Python and TypeScript AST selectors, JSON normalization and the conservative text
+fallback. TypeScript fingerprints use a bundled supported-grammar parser; unsupported syntax is an
+explicit evidence gap. They preserve types, literal values, calls and conditions while ignoring
+comments, layout and optional trailing commas. Imports/helpers/configuration remain explicit dependencies.
+
+Proposal caches now carry per-target `evidence_state` and an `evidence_dependencies` registry. An
+unrelated README edit preserves analysis; changed serializer or connection evidence flags only its
+dependent fields, activities and relationships. Unique source moves refresh citations; missing or
+ambiguous dependencies remain unresolved. Superseded structural analysis is retained separately.
+
+Broad code/configuration discovery continues outside those dependencies. New files and unregistered
+declarations enter `discovery_required`; existing analysis stays intact. Evidence-backed discovery
+answers are required before sealing a new baseline, and unreviewed new scope blocks export. See the
+scan command's “Scoped analysis and broad discovery” for cache targets, supported syntax and answers.
+
 The first completed review is sealed in `.noru/privacy-datamap.lock.json`. The lock contains stable
 field identities, normalized structural fingerprints and citations. It contains no classifications
 or model output: accepted meaning stays in `.noru/privacy-datamap.yml`.
@@ -223,11 +243,15 @@ On later scans `scripts/reconcile.py` compares every current field with that obs
 | removed field | remove it from the candidate; re-sign the collection |
 | unique logical-identity migration | carry the decision forward under the new datastore key |
 
-The reconciler writes `.noru/.cache/privacy-datamap.reconciliation.json`,
-`.noru/.cache/privacy-datamap.proposals.json` and
-`.noru/.cache/privacy-datamap.candidate.yml`. It also writes
-`.noru/.cache/privacy-datamap.review.md`, a compact index grouped by collection and syntactic field
-family so the detailed proposal JSON is not the user interface. These are working files and must
+The reconciler writes the structural delta, proposal work queue and candidate manifest in
+`.noru/.cache/`. After agent enrichment, `scripts/review.py --repo=<repo> --output=json` produces
+three outputs: `privacy-datamap.map.md` summarizes stores and processing, `privacy-datamap.review.md`
+groups human decisions, and `privacy-datamap.evidence.json` retains the full field inventory and
+reasoning. Explicit decision IDs group related fields despite differences in reasoning; short decision
+summaries replace detailed rationale in review. Technical fields remain in evidence. Evidence-backed
+activities need no questions; a question must identify the privacy decision its answer changes. Each processing activity and actionable uncertainty has its own description. Structural
+errors block review readiness until corrected. The reconciler's initial index is only navigation.
+These are working files and must
 not be committed. The candidate never overwrites the accepted manifest. In bootstrap mode an
 invalid manifest contributes no descriptions, systems, declarations or references to the
 candidate. After the candidate has been resolved and reviewed, `reconcile.py --seal` refuses to
@@ -387,3 +411,40 @@ python3 plugins/privacy-datamap/scripts/reconcile.py --repo=. --seal
 node    plugins/privacy-datamap/scripts/diff.mjs --repo=.
 node    plugins/privacy-datamap/scripts/push.mjs --repo=. --confirm
 ```
+
+## Connection relationship contract
+
+The optional manifest `relationship_graph` stores framework-independent nodes and directed edges.
+Explicit schema bindings override directory grouping. The same schema bound to two unresolved
+connections produces two datasets, keyed `connection_<connection_id>`. Connections share a datastore
+only through explicit edges to the same datastore node; schema similarity never supplies that edge.
+
+Nodes have stable `id` and `kind` (`runtime`, `client`, `connection`, `datastore`, `schema`, `payload`).
+Runtime/datastore nodes carry a manifest `key`. Schema/payload nodes carry repository-relative
+`paths`. An unresolved connection carries `unresolved_question` and `resolution_needed`.
+Edges have `id`, `source`, `target`, `dependencies`, `rationale`, and `confidence`. Allowed directions
+are runtime→client, client→connection, connection→datastore, and client→schema/payload.
+Each dependency ID must exist in `evidence_dependencies` and target `relationship:<edge_id>`;
+its source fingerprint supplies the citation and freshness check. Changing that evidence queues
+investigation of the relationship through the existing reconciler and blocks stale export/sealing.
+
+The proposal cache uses `relationship_proposal: {graph, evidence_dependencies, decision_summary}`.
+Use `collect.mjs --candidate`, `reconcile.py --candidate`, then `review.py --candidate` with the
+same `--repo` to preview these proposals. Collection validates the graph and live evidence before
+applying its bindings. The complete proposed graph replaces the mapping only within the preview.
+Corrected observations, candidate manifest, enrichment queue and three review outputs live under
+`.noru/.cache/privacy-datamap-preview/`. Normal scan/review artifacts, the accepted manifest, lock,
+and Fides export stay unchanged. Candidate mode also works when no accepted manifest exists.
+
+Complete the preview's enrichment queue before requesting acceptance. The rendered map uses the
+corrected candidate stores and fields; missing processing context remains an explicit question.
+Changed source proposals, evidence or baseline invalidate the preview and require recollection.
+Invalid evidence fails before overwriting existing preview artifacts. Candidate mode cannot seal,
+run `--check`, or export. Acceptance records the reviewed graph and decisions in the manifest;
+normal collection and validation then establish the accepted observation baseline.
+
+Extraction and identity are separate: framework adapters discover evidence, while the common graph
+records relationships. Automatic client/import tracing is not implemented yet. Existing parsers
+and static migration configuration provide discovery; the agent traces client wrappers and records
+missing bindings. Without an explicit graph, the legacy directory grouping remains provisional.
+A graph does not create payload fields: unsupported structures still require supplemental evidence.

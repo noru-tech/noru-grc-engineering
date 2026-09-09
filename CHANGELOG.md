@@ -6,6 +6,50 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Add framework-independent connection relationship proposals and manifest bindings, with per-edge
+  evidence dependencies, separate unresolved connection identities, and explicit schema bindings
+  that take precedence over directory grouping. Automatic client/import tracing remains unsupported.
+
+
+### Changed
+
+- Keep unresolved discovery answers reviewable while blocking acceptance, including answers relabeled
+  as analysed with outstanding questions. Track supplemental-store finding evidence independently.
+  Correct TypeScript escaped-line-continuation fingerprints and advance the normalizer to v2.
+
+- Add a stdlib TypeScript syntax fingerprint with declaration selectors and explicit unsupported-
+  syntax gaps. Proposal evidence now reconciles per field, activity and relationship; formatting,
+  unrelated documentation and citation movement preserve supported analysis. Broad discovery still
+  queues new code/configuration scope and blocks unreviewed acceptance/export. Removed or ambiguous
+  evidence remains unresolved without discarding unaffected proposals.
+
+- Add `--candidate` privacy collection, reconciliation and review. Proposed connection mappings now
+  produce corrected observations before acceptance, with current-evidence validation and isolated
+  preview artifacts. Candidate runs preserve accepted files and normal review outputs, require
+  complete enrichment, and cannot seal or export.
+
+- Privacy scan drift now compares structural facts independently of citations, file counts and
+  classification lookup values. Accepted manifests can register scoped processing-code dependencies;
+  changed evidence produces investigations with previous/current fingerprints, while baseline and
+  taxonomy maintenance remain distinct from confirmed structural changes. Repeated scans preserve
+  enrichment bound to the same source and baseline. Sealing recollects live structure, and export
+  revalidates current evidence. Unreadable or oversized schema sources are explicit coverage gaps.
+
+- Privacy review uses explicit decision IDs and concise decision summaries, leaving detailed
+  rationale in evidence. Evidence-backed activities no longer need artificial confirmation questions;
+  remaining questions identify their decision impact. Acceptance instructions and evidence links
+  appear once rather than repeating for every group.
+
+- Privacy review now separates a concise data map, a grouped human decision queue and a full
+  evidence record. Shared reasoning and technical-field coverage are collapsed in review, processing
+  activities remain distinct, questions name the evidence needed to resolve them, and structural
+  errors defer privacy decisions until corrected.
+
+- Privacy scans now require agent enrichment for queued fields, system processing and supplemental
+  store coverage. A deterministic review gate checks proposal completeness, citation locations and
+  taxonomy values, and renders proposals and coverage questions separately from accepted decisions.
+  Completion distinguishes collected structure, incomplete enrichment, review readiness and acceptance.
+
 ## 0.8.1 — 2026-09-08
 
 ### Changed
