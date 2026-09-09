@@ -1435,13 +1435,13 @@ def test_datamap_never_overwrites_a_reviewed_manifest(results, tmp):
 def accepted_datamap_text(digest):
     names = ["id", "email", "password_hash", "weird_column", "created_at"]
     structure = hashlib.sha256("\n".join(sorted(names)).encode("utf-8")).hexdigest()
-    return f"""version: 0.8.1
+    return f"""version: 0.9.0
 piece: privacy-datamap
 source:
   slug: fixture/privacy-map
   commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
   branch: main
-  generated_by: privacy-datamap@0.8.1
+  generated_by: privacy-datamap@0.9.0
   derived_digest: {digest}
 dataset:
   - fides_key: db
@@ -1494,13 +1494,13 @@ system:
 def accepted_compact_datamap_text(digest):
     names = ["id", "email", "password_hash", "weird_column", "created_at"]
     structure = hashlib.sha256("\n".join(sorted(names)).encode("utf-8")).hexdigest()
-    return f"""version: 0.8.1
+    return f"""version: 0.9.0
 piece: privacy-datamap
 source:
   slug: fixture/privacy-map
   commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
   branch: main
-  generated_by: privacy-datamap@0.8.1
+  generated_by: privacy-datamap@0.9.0
   derived_digest: {digest}
 dataset:
   - fides_key: db
@@ -2843,13 +2843,13 @@ def test_datamap_bootstrap_ignores_invalid_manifest_baseline(results, tmp):
     summary, _derived = datamap_scan(repo)
     manifest = repo / ".noru" / "privacy-datamap.yml"
     manifest.write_text(
-        f"""version: 0.8.1
+        f"""version: 0.9.0
 piece: privacy-datamap
 source:
   slug: fixture/bootstrap
   commit_sha: 4f3c1a9e77b2d5c8a10e6b4f2d9c3a71e5b80d64
   branch: main
-  generated_by: privacy-datamap@0.8.1
+  generated_by: privacy-datamap@0.9.0
   derived_digest: {summary["derived_digest"]}
 dataset:
   - fides_key: db

@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.9.0 — 2026-09-09
+
 - Add framework-independent connection relationship proposals and manifest bindings, with per-edge
   evidence dependencies, separate unresolved connection identities, and explicit schema bindings
   that take precedence over directory grouping. Automatic client/import tracing remains unsupported.
