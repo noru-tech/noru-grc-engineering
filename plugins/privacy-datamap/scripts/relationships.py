@@ -2,6 +2,7 @@
 """Framework-independent relationship contracts; never import or execute repository code."""
 import hashlib
 import json
+import analysis_storage
 import pathlib
 import re
 import sys
@@ -158,20 +159,30 @@ def candidate_mapping(repo):
     import dependencies
     import analysis_cache
     repo = pathlib.Path(repo).resolve()
-    path = repo / ".noru" / ".cache" / "privacy-datamap.proposals.json"
-    document = json.loads(path.read_text(encoding="utf-8"))
+    path = repo / ".noru" / ".cache" / "privacy-datamap.analysis.json"
+    document = analysis_storage.load(path)
     proposal = document.get("relationship_proposal") if isinstance(document, dict) else None
-    errors = validate_proposal(proposal, repo)
+    structural = document.get("structural_proposal")
+    errors = validate_proposal(proposal, repo) if proposal is not None or not structural else []
+    if structural:
+        import dataset_inputs
+        dataset_inputs.extract(repo, True)
     if errors:
         raise ValueError("Cannot preview mapping: " + "; ".join(errors))
     manifest = repo / ".noru" / "privacy-datamap.yml"
     # Cache artifacts are excluded by source_snapshot, so previewing cannot invalidate itself.
     lock = repo / ".noru" / "privacy-datamap.lock.json"
     context = {"proposal_digest": dependencies.digest(proposal),
+               "structural_digest": dependencies.digest(structural),
                "lock_digest": dependencies.digest(lock.read_text()) if lock.is_file() else None,
                "manifest_digest": dependencies.digest(manifest.read_text()) if manifest.is_file() else None,
                "discovery_digest": dependencies.digest(analysis_cache.discover(repo))}
-    return {**project(proposal["graph"]), "graph": proposal["graph"], "errors": [],
+    accepted = json.loads("{}")
+    if manifest.is_file():
+        import validate_manifest
+        accepted = validate_manifest.load_yaml(manifest.read_text())[0]
+    graph = proposal["graph"] if proposal else accepted.get("relationship_graph", {"nodes": [], "edges": []})
+    return {**project(graph), "graph": graph, "errors": [], "structural_proposal": structural,
             "proposal": proposal, "candidate_context": context}
 
 
@@ -180,8 +191,8 @@ def verify_candidate(repo, derived, scan):
         current = candidate_mapping(repo)
     except (OSError, ValueError, TypeError, KeyError) as error:
         raise ValueError(f"Cannot verify candidate preview: {error}") from error
-    artifact = pathlib.Path(repo) / ".noru" / ".cache" / "privacy-datamap-preview" / "privacy-datamap.derived.json"
-    if not artifact.is_file() or hashlib.sha256(artifact.read_bytes()).hexdigest() != scan.get("candidate_artifact_sha256"):
+    import dependencies
+    if dependencies.digest(derived) != scan.get("candidate_artifact_sha256"):
         raise ValueError("Candidate observations changed; rerun collect.mjs --candidate")
     context = current["candidate_context"]
     if scan.get("candidate_context") != context or derived.get("relationship_mapping") != current:

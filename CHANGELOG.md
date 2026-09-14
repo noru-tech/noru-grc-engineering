@@ -6,6 +6,23 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Represent supplemental storage as datasets in the main privacy manifest and external services as
+  systems with native ingress/egress. Preview structural proposals without changing acceptance and
+  remove the separate stores-file contract.
+- Consolidate reusable privacy analysis and preview observations in one compact cache, deduplicate
+  repeated reasoning, and write atomically. Render candidate YAML and detailed evidence on demand;
+  retain one concise privacy review report and require explicit Fides export.
+- Focus reviews on categories, subjects, purposes, sharing and human decisions. Require activity
+  categories and recorded runtime, storage, recipient, infrastructure and structural-boundary
+  investigations. Support transient processing without artificial dataset references.
+- Compare accepted privacy meaning with proposals and manifest edits. Require evidence-backed
+  explanations for disappeared scope, personal-to-non-personal changes, collections filtered from
+  export, and narrowed activity categories, subjects, purposes or recipients. Block unexplained
+  sealing and unsealed semantic narrowing at export; ignore ordering and citation-only changes.
+- Read sharing destinations according to their declared shapes: system-level resource objects and
+  declaration-level system-key strings. Keep approval provenance separate from data descriptions
+  and require review of identifier continuity and unavailable deployment evidence.
+
 ## 0.9.0 — 2026-09-09
 
 - Add framework-independent connection relationship proposals and manifest bindings, with per-edge

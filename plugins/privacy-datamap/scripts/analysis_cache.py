@@ -2,6 +2,7 @@
 import ast
 import copy
 import json
+import analysis_storage
 import pathlib
 import re
 
@@ -93,6 +94,8 @@ def rows(document):
         yield "system:" + key, system
         for activity in system.get("processing_activities", []):
             yield "activity:" + key + "/" + activity.get("activity_id", ""), activity
+    for row in document.get("removal_proposals", []):
+        yield "removal:" + row["entity_id"], row
     for row in document.get("dependency_proposals", []):
         yield "investigation:" + row["entity_id"], row
     mapping = document.get("relationship_proposal")
@@ -112,13 +115,13 @@ def merge(prior, fresh):
         return fresh
     document = copy.deepcopy(fresh)
     for key in ("decisions", "reasoning_groups", "evidence_dependencies", "evidence_state", "relationship_proposal",
-                "discovery_state", "discovery_proposals", "retired_analysis", "structural_errors"):
+                "discovery_state", "discovery_proposals", "retired_analysis", "structural_errors", "structural_proposal", "preview"):
         if key in prior:
             document[key] = copy.deepcopy(prior[key])
     retired = document.setdefault("retired_analysis", {})
-    for key in ("proposals", "system_proposals", "dependency_proposals"):
+    for key in ("proposals", "system_proposals", "dependency_proposals", "removal_proposals"):
         old = {row["entity_id"]: row for row in prior.get(key, [])}
-        for index, row in enumerate(document[key]):
+        for index, row in enumerate(document.get(key, [])):
             previous = old.pop(row["entity_id"], None)
             if previous is None:
                 continue
@@ -240,8 +243,8 @@ def check_accepted_discovery(repo, specs, allow_review=False):
         return []
     changes = discovery_changes(lock["discovery_sources"], discover(repo), specs)
     if allow_review and changes:
-        proposal_path = repo / ".noru" / ".cache" / "privacy-datamap.proposals.json"
-        document = json.loads(proposal_path.read_text()) if proposal_path.is_file() else {}
+        proposal_path = repo / ".noru" / ".cache" / "privacy-datamap.analysis.json"
+        document = analysis_storage.load(proposal_path) or {}
         answers = {row.get("path"): row for row in document.get("discovery_proposals", [])}
         changes = [change for change in changes if not discovery_answer_valid(answers.get(change["path"], {}), change, repo, for_acceptance=True)]
     return changes
@@ -264,3 +267,72 @@ def refresh_discovery(document, current, registered=()):
             pending.append(change)
     document["discovery_required"] = pending
     return pending
+
+def semantic_snapshot(manifest, proposals=None):
+    """Compact accepted meaning; ordering and citations are not privacy changes."""
+    collections, fields = {}, {}
+    systems = {row["fides_key"]: row for row in manifest.get("system", [])}
+    for dataset in manifest.get("dataset", []):
+        for collection in dataset.get("collections", []):
+            key = dataset["fides_key"] + "/" + collection["name"]
+            collections[key] = collection
+            def walk(items, prefix):
+                for field in items:
+                    identity = prefix + field["name"]
+                    fields[identity] = field
+                    walk(field.get("fields", []), identity + ".")
+            walk(collection.get("fields", []), key + "/")
+            for name in collection.get("non_personal_fields", []):
+                fields[key + "/" + name] = {"data_categories": []}
+    snapshot = {"fields": {key: sorted(set(row.get("data_categories") or [])) for key, row in fields.items() if row.get("data_categories")},
+                "collections": sorted(collections), "activities": {}}
+    def activity(row, uses=None, subjects=None, categories=None, recipients=None):
+        return {"purposes": sorted(set(uses if uses is not None else [row.get("data_use")])),
+                "subjects": sorted(set(subjects if subjects is not None else row.get("data_subjects", []))),
+                "categories": sorted(set(categories if categories is not None else row.get("data_categories", []))),
+                "recipients": sorted(set(recipients or []))}
+    for key, system in systems.items():
+        recipients = [r["fides_key"] for r in system.get("egress", [])]
+        for declaration in system.get("privacy_declarations", []):
+            own_recipients = list(declaration.get("egress", []))
+            snapshot["activities"][key + "/" + str(declaration.get("name", ""))] = activity(declaration, recipients=recipients + own_recipients)
+    for row in (proposals or {}).get("proposals", []):
+        if row.get("proposal_kind") in ("personal", "special_category", "non_personal"):
+            snapshot["fields"][row["entity_id"]] = sorted(set(row.get("proposed_categories", [])))
+    for system in (proposals or {}).get("system_proposals", []):
+        activities = system.get("processing_activities")
+        if not activities:
+            continue
+        prefix = system["entity_id"] + "/"
+        snapshot["activities"] = {k: v for k, v in snapshot["activities"].items() if not k.startswith(prefix)}
+        for row in activities:
+            snapshot["activities"][prefix + str(row.get("purpose", ""))] = activity(row,
+                uses=row.get("proposed_data_uses", []), subjects=row.get("proposed_data_subjects", []),
+                categories=row.get("proposed_categories", []), recipients=row.get("recipient_systems", []))
+    return snapshot
+
+
+def semantic_changes(previous, current):
+    if previous is None:
+        return []
+    changes = []
+    def record(identity, kind, before, after):
+        changes.append({"entity_id": "semantic:" + identity, "kind": kind,
+                        "previous": before, "current": after,
+                        "observation_digest": dependencies.digest({"kind": kind, "previous": before, "current": after})})
+    for key, before in previous.get("fields", {}).items():
+        after = current.get("fields", {}).get(key, [])
+        if before and not after:
+            record("field:" + key, "personal_to_non_personal_or_removed", before, after)
+    def visible(snapshot, collection):
+        return any(values for key, values in snapshot.get("fields", {}).items() if key.startswith(collection + "/"))
+    for key in previous.get("collections", []):
+        if visible(previous, key) and key in current.get("collections", []) and not visible(current, key):
+            record("collection:" + key, "collection_filtered_from_export", True, False)
+    for key, before in previous.get("activities", {}).items():
+        after = current.get("activities", {}).get(key, {})
+        lost = {dimension: sorted(set(values) - set(after.get(dimension, []))) for dimension, values in before.items()}
+        lost = {dimension: values for dimension, values in lost.items() if values}
+        if lost:
+            record("activity:" + key, "processing_scope_narrowed", before, after)
+    return sorted(changes, key=lambda row: row["entity_id"])

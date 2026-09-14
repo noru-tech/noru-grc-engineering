@@ -24,6 +24,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import dependencies
 import relationships
 import analysis_cache
+import copy
+import analysis_storage
 
 
 PIECE = "privacy-datamap"
@@ -488,6 +490,34 @@ def build_candidate(derived, scan, manifest, lock):
             candidate_collection["fields"] = candidate_fields
             candidate_collection["non_personal_fields"] = sorted(non_personal_fields)
             candidate_collections.append(candidate_collection)
+        if dataset.get("definition"):
+            definition = copy.deepcopy(dataset["definition"])
+            flat = {}
+            def evidence_fields(items, prefix=""):
+                for item in items:
+                    name = prefix + item["name"]
+                    flat[name] = item
+                    evidence_fields(item.get("fields", []), name + ".")
+            candidate_dataset["meta"] = definition["meta"]
+            for collection in candidate_collections:
+                original = next(c for c in definition["collections"] if c["name"] == collection["name"])
+                flat = {}
+                evidence_fields(original["fields"])
+                for field in collection["fields"]:
+                    field["meta"] = flat[field["name"]]["meta"]
+                for name in collection.pop("non_personal_fields", []):
+                    collection["fields"].append({"name": name, "data_categories": [], "refs": flat[name]["refs"], "meta": flat[name]["meta"]})
+                reviewed = {f["name"]: f for f in collection["fields"]}
+                def nest(items, prefix=""):
+                    out = []
+                    for item in items:
+                        name = prefix + item["name"]
+                        field = {**reviewed[name], "name": item["name"]}
+                        if item.get("fields"):
+                            field["fields"] = nest(item["fields"], name + ".")
+                        out.append(field)
+                    return out
+                collection["fields"] = nest(original["fields"])
         candidate_dataset["collections"] = candidate_collections
         datasets.append(candidate_dataset)
 
@@ -499,7 +529,7 @@ def build_candidate(derived, scan, manifest, lock):
             previous_refs = list(old.get("dataset_references") or [])
             current_refs = list(system.get("dataset_references") or [])
             candidate["dataset_references"] = current_refs
-            if previous_refs != current_refs:
+            if previous_refs != current_refs or any(old.get(k, []) != system.get(k, []) for k in ("ingress", "egress")):
                 declarations = []
                 for declaration in old.get("privacy_declarations") or []:
                     changed = dict(declaration)
@@ -507,13 +537,17 @@ def build_candidate(derived, scan, manifest, lock):
                     changed["needs_review"] = True
                     declarations.append(changed)
                 candidate["privacy_declarations"] = declarations
+            for key in ("ingress", "egress", "meta", "system_type"):
+                if key in system:
+                    candidate[key] = system[key]
             systems.append(candidate)
         else:
             systems.append(
                 {
                     "fides_key": system.get("fides_key"),
                     "name": system.get("name"),
-                    "system_type": "Application",
+                    "system_type": system.get("system_type", "Application"),
+                    **{k: system[k] for k in ("ingress", "egress", "meta") if k in system},
                     "dataset_references": list(system.get("dataset_references") or []),
                     "privacy_declarations": [
                         {
@@ -536,7 +570,7 @@ def build_candidate(derived, scan, manifest, lock):
         "dataset": datasets,
         "system": systems,
         **({"relationship_graph": manifest["relationship_graph"]} if manifest and "relationship_graph" in manifest else {}),
-        **({"evidence_dependencies": manifest["evidence_dependencies"]} if manifest and "evidence_dependencies" in manifest else {}),
+        **({"evidence_dependencies": derived["input_dependencies"]} if derived.get("input_dependencies") else {}),
     }
 
 
@@ -549,7 +583,7 @@ def reconcile(derived, scan, manifest, lock, manifest_path):
     valid_manifest = False
     if manifest:
         report, _counts = VALIDATOR.validate(
-            manifest, VALIDATOR.load_vocabulary(), observed=derived, repo=manifest_path.parent.parent, allow_discovery_review=True
+            manifest, VALIDATOR.load_vocabulary(), observed=derived, repo=manifest_path.parent.parent, allow_discovery_review=True, allow_semantic_review=True
         )
         valid_manifest = not report.errors
     accepted_digest = (manifest or {}).get("source", {}).get("derived_digest")
@@ -687,10 +721,25 @@ def reconcile(derived, scan, manifest, lock, manifest_path):
     dependency_investigations = [row for row in dependency_changes if row["action"] not in {"refresh_evidence", "normalizer_changed"}]
     current_systems = {system["fides_key"]: sorted(system.get("dataset_references") or []) for system in derived.get("systems", [])}
     old_systems = (lock or {}).get("systems", {})
+    flows = {s["fides_key"]: {k: sorted(s.get(k, []), key=lambda e: e["fides_key"]) for k in ("ingress", "egress") if s.get(k)} for s in derived.get("systems", []) if s.get("ingress") or s.get("egress")}
+    old_flows = (lock or {}).get("system_flows", {})
     system_changes = [{"id": key, "previous": old_systems.get(key), "current": current_systems.get(key),
                        "reason": "Observed runtime boundary or datastore relationship changed."}
                       for key in sorted(set(old_systems) | set(current_systems))
                       if old_systems.get(key) != current_systems.get(key)] if lock and "systems" in lock else []
+    if lock:
+        system_changes.extend({"id": key, "previous": old_flows.get(key), "current": flows.get(key), "reason": "Observed system data flow changed."} for key in sorted(set(flows) | set(old_flows)) if flows.get(key) != old_flows.get(key))
+    removed = {}
+    for action in actions:
+        if action["action"] == "remove":
+            scope = "collection:" + action["entity_id"].rsplit("/", 1)[0]
+            removed.setdefault(scope, []).append(action["entity_id"])
+    for change in system_changes:
+        if change["current"] is None:
+            scope = ("system:" if change["id"] not in current_systems else "flow:") + change["id"]
+            removed.setdefault(scope, []).append(change)
+    removal_required = [{"entity_id": key, "observation_digest": sha256_json(value)}
+                        for key, value in sorted(removed.items())]
     control_changes = [{"kind": "invalid_dependencies", "reason": error} for error in dependency_errors]
     control_changes.extend({"kind": "evidence_normalizer_changed", "reason": f"{row['id']}: evidence normalizer changed; review the baseline format separately from code behavior."}
                            for row in dependency_changes if row["action"] == "normalizer_changed")
@@ -717,13 +766,14 @@ def reconcile(derived, scan, manifest, lock, manifest_path):
         "monitoring_scope": {"registered_dependencies": len(specs) if isinstance(specs, list) else 0,
                              "limitation": "Only collected structures and explicitly registered decision evidence are compared; unregistered processing code is outside this baseline."},
         "drift": reconciler_drift,
-        "agent_required": bool(scan.get("candidate_context") or proposal_required or dependency_investigations or discovery_required),
+        "agent_required": bool(scan.get("candidate_context") or proposal_required or removal_required or dependency_investigations or discovery_required),
         "discovery_required": discovery_required,
         "discovery_sources": discovered,
         "dependency_observations": dependency_observations,
         "dependency_changes": dependency_changes,
         "investigation_required": dependency_investigations,
         "system_changes": system_changes,
+        "removal_required": removal_required,
         "control_changes": control_changes,
         "coverage_gaps": coverage_gaps,
         "blocked": blocked,
@@ -750,7 +800,22 @@ def analysis_binding(repo, manifest_path, result):
 
 def cache_directory(repo, candidate=False):
     cache = repo / ".noru" / ".cache"
-    return cache / "privacy-datamap-preview" if candidate else cache
+    return cache
+
+
+def load_observations(repo, candidate=False):
+    cache = cache_directory(repo)
+    if candidate:
+        analysis = analysis_storage.load(cache / "privacy-datamap.analysis.json") or {}
+        preview = analysis.get("preview", {})
+        if not preview.get("derived") or not preview.get("scan"):
+            raise ValueError("Run collect.mjs --candidate before reviewing candidate observations")
+        return preview["derived"], preview["scan"]
+    derived = load_json(cache / "privacy-datamap.derived.json", required=True)
+    scan = derived.pop("_scan", None)
+    if not isinstance(scan, dict):
+        raise ValueError("Run collection to populate scan metadata in the derived cache")
+    return derived, scan
 
 
 def validate_scan_mode(repo, derived, scan, candidate):
@@ -763,6 +828,8 @@ def validate_scan_mode(repo, derived, scan, candidate):
 
 def apply_candidate_mapping(candidate, mapping):
     if mapping is None:
+        return candidate
+    if mapping.get("proposal") is None:
         return candidate
     candidate["relationship_graph"] = mapping["graph"]
     # Keep non-relationship monitoring when replacing the proposed graph.
@@ -786,6 +853,27 @@ def refresh_candidate_evidence(candidate, result):
     return candidate
 
 
+semantic_snapshot = analysis_cache.semantic_snapshot
+semantic_changes = analysis_cache.semantic_changes
+
+
+def add_semantic_review(result, lock, candidate, proposals=None):
+    changes = semantic_changes((lock or {}).get("semantic_snapshot"), semantic_snapshot(candidate, proposals))
+    result["semantic_changes"] = changes
+    result["removal_required"] = [row for row in result.get("removal_required", []) if not row["entity_id"].startswith("semantic:")]
+    grouped = {}
+    for row in changes:
+        identity = row["entity_id"]
+        if identity.startswith("semantic:field:"):
+            identity = "semantic:classification:" + identity.removeprefix("semantic:field:").rsplit("/", 1)[0]
+        grouped.setdefault(identity, []).append(row)
+    result["removal_required"].extend({"entity_id": identity, "observation_digest": sha256_json(rows)}
+                                      for identity, rows in sorted(grouped.items()))
+    if changes:
+        result["agent_required"] = True
+        result["accepted_current"] = False
+
+
 def build_lock(derived, scan, manifest_path):
     return {
         "version": VERSION,
@@ -796,11 +884,13 @@ def build_lock(derived, scan, manifest_path):
         },
         "observation_format": "structural-v2",
         "discovery_sources": (derived.get("discovery") or {}).get("sources", {}),
+        "system_flows": {s["fides_key"]: {k: sorted(s.get(k, []), key=lambda e: e["fides_key"]) for k in ("ingress", "egress") if s.get(k)} for s in derived.get("systems", []) if s.get("ingress") or s.get("egress")},
         "systems": {system["fides_key"]: sorted(system.get("dataset_references") or []) for system in derived.get("systems", [])},
         "dependencies": dependencies.reconcile(manifest_path.parent.parent,
             (load_manifest(manifest_path) or {}).get("evidence_dependencies", []), {})[0],
         "taxonomy_digest": taxonomy_digest(),
         "accepted_manifest_sha256": manifest_sha(manifest_path),
+        "semantic_snapshot": semantic_snapshot(load_manifest(manifest_path) or {}),
         "collections": {
             row["entity_id"]: {
                 "semantic_digest": row["semantic_digest"],
@@ -820,84 +910,19 @@ def build_lock(derived, scan, manifest_path):
     }
 
 
-def proposal_family(field):
-    """Group review work by syntax without making a privacy determination."""
-    name = str(field or "").lower()
-    if re.search(r"(?:^|_)(?:password|secret|token|credential)(?:_|$)", name):
-        return "credentials and secrets"
-    if name in {"id", "uuid"} or re.search(r"_(?:id|ids|uuid|uuids)$", name):
-        return "identifiers"
-    if name in {"status", "state", "enabled", "is_active"} or re.search(
-        r"^(?:is|has|can)_[a-z0-9_]+$", name
-    ):
-        return "state and flags"
-    if re.search(r"(?:^|_)(?:email|phone|address|url|uri|domain)(?:_|$)", name):
-        return "contact and location"
-    if re.search(r"(?:^|_)(?:at|date|time|timestamp)$", name):
-        return "dates and times"
-    if re.search(
-        r"(?:^|_)(?:content|description|message|notes?|metadata|config|payload|data|result|results)(?:_|$)",
-        name,
-    ):
-        return "content and structured values"
-    return "other fields"
-
-
-def build_review_report(result):
-    grouped = {}
-    for proposal in result.get("proposal_required") or []:
-        key = (proposal.get("dataset", ""), proposal.get("collection", ""))
-        family = proposal_family(proposal.get("field"))
-        grouped.setdefault(key, {}).setdefault(family, []).append(proposal)
-
-    lines = [
-        "# Privacy data-map proposal review",
-        "",
-        (
-            "This is a compact navigation report, not a classification. Field families are "
-            "syntactic groupings only; inspect the cited schema, relationships, neighbouring "
-            "fields and code usage before proposing or accepting a privacy decision."
-        ),
-        "",
-        f"- Mode: {result.get('mode', 'unknown')}",
-        f"- Collections requiring review: {len(grouped)}",
-        f"- Fields requiring contextual proposals: {sum(len(rows) for families in grouped.values() for rows in families.values())}",
-        f"- Possible special-category references: {len(result.get('special_category_refs') or [])}",
-        "",
-    ]
-    family_order = [
-        "credentials and secrets",
-        "identifiers",
-        "state and flags",
-        "contact and location",
-        "dates and times",
-        "content and structured values",
-        "other fields",
-    ]
-    for (dataset, collection), families in sorted(grouped.items()):
-        lines.extend([f"## {dataset} / {collection}", ""])
-        for family in family_order:
-            rows = families.get(family, [])
-            if not rows:
-                continue
-            fields = ", ".join(
-                f"{row.get('field')} ({(row.get('refs') or ['no citation'])[0]})"
-                for row in sorted(rows, key=lambda item: item.get("field", ""))
-            )
-            lines.append(f"- {family} ({len(rows)}): {fields}")
-        lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
-
-
 def parse_args(argv):
     opts = {"repo": pathlib.Path.cwd(), "seal": False, "candidate": False, "json": False, "quiet": False}
     for arg in argv:
         if arg.startswith("--repo="):
             opts["repo"] = pathlib.Path(arg.split("=", 1)[1]).resolve()
+        elif arg == "--render-candidate":
+            opts["render_candidate"] = True
         elif arg == "--seal":
             opts["seal"] = True
         elif arg == "--candidate":
             opts["candidate"] = True
+        elif arg == "--output=evidence":
+            opts["evidence"] = True
         elif arg == "--output=json":
             opts["json"] = True
         elif arg == "--output=text":
@@ -914,7 +939,7 @@ def parse_args(argv):
 
 
 def main(argv):
-    usage = "usage: reconcile.py --repo=<path> [--seal | --candidate] [--output=json|text] [--quiet]\n"
+    usage = "usage: reconcile.py --repo=<path> [--seal | --candidate | --render-candidate] [--output=json|text] [--quiet]\n"
     try:
         opts = parse_args(argv)
     except ValueError as exc:
@@ -924,6 +949,9 @@ def main(argv):
         sys.stdout.write(usage)
         return 0
 
+    if opts.get("render_candidate"):
+        analysis = analysis_storage.load(cache_directory(opts["repo"]) / "privacy-datamap.analysis.json") or {}
+        opts["candidate"] = opts["candidate"] or analysis.get("collection_mode") == "candidate"
     repo = opts["repo"]
     cache = cache_directory(repo, opts["candidate"])
     manifest_path = repo / ".noru" / "privacy-datamap.yml"
@@ -933,8 +961,7 @@ def main(argv):
             fresh = subprocess.run(["node", str(HERE / "collect.mjs"), f"--repo={repo}", "--check", "--output=json", "--quiet"], capture_output=True, text=True)
             if fresh.returncode not in (0, 1):
                 raise ValueError("cannot seal: fresh collection failed: " + fresh.stderr.strip())
-        derived = load_json(cache / "privacy-datamap.derived.json", required=True)
-        scan = load_json(cache / "privacy-datamap.scan.json", required=True)
+        derived, scan = load_observations(repo, opts["candidate"])
         manifest = load_manifest(manifest_path)
         lock = load_json(lock_path)
         if not isinstance(derived, dict) or not isinstance(scan, dict):
@@ -951,7 +978,7 @@ def main(argv):
             sys.stderr.write("error: cannot seal without .noru/privacy-datamap.yml\n")
             return 1
         report, _counts = VALIDATOR.validate(
-            manifest, VALIDATOR.load_vocabulary(), observed=derived, repo=manifest_path.parent.parent, allow_discovery_review=True
+            manifest, VALIDATOR.load_vocabulary(), observed=derived, repo=manifest_path.parent.parent, allow_discovery_review=True, allow_semantic_review=True
         )
         if report.errors:
             sys.stderr.write(
@@ -971,7 +998,7 @@ def main(argv):
             return 1
         check = reconcile(derived, scan, manifest, lock, manifest_path)
         if check["discovery_required"]:
-            discovery_document = load_json(cache / "privacy-datamap.proposals.json") or {}
+            discovery_document = analysis_storage.load(cache / "privacy-datamap.analysis.json") or {}
             discovery_document["discovery_state"] = (lock or {}).get("discovery_sources", {})
             if analysis_cache.refresh_discovery(discovery_document, (derived.get("discovery") or {}).get("sources", {}), manifest.get("evidence_dependencies", [])):
                 sys.stderr.write("error: investigate new or changed code/configuration scope before sealing\n")
@@ -979,6 +1006,15 @@ def main(argv):
         if check["investigation_required"] or any(check["coverage_gaps"].values()) or check["identity_ambiguities"]:
             sys.stderr.write("error: resolve evidence investigations and coverage gaps before sealing\n")
             return 1
+        add_semantic_review(check, lock, manifest)
+        if check["removal_required"]:
+            import review
+            removal_document = analysis_storage.load(cache / "privacy-datamap.analysis.json") or {}
+            removal_errors = analysis_cache.refresh(removal_document, repo)
+            removal_errors.extend(review.validate_removals(removal_document, check, manifest, repo, accepting=True))
+            if removal_errors:
+                sys.stderr.write("error: cannot seal unexplained removals: " + "; ".join(removal_errors) + "\n")
+                return 1
         lock_document = build_lock(derived, scan, manifest_path)
         lock_path.write_text(
             json.dumps(lock_document, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
@@ -997,10 +1033,7 @@ def main(argv):
         result = reconcile(derived, scan, manifest, lock, manifest_path)
         result["status"] = "structure collected"
         cache.mkdir(parents=True, exist_ok=True)
-        reconciliation_path = cache / "privacy-datamap.reconciliation.json"
-        proposals_path = cache / "privacy-datamap.proposals.json"
-        candidate_path = cache / "privacy-datamap.candidate.yml"
-        review_path = cache / "privacy-datamap.review.md"
+        proposals_path = cache / "privacy-datamap.analysis.json"
         candidate_lock = (
             build_lock(derived, scan, manifest_path) if result["mode"] == "migration" else lock
         )
@@ -1008,16 +1041,16 @@ def main(argv):
         # a source for descriptions, declarations, references or system identities.
         baseline_manifest = {} if result["mode"] == "bootstrap" else manifest
         candidate = apply_candidate_mapping(refresh_candidate_evidence(build_candidate(derived, scan, baseline_manifest, candidate_lock), result), mapping)
-        reconciliation_path.write_text(
-            json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        if opts.get("render_candidate"):
+            sys.stdout.write(to_yaml(candidate))
+            return 0
         binding = analysis_binding(repo, manifest_path, result)
-        prior_proposals = load_json(proposals_path)
-        reuse_proposals = isinstance(prior_proposals, dict) and prior_proposals.get("analysis_binding") == binding
+        prior_proposals = analysis_storage.load(proposals_path)
+        add_semantic_review(result, lock, candidate, prior_proposals)
         proposal_document = \
                 {
                     "version": VERSION,
+                    "collection_mode": "candidate" if opts["candidate"] else "manifest",
                     "analysis_binding": binding,
                     "piece": PIECE,
                     "observation_digest": scan.get("derived_digest"),
@@ -1043,11 +1076,13 @@ def main(argv):
                          "refs": item["current"].get("refs", []), "unresolved_question": "", "resolution_needed": "", "decision_impact": ""}
                         for item in result["investigation_required"]
                     ],
+                    "removal_proposals": [{**row, "outcome": None, "refs": [], "rationale": "", "confidence": None,
+                                           "decision_summary": ""} for row in result["removal_required"]],
                     "system_proposals": [
                         {"entity_id": system["fides_key"], "rationale": "", "confidence": None,
-                         "refs": [], "processing_activities": []}
+                         "refs": [], "system_type": "", "investigation": {"runtime_processing": "", "external_recipients": "", "storage": "", "infrastructure": ""}, "processing_activities": []}
                         for system in candidate.get("system", [])
-                        if any(declaration.get("needs_review") for declaration in system.get("privacy_declarations", []))
+                        if not system.get("privacy_declarations") or any(declaration.get("needs_review") for declaration in system.get("privacy_declarations", []))
                     ],
                     "store_investigation": {"search_scope": "", "rationale": "", "confidence": None,
                                             "refs": [], "findings": []},
@@ -1058,23 +1093,15 @@ def main(argv):
         analysis_cache.refresh(proposal_document, repo)
         analysis_cache.refresh_discovery(proposal_document, result["discovery_sources"], (manifest or {}).get("evidence_dependencies", []))
         if mapping is not None:
-            proposal_document["relationship_proposal"] = mapping["proposal"]
-        proposals_path.write_text(json.dumps(proposal_document, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
-        candidate_path.write_text(
-            "# Generated reconciliation candidate. Review this file; do not treat it as accepted.\n"
-            "# Copy it to .noru/privacy-datamap.yml only after resolving every review flag.\n"
-            + to_yaml(candidate),
-            encoding="utf-8",
-        )
-        if not reuse_proposals or not review_path.is_file():
-            review_path.write_text(build_review_report(result), encoding="utf-8")
+            if mapping.get("proposal") is not None:
+                proposal_document["relationship_proposal"] = mapping["proposal"]
+            if mapping.get("structural_proposal"):
+                proposal_document["structural_proposal"] = mapping["structural_proposal"]
+        analysis_storage.save(proposals_path, proposal_document)
         result.update(
             {
                 "ok": True,
-                "reconciliation": str(reconciliation_path.relative_to(repo)),
-                "proposals": str(proposals_path.relative_to(repo)),
-                "candidate": str(candidate_path.relative_to(repo)),
-                "review_report": str(review_path.relative_to(repo)),
+                "analysis": str(proposals_path.relative_to(repo)),
             }
         )
 

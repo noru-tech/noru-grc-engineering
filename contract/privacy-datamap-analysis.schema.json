@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/privacy-datamap-proposals.schema.json",
-  "title": "Noru privacy data-map non-authoritative agent proposal queue",
-  "description": "Cache-only work selected by the deterministic reconciler. Entries are suggestions and cannot update the accepted manifest or lock by themselves.",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/privacy-datamap-analysis.schema.json",
+  "title": "Noru privacy data-map analysis",
+  "description": "Reusable, non-authoritative investigations with exact shared reasoning and optional preview observations. Derived views are reconstructed; acceptance remains in the manifest and lock.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -359,6 +359,141 @@
     },
     "retired_analysis": {
       "type": "object"
+    },
+    "structural_proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dataset": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "system": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "evidence_dependencies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "path",
+              "method",
+              "targets",
+              "fingerprint"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "method": {
+                "enum": [
+                  "python_ast",
+                  "typescript_ast",
+                  "json",
+                  "text"
+                ]
+              },
+              "selector": {
+                "type": "string"
+              },
+              "targets": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "fingerprint": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "preview": {
+      "type": "object"
+    },
+    "shared_reasoning": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "object"
+        ]
+      }
+    },
+    "collection_mode": {
+      "enum": [
+        "candidate",
+        "manifest"
+      ]
+    },
+    "removal_proposals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "observation_digest": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "decision_summary": {
+            "type": "string"
+          },
+          "unresolved_question": {
+            "type": "string"
+          },
+          "resolution_needed": {
+            "type": "string"
+          },
+          "decision_impact": {
+            "type": "string"
+          },
+          "replacement_reference": {
+            "type": "string"
+          },
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "enum": [
+              null,
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              null,
+              "retired",
+              "replaced",
+              "gap",
+              "amended"
+            ]
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -390,6 +525,33 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/processing_activity"
+          }
+        },
+        "system_type": {
+          "type": "string"
+        },
+        "investigation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "runtime_processing",
+            "external_recipients",
+            "storage",
+            "infrastructure"
+          ],
+          "properties": {
+            "runtime_processing": {
+              "type": "string"
+            },
+            "external_recipients": {
+              "type": "string"
+            },
+            "storage": {
+              "type": "string"
+            },
+            "infrastructure": {
+              "type": "string"
+            }
           }
         }
       }
@@ -477,6 +639,9 @@
         "finding_id": {
           "type": "string",
           "minLength": 1
+        },
+        "structure_rationale": {
+          "type": "string"
         }
       }
     },
@@ -498,7 +663,6 @@
         "reason",
         "proposal_kind",
         "proposed_categories",
-        "rationale",
         "confidence",
         "status"
       ],
@@ -600,8 +764,26 @@
         },
         "decision_impact": {
           "type": "string"
+        },
+        "analysis_ref": {
+          "type": "string"
+        },
+        "rationale_ref": {
+          "type": "string"
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "rationale"
+          ]
+        },
+        {
+          "required": [
+            "rationale_ref"
+          ]
+        }
+      ]
     },
     "processing_activity": {
       "type": "object",
@@ -668,6 +850,28 @@
         },
         "decision_impact": {
           "type": "string"
+        },
+        "proposed_categories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "processing_mode": {
+          "enum": [
+            "stored",
+            "transient",
+            "unknown"
+          ]
+        },
+        "recipient_systems": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "recipient_rationale": {
+          "type": "string"
         }
       },
       "required": [
@@ -680,7 +884,11 @@
         "dataset_references",
         "relationship_rationale",
         "activity_id",
-        "decision_summary"
+        "decision_summary",
+        "proposed_categories",
+        "processing_mode",
+        "recipient_systems",
+        "recipient_rationale"
       ]
     },
     "reasoning_group": {
