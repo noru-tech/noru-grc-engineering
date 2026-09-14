@@ -6,6 +6,9 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Clarify that deleting the privacy analysis cache loses unaccepted work, and that the committed
+  lock includes a compact snapshot of accepted privacy meaning.
+
 - Represent supplemental storage as datasets in the main privacy manifest and external services as
   systems with native ingress/egress. Preview structural proposals without changing acceptance and
   remove the separate stores-file contract.

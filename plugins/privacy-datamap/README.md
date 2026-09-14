@@ -467,7 +467,8 @@ node <plugin>/scripts/collect.mjs --repo=. --export
 
 Candidate YAML and full evidence JSON go to stdout. The review command writes the readable report;
 the export command requires an accepted valid manifest and writes `.fides/datamap.yml`. The accepted
-manifest and lock are committed; caches remain local.
+manifest and lock are committed; caches remain local. Deleting the analysis cache loses unaccepted
+investigations and proposals; accepted decisions remain in the committed manifest and lock.
 
 Readiness also checks purpose-specific activity categories, stored versus transient processing,
 recipient assessment, and system investigation covering runtime processing, sharing and storage.

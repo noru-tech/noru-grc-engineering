@@ -234,8 +234,8 @@ reviewer must not have to go looking for.
   compact non-personal names, interpretation blocks and review flags. Commit it; reviewing it in a
   pull request is the point.
 - `.noru/privacy-datamap.lock.json` — the **accepted observation**. Generated only after a current
-  manifest validates. It records stable structural fingerprints and citations, never business
-  meaning or agent reasoning. Commit it and do not edit it by hand.
+  manifest validates. It records stable structural fingerprints, citations and a compact snapshot
+  of accepted privacy meaning, without full agent reasoning. Commit it and do not edit it by hand.
 - `.fides/datamap.yml` — the **export**, in Ethyca's own format, for `fides push` and anything else
   that reads a Fides manifest. It contains only privacy-relevant fields, drops empty collections
   and datasets, and repairs system dataset references. Generated explicitly with `collect.mjs --export` after acceptance and validation.

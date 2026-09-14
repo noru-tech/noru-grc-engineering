@@ -1631,8 +1631,19 @@ def test_datamap_compacts_non_personal_review_state(results, tmp):
         and lock["entities"]["db/accounts/created_at"]["refs"] == ["db/schema.sql:6"],
         lock.get("entities"),
     )
+    lock_path = repo / ".noru/privacy-datamap.lock.json"
+    accepted_bytes = (manifest.read_bytes(), lock_path.read_bytes())
+    assert run(["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"]).returncode == 0
+    (repo / ".noru/.cache/privacy-datamap.analysis.json").unlink()
     unchanged = run(["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"])
     unchanged_payload = json.loads(unchanged.stdout)
+    results.check(
+        "[privacy-datamap] rebuilding deleted analysis preserves committed acceptance",
+        unchanged.returncode == 0
+        and (manifest.read_bytes(), lock_path.read_bytes()) == accepted_bytes
+        and unchanged_payload["counts"]["proposal_required"] == 0,
+        unchanged_payload,
+    )
     candidate = load_datamap_candidate(repo / ".noru" / ".cache" / "privacy-datamap.analysis.json")
     candidate_collection = candidate["dataset"][0]["collections"][0]
     results.check(
