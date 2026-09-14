@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/assets/grc-engineering.png" alt="grc-engineering" width="480">
+</p>
+
 # noru-grc-engineering
 
 > The compliance work that lives in your repo, your CI, or your laptop — done where it lives, and
