@@ -283,6 +283,15 @@
           "items": {
             "$ref": "#/$defs/collection"
           }
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "noru": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": true
         }
       }
     },
@@ -380,6 +389,15 @@
           "items": {
             "$ref": "#/$defs/field"
           }
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "noru": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": true
         }
       }
     },
@@ -418,6 +436,65 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/declaration"
+          }
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "noru": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": true
+        },
+        "ingress": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fides_key",
+              "type"
+            ],
+            "properties": {
+              "fides_key": {
+                "type": "string"
+              },
+              "type": {
+                "const": "system"
+              },
+              "data_categories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "egress": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fides_key",
+              "type"
+            ],
+            "properties": {
+              "fides_key": {
+                "type": "string"
+              },
+              "type": {
+                "const": "system"
+              },
+              "data_categories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }
@@ -465,6 +542,18 @@
         },
         "needs_review": {
           "type": "boolean"
+        },
+        "ingress": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "egress": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

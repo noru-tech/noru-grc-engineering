@@ -981,10 +981,10 @@ def test_audit_pack_every_conclusion_has_an_assurance_horizon(results):
 # the gap gets reviewed and the wrong answer gets signed.
 
 
-def datamap_scan(repo):
+def datamap_scan(repo, export=False):
     """Run the collector over a directory that already exists. Returns (summary, derived facts)."""
     collector = PRIVACY_DATAMAP / "scripts" / "collect.mjs"
-    result = run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+    result = run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"] + (["--export"] if export else []))
     if result.returncode != 0:
         raise RuntimeError(f"collector exited {result.returncode}: {result.stderr[:300]}")
     derived = json.loads(
@@ -1631,9 +1631,20 @@ def test_datamap_compacts_non_personal_review_state(results, tmp):
         and lock["entities"]["db/accounts/created_at"]["refs"] == ["db/schema.sql:6"],
         lock.get("entities"),
     )
+    lock_path = repo / ".noru/privacy-datamap.lock.json"
+    accepted_bytes = (manifest.read_bytes(), lock_path.read_bytes())
+    assert run(["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"]).returncode == 0
+    (repo / ".noru/.cache/privacy-datamap.analysis.json").unlink()
     unchanged = run(["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"])
     unchanged_payload = json.loads(unchanged.stdout)
-    candidate = load_datamap_yaml(repo / ".noru" / ".cache" / "privacy-datamap.candidate.yml")
+    results.check(
+        "[privacy-datamap] rebuilding deleted analysis preserves committed acceptance",
+        unchanged.returncode == 0
+        and (manifest.read_bytes(), lock_path.read_bytes()) == accepted_bytes
+        and unchanged_payload["counts"]["proposal_required"] == 0,
+        unchanged_payload,
+    )
+    candidate = load_datamap_candidate(repo / ".noru" / ".cache" / "privacy-datamap.analysis.json")
     candidate_collection = candidate["dataset"][0]["collections"][0]
     results.check(
         "[privacy-datamap] unchanged compact non-personal decisions carry forward",
@@ -1653,8 +1664,8 @@ def test_datamap_compacts_non_personal_review_state(results, tmp):
     datamap_scan(repo)
     changed = run(["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"])
     changed_payload = json.loads(changed.stdout)
-    changed_candidate = load_datamap_yaml(
-        repo / ".noru" / ".cache" / "privacy-datamap.candidate.yml"
+    changed_candidate = load_datamap_candidate(
+        repo / ".noru" / ".cache" / "privacy-datamap.analysis.json"
     )["dataset"][0]["collections"][0]
     results.check(
         "[privacy-datamap] a changed accepted non-personal field returns to review",
@@ -1731,6 +1742,92 @@ console.log(JSON.stringify({{ projected: toFideslang(base), blocked }}));
     )
 
 
+def test_datamap_semantic_regressions(results, tmp):
+    sys.path.insert(0, str(PRIVACY_DATAMAP / "scripts"))
+    import reconcile as workflow
+    import review
+    base = {"dataset": [{"fides_key": "records", "collections": [{"name": "profiles", "fields": [
+        {"name": "email", "data_categories": ["user.contact.email"]}]}]}],
+        "system": [{"fides_key": "portal", "egress": [{"fides_key": "mail_service", "type": "system"}],
+          "privacy_declarations": [{"name": "Notify members", "data_use": "essential.service.notifications.email",
+            "data_categories": ["user.contact.email", "user.name"], "data_subjects": ["customer", "employee"]}]}]}
+    # System flows are resource objects; declaration destinations are system-key strings.
+    base["system"][0]["privacy_declarations"][0]["egress"] = ["archive_service"]
+    before = workflow.semantic_snapshot(base)
+    results.check("[privacy-datamap] semantic comparison reads system objects and declaration string destinations",
+                  before["activities"]["portal/Notify members"]["recipients"] == ["archive_service", "mail_service"])
+    def clone(value):
+        return json.loads(json.dumps(value))
+    for label, edit in {
+        "personal to non-personal": lambda d: d["dataset"][0]["collections"][0]["fields"][0].update(data_categories=[]),
+        "activity categories": lambda d: d["system"][0]["privacy_declarations"][0].update(data_categories=["user.name"]),
+        "activity subjects": lambda d: d["system"][0]["privacy_declarations"][0].update(data_subjects=["customer"]),
+        "activity purpose": lambda d: d["system"][0]["privacy_declarations"][0].update(data_use="essential.service"),
+        "declaration recipient": lambda d: d["system"][0]["privacy_declarations"][0].update(egress=[]),
+        "activity recipient": lambda d: d["system"][0].update(egress=[]),
+        "removed activity": lambda d: d["system"][0].update(privacy_declarations=[]),
+    }.items():
+        changed = clone(base);edit(changed)
+        changes = workflow.semantic_changes(before, workflow.semantic_snapshot(changed))
+        results.check(f"[privacy-datamap] detects narrowing of {label}", bool(changes))
+        if label == "personal to non-personal":
+            results.check("[privacy-datamap] flags collection lost through export filtering",
+                          any(row["kind"] == "collection_filtered_from_export" for row in changes))
+    harmless = clone(base)
+    harmless["system"][0]["privacy_declarations"][0]["data_categories"].reverse()
+    harmless["dataset"][0]["collections"][0]["fields"][0]["refs"] = ["schema.sql:200"]
+    results.check("[privacy-datamap] citation and ordering changes preserve accepted meaning",
+                  not workflow.semantic_changes(before, workflow.semantic_snapshot(harmless)))
+    wider = clone(base);wider["system"][0]["privacy_declarations"][0]["data_categories"].append("user.unique_id")
+    results.check("[privacy-datamap] expansion is not reported as narrowing",
+                  not workflow.semantic_changes(before, workflow.semantic_snapshot(wider)))
+    pending = {"removal_required": [], "accepted_current": True}
+    workflow.add_semantic_review(pending, {"semantic_snapshot": before}, base,
+        {"proposals": [{"entity_id": "records/profiles/email", "proposal_kind": "non_personal", "proposed_categories": []}]})
+    results.check("[privacy-datamap] unaccepted classification proposals trigger semantic review",
+                  not pending["accepted_current"] and len(pending["removal_required"]) == 2)
+    repo = write_files(pathlib.Path(tmp) / "semantic-evidence", {"schema.sql": "-- synthetic schema evidence\n"})
+    results.check("[privacy-datamap] unexplained narrowing cannot be accepted",
+                  bool(review.validate_removals({}, pending, base, repo, accepting=True)))
+    answers = {"removal_proposals": [{**row, "outcome": "amended", "refs": ["schema.sql:1"], "confidence": "high",
+        "rationale": "The reviewed synthetic contract establishes a non-personal test mailbox.",
+        "decision_summary": "Reclassify the test mailbox."} for row in pending["removal_required"]]}
+    results.check("[privacy-datamap] evidenced semantic amendments can be accepted",
+                  not review.validate_removals(answers, pending, base, repo, accepting=True))
+    answers["removal_proposals"][0]["observation_digest"] = "0" * 64
+    results.check("[privacy-datamap] stale semantic explanation is rejected",
+                  bool(review.validate_removals(answers, pending, base, repo, accepting=True)))
+
+
+    # Full CLI path: a valid-looking edit must not bypass semantic review at export or sealing.
+    repo = write_files(pathlib.Path(tmp) / "semantic-cli", {"db/schema.sql": SQL_FIXTURE})
+    summary, _ = datamap_scan(repo)
+    manifest = repo / ".noru/privacy-datamap.yml"
+    manifest.write_text(accepted_datamap_text(summary["derived_digest"]))
+    command = ["python3", str(PRIVACY_DATAMAP / "scripts/reconcile.py"), f"--repo={repo}", "--output=json"]
+    assert run(command + ["--seal"]).returncode == 0
+    export = ["node", str(PRIVACY_DATAMAP / "scripts/collect.mjs"), f"--repo={repo}", "--export", "--output=json"]
+    assert run(export).returncode == 0
+    original_export = (repo / ".fides/datamap.yml").read_bytes()
+    manifest.write_text(manifest.read_text().replace("data_categories: [user.contact.email]", "data_categories: []"))
+    rejected = run(export)
+    results.check("[privacy-datamap] export blocks unsealed semantic narrowing and preserves the prior artifact",
+                  rejected.returncode != 0 and (repo / ".fides/datamap.yml").read_bytes() == original_export)
+    assert run(command).returncode == 0
+    cache = repo / ".noru/.cache/privacy-datamap.analysis.json"
+    document = workflow.analysis_storage.load(cache)
+    results.check("[privacy-datamap] unchanged code with narrowed meaning queues semantic explanations",
+                  bool(document["removal_proposals"]) and all(row["entity_id"].startswith("semantic:") for row in document["removal_proposals"]))
+    results.check("[privacy-datamap] semantic amendments cannot seal without an explanation", run(command + ["--seal"]).returncode == 1)
+    for row in document["removal_proposals"]:
+        row.update(outcome="amended", refs=["db/schema.sql:3"], rationale="Synthetic reviewed decision: this field holds a service test address.",
+                   confidence="high", decision_summary="Classify the service test address as non-personal.")
+    workflow.analysis_storage.save(cache, document)
+    sealed = run(command + ["--seal"])
+    results.check("[privacy-datamap] explained semantic changes establish a new baseline and permit export",
+                  sealed.returncode == 0 and run(export).returncode == 0, sealed.stderr)
+
+
 def test_datamap_enrichment_gate(results, tmp):
     repo = write_files(pathlib.Path(tmp) / "privacy-enrichment", {"db/schema.sql": SQL_FIXTURE})
     datamap_scan(repo)
@@ -1739,11 +1836,31 @@ def test_datamap_enrichment_gate(results, tmp):
     results.check("[privacy-datamap] reconciliation reports structure collected",
                   setup.returncode == 0 and json.loads(setup.stdout)["status"] == "structure collected")
     cache = repo / ".noru" / ".cache"
-    proposals = cache / "privacy-datamap.proposals.json"
+    proposals = cache / "privacy-datamap.analysis.json"
     command = ["python3", str(scripts / "review.py"), f"--repo={repo}", "--output=json"]
     incomplete = run(command)
     results.check("[privacy-datamap] skeleton is enrichment incomplete",
                   incomplete.returncode == 1 and json.loads(incomplete.stdout)["status"] == "enrichment incomplete")
+    sys.path.insert(0, str(scripts))
+    import review as renderer
+    snapshot = datamap_evidence(repo)
+    original_snapshot = json.dumps(snapshot, sort_keys=True)
+    large = json.loads(original_snapshot)
+    large["review_queue"]["field_groups"] = [{"summary": "Analysis required", "field_ids": [f"records/accounts/raw_field_{i}"]} for i in range(2000)]
+    large["review_queue"]["analysis_errors"] = [f"records/accounts/raw_field_{i}: missing rationale" for i in range(2000)]
+    large["review_queue"]["technical_coverage"] = {f"records/technical_{i}": 10 for i in range(1000)}
+    large["review_queue"]["collection_decisions"] = [f"records/collection_{i}" for i in range(1000)]
+    large["data_map"]["stores"][0]["collections"] = [f"collection_{i}" for i in range(1000)]
+    original_large = json.dumps(large, sort_keys=True)
+    map_view, decisions_view = renderer.render_outputs(large)
+    readable = map_view + decisions_view
+    results.check("[privacy-datamap] unfinished inventory becomes bounded agent work, not a field review dump",
+                  "enrichment incomplete" in readable and "2000 fields still lack" in readable
+                  and "raw_field_" not in readable and "technical_999" not in readable
+                  and len(readable) < 5000 and json.dumps(large, sort_keys=True) == original_large)
+    results.check("[privacy-datamap] privacy presentation preserves complete evidence and readiness errors",
+                  bool(snapshot["evidence_record"]["fields"]) and bool(snapshot["review_queue"]["analysis_errors"])
+                  and json.dumps(snapshot, sort_keys=True) == original_snapshot)
     document = json.loads(proposals.read_text())
     document["decisions"] = {"classify": {"decision_summary": "Establish the use of the unresolved account fields."}}
     for row in document["proposals"]:
@@ -1754,12 +1871,14 @@ def test_datamap_enrichment_gate(results, tmp):
                    analysis={"schema": "Read the SQL definition.", "relationships": "No foreign key in this fixture.",
                              "service_or_serialization": "No runtime consumer exists in this fixture."})
     for row in document["system_proposals"]:
+        row.update(system_type="Service", investigation={"runtime_processing": "Read the available runtime and schema evidence; business intent needs confirmation.", "external_recipients": "Inspected runtime integrations; no recipient is established in this fixture.", "storage": "Inspected schema and connection evidence.", "infrastructure": "The fixture contains no deployment infrastructure; only the cited runtime/schema binding is established."})
         row.update(rationale="Only a repository fallback boundary is available.", refs=["db/schema.sql:1"],
                    confidence="low", processing_activities=[{
                        "activity_id": "unknown", "purpose": "Processing purpose not established by this fixture",
                        "decision_summary": "Establish the account processing purpose.",
                        "decision_impact": "Determines the purpose and subject classification.",
                        "rationale": "No runtime consumer is present.", "refs": ["db/schema.sql:1"], "confidence": "low",
+                       "proposed_categories": [], "processing_mode": "unknown", "recipient_systems": [], "recipient_rationale": "No runtime recipient is established by this fixture.",
                        "proposed_data_uses": [], "proposed_data_subjects": [], "dataset_references": [],
                        "unresolved_question": "What process and subjects does the runtime serve?",
                        "relationship_rationale": "Schema exists but runtime access is not established.",
@@ -1768,8 +1887,7 @@ def test_datamap_enrichment_gate(results, tmp):
     document["store_investigation"].update(search_scope="Inspected all tracked SQL and runtime files.",
         rationale="The fixture has only a SQL schema and no other persistent integration.",
         refs=["db/schema.sql:1"], confidence="high")
-    protected = [repo / ".noru" / "privacy-datamap.yml", cache / "privacy-datamap.candidate.yml",
-                 repo / ".noru" / "privacy-datamap.lock.json", repo / ".fides" / "datamap.yml"]
+    protected = [repo / ".noru" / "privacy-datamap.yml", repo / ".noru" / "privacy-datamap.lock.json", repo / ".fides" / "datamap.yml"]
     before = {str(p): p.read_bytes() if p.exists() else None for p in protected}
     proposals.write_text(json.dumps(document))
     ready = run(command)
@@ -1795,6 +1913,14 @@ def test_datamap_enrichment_gate(results, tmp):
         "invalid citation": lambda d: d["proposals"][0].update(refs=["db/schema.sql:999999"]),
         "escaping citation": lambda d: d["proposals"][0].update(refs=["../outside.sql:1"]),
         "missing store investigation": lambda d: d.pop("store_investigation"),
+        "missing infrastructure investigation": lambda d: d["system_proposals"][0]["investigation"].pop("infrastructure"),
+        "missing runtime investigation": lambda d: d["system_proposals"][0]["investigation"].pop("runtime_processing"),
+        "missing recipient investigation": lambda d: d["system_proposals"][0]["investigation"].pop("external_recipients"),
+        "missing architectural type": lambda d: d["system_proposals"][0].pop("system_type"),
+        "missing activity categories": lambda d: d["system_proposals"][0]["processing_activities"][0].pop("proposed_categories"),
+        "invalid activity category": lambda d: d["system_proposals"][0]["processing_activities"][0].update(proposed_categories=["invented.category"]),
+        "stored processing without dataset": lambda d: d["system_proposals"][0]["processing_activities"][0].update(processing_mode="stored"),
+        "unrepresented recipient": lambda d: d["system_proposals"][0]["processing_activities"][0].update(recipient_systems=["missing_provider"]),
         "missing systems": lambda d: d.update(system_proposals=[]),
         "invalid use": lambda d: d["system_proposals"][0]["processing_activities"][0].update(proposed_data_uses=["invented.use"]),
         "invalid subject": lambda d: d["system_proposals"][0]["processing_activities"][0].update(proposed_data_subjects=["invented.subject"]),
@@ -1807,6 +1933,18 @@ def test_datamap_enrichment_gate(results, tmp):
         rejected = run(command)
         results.check(f"[privacy-datamap] enrichment rejects {name}", rejected.returncode == 1,
                       rejected.stderr or rejected.stdout)
+    covered = json.loads(json.dumps(document))
+    covered["store_investigation"]["findings"] = [{"store": "records", "status": "covered",
+        "dataset_reference": "db", "refs": ["db/schema.sql:1"], "confidence": "high",
+        "rationale": "The synthetic schema establishes this collection."}]
+    proposals.write_text(json.dumps(covered))
+    results.check("[privacy-datamap] claimed store coverage without structural boundary analysis blocks readiness",
+                  run(command).returncode == 1)
+    covered["store_investigation"]["findings"][0]["structure_rationale"] = (
+        "This dataset models persisted SQL records. Columns are flat; no SDK request envelope or nested payload is represented.")
+    proposals.write_text(json.dumps(covered))
+    results.check("[privacy-datamap] supported structural boundary analysis completes store coverage",
+                  run(command).returncode == 0)
     document["store_investigation"]["findings"] = [{"store": "archive", "status": "gap",
         "rationale": "Payload contract is absent.", "refs": ["db/schema.sql:1"], "confidence": "low",
         "unresolved_question": "Provide the archive payload contract.", "resolution_needed": "Supply the typed upload payload.",
@@ -1820,13 +1958,14 @@ def test_datamap_enrichment_gate(results, tmp):
     special = run(command)
     special_section = (cache / "privacy-datamap.review.md").read_text().split("## Possible Article 9 or Article 10 data")[1]
     results.check("[privacy-datamap] ambiguous special categories appear in the dedicated review section",
-                  special.returncode == 0 and document["proposals"][0]["entity_id"] in special_section)
+                  special.returncode == 0 and document["proposals"][0]["entity_id"].rsplit("/", 1)[0] in special_section
+                  and "user.health_and_medical" in special_section)
 
 
-    evidence = json.loads((cache / "privacy-datamap.evidence.json").read_text())
+    evidence = datamap_evidence(repo)
     schema = json.loads((ROOT / "contract" / "privacy-datamap-review.schema.json").read_text())
     results.check("[privacy-datamap] three review outputs satisfy the public contract",
-                  not validate_json_schema(evidence, schema) and (cache / "privacy-datamap.map.md").exists())
+                  not validate_json_schema(evidence, schema) and (cache / "privacy-datamap.review.md").exists())
     derived = json.loads((cache / "privacy-datamap.derived.json").read_text())
     observed_count = sum(len(c["fields"]) for d in derived["datasets"] for c in d["collections"])
     results.check("[privacy-datamap] evidence retains every observed field including deterministic fields",
@@ -1844,7 +1983,7 @@ def test_datamap_enrichment_gate(results, tmp):
     results.check("[privacy-datamap] shared decision summary appears once and full reasoning stays in evidence",
                   grouped.returncode == 0 and review.count("Treat account identifiers as personal data.") == 1
                   and "Shared account linkage rationale." not in review
-                  and "Shared account linkage rationale." in (cache / "privacy-datamap.evidence.json").read_text(), grouped.stdout or grouped.stderr)
+                  and "Shared account linkage rationale." in (cache / "privacy-datamap.analysis.json").read_text(), grouped.stdout or grouped.stderr)
     document["proposals"][0].update(proposal_kind="non_personal", proposed_categories=[], reasoning_group="",
                                     rationale="Technical row counter.")
     document["proposals"][0]["analysis"] = document["reasoning_groups"]["identifiers"]["analysis"]
@@ -1854,9 +1993,9 @@ def test_datamap_enrichment_gate(results, tmp):
     proposals.write_text(json.dumps(document))
     technical = run(command)
     review = (cache / "privacy-datamap.review.md").read_text()
-    map_text = (cache / "privacy-datamap.map.md").read_text()
+    map_text = (cache / "privacy-datamap.review.md").read_text()
     results.check("[privacy-datamap] technical fields collapse and distinct processing descriptions survive",
-                  technical.returncode == 0 and "<details><summary>Technical field coverage" in review
+                  technical.returncode == 0 and "Technical coverage:" in review
                   and "Technical row counter." not in review and all(name in map_text for name in
                   ("Authentication", "Training", "Billing", "Provider sharing")))
     document["structural_errors"] = [{"kind": "datastore boundary", "detail": "Two distinct catalog databases were combined.",
@@ -1867,7 +2006,7 @@ def test_datamap_enrichment_gate(results, tmp):
     results.check("[privacy-datamap] structural errors defer privacy decisions without dropping evidence",
                   blocked.returncode == 1 and "Fix structure before privacy review" in review
                   and "Changes requiring decisions" not in review
-                  and len(json.loads((cache / "privacy-datamap.evidence.json").read_text())["evidence_record"]["fields"]) == observed_count)
+                  and len(datamap_evidence(repo)["evidence_record"]["fields"]) == observed_count)
 
     document["structural_errors"] = []
     proposals.write_text(json.dumps(document))
@@ -1889,6 +2028,7 @@ def test_datamap_enrichment_gate(results, tmp):
                              "service_or_serialization": "Inspected runtime use."})
     for activity in document["system_proposals"][0]["processing_activities"]:
         activity.update(decision_summary=f"Use account data for {activity['purpose'].lower()}.",
+                        proposed_categories=["user.unique_id"], processing_mode="stored",
                         proposed_data_uses=["essential.service"], proposed_data_subjects=["customer"],
                         dataset_references=[derived["datasets"][0]["fides_key"]],
                         unresolved_question="", business_context_question="", resolution_needed="", decision_impact="",
@@ -1896,26 +2036,77 @@ def test_datamap_enrichment_gate(results, tmp):
     proposals.write_text(json.dumps(document))
     precise = run(command)
     review = (cache / "privacy-datamap.review.md").read_text()
-    evidence = json.loads((cache / "privacy-datamap.evidence.json").read_text())
+    evidence = datamap_evidence(repo)
     groups = evidence["review_queue"]["field_groups"]
     results.check("[privacy-datamap] concise reference decisions preserve categories, scope and all evidence",
                   precise.returncode == 0 and len(groups) == 1
                   and groups[0]["data_categories"] == ["user.unique_id"]
                   and set(groups[0]["field_ids"]) == {row["entity_id"] for row in document["proposals"]}
                   and len(evidence["evidence_record"]["fields"]) == observed_count
-                  and len(review.split()) <= 230, f"{len(review.split())} words; {precise.stderr or precise.stdout}")
+                  and len(review.split()) <= 250, f"{len(review.split())} words; {precise.stderr or precise.stdout}")
     results.check("[privacy-datamap] different field reasoning groups by decision and stays out of the review",
                   review.count("Treat account identifiers as personal data.") == 1
                   and "Field-specific explanation" not in review and "Detailed processing explanation" not in review
-                  and all(row["rationale"] in (cache / "privacy-datamap.evidence.json").read_text() for row in document["proposals"]))
+                  and all(row["rationale"] in (cache / "privacy-datamap.analysis.json").read_text() for row in document["proposals"]))
     results.check("[privacy-datamap] supported activities need no artificial questions or repeated instructions",
                   "Unknown:" not in review and "To resolve:" not in review
-                  and review.count("Accept or amend") == 1 and review.count("[Full evidence]") == 1
+                  and review.count("Accept or amend") == 1 and review.count("[Analysis and evidence]") == 1
                   and "## Coverage and identity questions" not in review)
-    proposal_contract = json.loads((ROOT / "contract" / "privacy-datamap-proposals.schema.json").read_text())
+    proposal_contract = json.loads((ROOT / "contract" / "privacy-datamap-analysis.schema.json").read_text())
     results.check("[privacy-datamap] question-free proposals satisfy both output contracts",
                   not validate_json_schema(document, proposal_contract) and not validate_json_schema(evidence, schema))
+    # Removed scope cannot be interpreted as retirement merely because extraction omitted it.
+    removal_result = json.loads(json.dumps(evidence["evidence_record"]["reconciliation"]))
+    removal_result["removal_required"] = [{"entity_id": "system:former_provider", "observation_digest": "a" * 64}]
+    removal_candidate = evidence["evidence_record"]["candidate_manifest"]
+    missing_removal = renderer.validate(json.loads(json.dumps(document)), removal_result, removal_candidate, repo)
+    results.check("[privacy-datamap] unexplained disappearance blocks readiness",
+                  any("removal_proposals: missing" in error for error in missing_removal))
+    removal_document = json.loads(json.dumps(document))
+    removal_document["removal_proposals"] = [{**removal_result["removal_required"][0], "outcome": "gap",
+        "rationale": "Current fixture only establishes storage, not the former provider's retirement.",
+        "refs": ["db/schema.sql:1"], "confidence": "low", "decision_summary": "Establish the former provider's status.",
+        "unresolved_question": "Was the provider retired or omitted from extraction?",
+        "resolution_needed": "Supply the current integration binding or removal evidence.",
+        "decision_impact": "Determines whether recipient coverage is complete."}]
+    removal_errors = renderer.validate(removal_document, removal_result, removal_candidate, repo)
+    results.check("[privacy-datamap] evidence-backed omission questions remain reviewable", not removal_errors, removal_errors)
+    removal_views = renderer.build_outputs(removal_document, removal_result, derived, removal_candidate, removal_errors)
+    removal_map, removal_review = renderer.render_outputs(removal_views)
+    results.check("[privacy-datamap] complete review displays purpose categories and actionable disappearance",
+                  "Categories: user.unique_id" in removal_map
+                  and "Was the provider retired or omitted" in removal_review
+                  and removal_views["status"] == "ready for human review")
+
+    results.check("[privacy-datamap] unresolved disappearance cannot seal an accepted baseline",
+                  bool(renderer.validate_removals(removal_document, removal_result, removal_candidate, repo, accepting=True)))
+    retirement = json.loads(json.dumps(removal_document))
+    retirement["removal_proposals"][0].update(outcome="retired", unresolved_question="", resolution_needed="", decision_impact="",
+        rationale="The reviewed retirement evidence establishes that this provider is no longer used.")
+    results.check("[privacy-datamap] reviewed removal evidence permits sealing",
+                  not renderer.validate_removals(retirement, removal_result, removal_candidate, repo, accepting=True))
+    invalid_activity_manifest = json.loads(json.dumps(removal_candidate))
+    invalid_activity_manifest["system"][0]["privacy_declarations"][0]["data_categories"] = []
+    manifest_report, _ = renderer.workflow.VALIDATOR.validate(invalid_activity_manifest, renderer.workflow.VALIDATOR.load_vocabulary())
+    results.check("[privacy-datamap] empty declaration categories cannot pass manifest validation",
+                  any("identify the data categories used for this processing purpose" in str(error) for error in manifest_report.errors))
+    for name, edit in {
+        "stale disappearance": {"observation_digest": "b" * 64},
+        "unsupported replacement": {"outcome": "replaced", "replacement_reference": "absent"},
+        "unexplained gap": {"unresolved_question": ""},
+        "missing retirement evidence": {"outcome": "retired", "refs": []},
+    }.items():
+        changed = json.loads(json.dumps(removal_document))
+        changed["removal_proposals"][0].update(edit)
+        results.check(f"[privacy-datamap] rejects {name}", bool(renderer.validate(changed, removal_result, removal_candidate, repo)))
+    transient = json.loads(json.dumps(document))
+    transient["system_proposals"][0]["processing_activities"][0].update(processing_mode="transient", dataset_references=[],
+        relationship_rationale="The payload is processed in memory and returned without persistent storage.")
+    results.check("[privacy-datamap] evidenced transient processing needs no artificial dataset",
+                  not renderer.validate(transient, evidence["evidence_record"]["reconciliation"], removal_candidate, repo))
     for name, mutate in {
+        "empty purpose categories without question": lambda d: d["system_proposals"][0]["processing_activities"][0].update(proposed_categories=[]),
+        "unknown processing without question": lambda d: d["system_proposals"][0]["processing_activities"][0].update(processing_mode="unknown"),
         "unknown decision": lambda d: d["proposals"][0].update(decision_id="absent"),
         "verbose summary": lambda d: d["decisions"]["classify"].update(decision_summary="x" * 241),
         "multiline summary": lambda d: d["decisions"]["classify"].update(decision_summary="One line\nAnother line"),
@@ -1999,7 +2190,7 @@ def test_discovery_acceptance_gate(results, tmp):
     results.check("[privacy-datamap] new unregistered scope blocks acceptance and stale export without schema drift",
                   summary["rendered"] is None and not pending["drift"] and pending["agent_required"]
                   and not pending["accepted_current"] and run(command + ["--seal"]).returncode == 1 and lock.read_bytes() == before)
-    path = repo / ".noru/.cache/privacy-datamap.proposals.json"
+    path = repo / ".noru/.cache/privacy-datamap.analysis.json"
     document = json.loads(path.read_text())
     change = document["discovery_required"][0]
     answer = {"path": change["path"], "observation_digest": workflow.dependencies.digest(change), "outcome": "no_new_scope",
@@ -2042,7 +2233,7 @@ def test_scoped_reconciliation_cli(results, tmp):
     datamap_scan(repo)
     command = ["python3", str(scripts / "reconcile.py"), f"--repo={repo}", "--output=json"]
     assert run(command).returncode == 0
-    path = repo / ".noru/.cache/privacy-datamap.proposals.json"
+    path = repo / ".noru/.cache/privacy-datamap.analysis.json"
     document = json.loads(path.read_text())
     document["evidence_dependencies"] = []
     for row, selector in zip(document["proposals"], ["serialize", "independent"]):
@@ -2282,7 +2473,7 @@ def test_datamap_candidate_collection(results, tmp):
     assert run(reconcile_command).returncode == 0
     assert run(review_command).returncode == 0
     cache = repo / ".noru/.cache"
-    proposals_path = cache / "privacy-datamap.proposals.json"
+    proposals_path = cache / "privacy-datamap.analysis.json"
     proposals = json.loads(proposals_path.read_text())
     graph = {"nodes": [
         {"id": "runtime", "kind": "runtime", "key": "repository"},
@@ -2303,36 +2494,36 @@ def test_datamap_candidate_collection(results, tmp):
     proposals_path.write_text(json.dumps(proposals))
     assert run(["python3", str(scripts / "validate_manifest.py"), str(manifest),
                 f"--emit-parsed={cache / 'privacy-datamap.parsed.json'}", "--quiet"]).returncode == 0
-    protected = {p: p.read_bytes() for p in (repo / ".noru").rglob("*") if p.is_file()}
+    protected = {p: p.read_bytes() for p in (repo / ".noru").rglob("*") if p.is_file() and p.name not in {"privacy-datamap.analysis.json", "privacy-datamap.review.md"}}
     (repo / ".fides").mkdir(exist_ok=True)
     export = repo / ".fides/datamap.yml"
     export.write_text("Existing accepted export remains unchanged.\n")
     protected[export] = export.read_bytes()
     candidate_command = ["node", str(scripts / "collect.mjs"), f"--repo={repo}", "--candidate", "--output=json"]
-    preview = cache / "privacy-datamap-preview"
+    preview = cache
     collected = run(candidate_command)
     results.check("[privacy-datamap] candidate collection consumes proposals without acceptance", collected.returncode == 0, collected.stderr)
-    derived = json.loads((preview / "privacy-datamap.derived.json").read_text())
+    derived = json.loads((preview / "privacy-datamap.analysis.json").read_text())["preview"]["derived"]
     results.check("[privacy-datamap] proposed connection corrects candidate collection and runtime datastore boundaries",
                   [d["fides_key"] for d in derived["datasets"]] == ["primary_store"]
                   and derived["datasets"][0]["collections"][0]["name"] == "accounts"
                   and derived["systems"][0]["dataset_references"] == ["primary_store"])
-    first_observations = (preview / "privacy-datamap.derived.json").read_bytes()
+    first_observations = json.loads((preview / "privacy-datamap.analysis.json").read_text())["preview"]["derived"]
     repeated = run(candidate_command)
     results.check("[privacy-datamap] unchanged candidate collection is byte-identical",
-                  repeated.returncode == 0 and (preview / "privacy-datamap.derived.json").read_bytes() == first_observations)
+                  repeated.returncode == 0 and json.loads((preview / "privacy-datamap.analysis.json").read_text())["preview"]["derived"] == first_observations)
     reconciled = run(reconcile_command + ["--candidate"])
-    results.check("[privacy-datamap] candidate reconciliation generates a separate review queue",
+    results.check("[privacy-datamap] candidate reconciliation records an unaccepted candidate",
                   reconciled.returncode == 0 and not json.loads(reconciled.stdout)["accepted_current"], reconciled.stderr)
-    candidate_path = preview / "privacy-datamap.candidate.yml"
-    candidate = load_datamap_yaml(candidate_path)
+    candidate_path = preview / "privacy-datamap.analysis.json"
+    candidate = load_datamap_candidate(candidate_path)
     results.check("[privacy-datamap] candidate manifest contains proposed graph and corrected fields",
                   candidate["relationship_graph"] == graph and candidate["dataset"][0]["fides_key"] == "primary_store"
                   and bool(candidate["evidence_dependencies"]))
     incomplete = run(review_command + ["--candidate"])
     results.check("[privacy-datamap] corrected preview still requires complete enrichment",
                   incomplete.returncode == 1 and json.loads(incomplete.stdout)["status"] == "enrichment incomplete")
-    preview_proposals_path = preview / "privacy-datamap.proposals.json"
+    preview_proposals_path = preview / "privacy-datamap.analysis.json"
     document = json.loads(preview_proposals_path.read_text())
     document["decisions"] = {"meaning": {"decision_summary": "Establish the remaining field meanings."}}
     for row in document["proposals"]:
@@ -2343,8 +2534,10 @@ def test_datamap_candidate_collection(results, tmp):
                    analysis={"schema": "Read the SQL definition.", "relationships": "Traced the explicit client binding.",
                              "service_or_serialization": "Only connection configuration is present."})
     for row in document["system_proposals"]:
+        row.update(system_type="Service", investigation={"runtime_processing": "Read the available runtime and schema evidence; business intent needs confirmation.", "external_recipients": "Inspected runtime integrations; no recipient is established in this fixture.", "storage": "Inspected schema and connection evidence.", "infrastructure": "The fixture contains no deployment infrastructure; only the cited runtime/schema binding is established."})
         row.update(rationale="The connection selects the primary store.", refs=["src/connection.py:1"], confidence="high",
                    processing_activities=[{"activity_id": "accounts", "purpose": "Account processing purpose remains unresolved",
+                       "proposed_categories": [], "processing_mode": "unknown", "recipient_systems": [], "recipient_rationale": "The connection fixture establishes no external recipient.",
                        "decision_summary": "Establish the account processing purpose.", "proposed_data_uses": [], "proposed_data_subjects": [],
                        "dataset_references": ["primary_store"], "relationship_rationale": "The proposed connection targets the primary store.",
                        "rationale": "The fixture establishes a destination but no business process.", "refs": ["src/connection.py:1"], "confidence": "low",
@@ -2353,19 +2546,46 @@ def test_datamap_candidate_collection(results, tmp):
     document["store_investigation"].update(search_scope="Read the schema and connection configuration.",
         rationale="No additional persistent integration exists in this synthetic fixture.", refs=["src/connection.py:1"], confidence="high", findings=[])
     preview_proposals_path.write_text(json.dumps(document))
+    # The preview changes established scope; its semantic differences also need an explanation.
+    assert run(reconcile_command + ["--candidate"]).returncode == 0
+    document = workflow.analysis_storage.load(preview_proposals_path)
+    for row in document["removal_proposals"]:
+        row.update(outcome="gap", refs=["src/connection.py:1"], confidence="low",
+            rationale="The connection establishes the proposed destination; remaining processing intent requires confirmation.",
+            decision_summary="Confirm processing scope after the mapping change.",
+            unresolved_question="Does the mapped runtime preserve the prior processing purpose?",
+            resolution_needed="Confirm the purpose and categories for this runtime.",
+            decision_impact="Determines whether the earlier processing scope remains covered.")
+    workflow.analysis_storage.save(preview_proposals_path, document)
     reviewed = run(review_command + ["--candidate"])
-    evidence = json.loads((preview / "privacy-datamap.evidence.json").read_text())
+    evidence = datamap_evidence(repo, candidate=True)
     results.check("[privacy-datamap] human review sees the corrected candidate map with unresolved business context",
                   reviewed.returncode == 0 and json.loads(reviewed.stdout)["status"] == "ready for human review"
                   and evidence["data_map"]["stores"][0]["id"] == "primary_store"
-                  and "Candidate collection" in (preview / "privacy-datamap.map.md").read_text(), reviewed.stderr or reviewed.stdout)
-    results.check("[privacy-datamap] candidate flow preserves accepted files, normal review artifacts and export",
+                  and "Candidate collection" in (preview / "privacy-datamap.review.md").read_text(), reviewed.stderr or reviewed.stdout)
+    obsolete = {"privacy-datamap.proposals.json", "privacy-datamap.reconciliation.json",
+                "privacy-datamap.candidate.yml", "privacy-datamap.map.md", "privacy-datamap.evidence.json",
+                "privacy-datamap-preview", "privacy-datamap.scan.json"}
+    results.check("[privacy-datamap] preview generates one analysis and one report without parallel artifacts",
+                  not (obsolete & {p.name for p in cache.iterdir()})
+                  and "preview" in json.loads(proposals_path.read_text())
+                  and not {"candidate", "reconciliation", "evidence"} & json.loads(proposals_path.read_text()).keys())
+    rendered_candidate = run(["python3", str(scripts / "reconcile.py"), f"--repo={repo}", "--render-candidate"])
+    results.check("[privacy-datamap] candidate YAML renders on demand without writing or accepting it",
+                  rendered_candidate.returncode == 0 and "primary_store" in rendered_candidate.stdout
+                  and not (obsolete & {p.name for p in cache.iterdir()}))
+    stable_analysis = json.loads(proposals_path.read_text())
+    repeated_review = run(review_command + ["--candidate"])
+    results.check("[privacy-datamap] repeated review does not nest or duplicate prior evidence",
+                  repeated_review.returncode == 0 and stable_analysis == json.loads(proposals_path.read_text())
+                  and "evidence" not in stable_analysis)
+    results.check("[privacy-datamap] candidate flow preserves accepted files, normal observations and export",
                   all(p.read_bytes() == content for p, content in protected.items()))
     del document["relationship_proposal"]
     preview_proposals_path.write_text(json.dumps(document))
     missing_mapping = run(review_command + ["--candidate"])
     results.check("[privacy-datamap] candidate review cannot omit the mapping decision",
-                  missing_mapping.returncode == 1 and "requires the collected relationship_proposal" in missing_mapping.stdout)
+                  missing_mapping.returncode != 0)
     document["relationship_proposal"] = proposals["relationship_proposal"]
     preview_proposals_path.write_text(json.dumps(document))
     assert run(review_command + ["--candidate"]).returncode == 0
@@ -2382,8 +2602,10 @@ def test_datamap_candidate_collection(results, tmp):
                   run(reconcile_command + ["--candidate", "--seal"]).returncode == 2
                   and run(candidate_command + ["--check"]).returncode == 2)
     preview_before = {p: p.read_bytes() for p in preview.iterdir() if p.is_file()}
-    preview_derived_path = preview / "privacy-datamap.derived.json"
-    preview_derived_path.write_text(first_observations.decode().replace('"primary_store"', '"edited_store"'))
+    preview_derived_path = preview / "privacy-datamap.analysis.json"
+    tampered = json.loads(preview_derived_path.read_text())
+    tampered["preview"]["derived"] = json.loads(json.dumps(first_observations).replace('"primary_store"', '"edited_store"'))
+    preview_derived_path.write_text(json.dumps(tampered))
     results.check("[privacy-datamap] edited candidate observations cannot reach review",
                   run(review_command + ["--candidate"]).returncode != 0)
     preview_derived_path.write_bytes(preview_before[preview_derived_path])
@@ -2394,12 +2616,14 @@ def test_datamap_candidate_collection(results, tmp):
     manifest.write_bytes(original_manifest)
     proposals["relationship_proposal"]["decision_summary"] = "Changed mapping proposal requires a fresh preview."
     proposals_path.write_text(json.dumps(proposals))
+    preview_before = {p: p.read_bytes() for p in preview.iterdir() if p.is_file()}
     results.check("[privacy-datamap] changed source proposal invalidates cached candidate review",
                   run(review_command + ["--candidate"]).returncode != 0
                   and all(p.read_bytes() == content for p, content in preview_before.items()))
     proposals["relationship_proposal"]["decision_summary"] = "Assign account storage to the configured primary store."
     proposals_path.write_text(json.dumps(proposals))
     (repo / "src/connection.py").write_text('SCHEMA_PATH = "db/schema.sql"\nDATASTORE = "different_store"\n')
+    preview_before = {p: p.read_bytes() for p in preview.iterdir() if p.is_file()}
     rejected = run(candidate_command)
     results.check("[privacy-datamap] stale candidate evidence fails before overwriting existing preview artifacts",
                   rejected.returncode != 0 and "evidence changed" in rejected.stderr
@@ -2557,7 +2781,7 @@ def test_datamap_repeatable_evidence_baseline(results, tmp):
     baseline_lock = lock_path.read_bytes()
     baseline_manifest = manifest_path.read_bytes()
     before = json.loads(run(command).stdout)
-    proposal_path = cache / "privacy-datamap.proposals.json"
+    proposal_path = cache / "privacy-datamap.analysis.json"
     proposals = json.loads(proposal_path.read_text())
     proposals["store_investigation"]["rationale"] = "Completed analysis is retained on identical input."
     proposal_path.write_text(json.dumps(proposals))
@@ -2625,7 +2849,7 @@ def test_datamap_repeatable_evidence_baseline(results, tmp):
     path.rename(repo / "src/moved.py")
     datamap_scan(repo)
     renamed = json.loads(run(command).stdout)
-    candidate = load_datamap_yaml(cache / "privacy-datamap.candidate.yml")
+    candidate = load_datamap_candidate(cache / "privacy-datamap.analysis.json")
     results.check("[privacy-datamap] unique code moves preserve decisions and refresh the candidate path",
                   not renamed["blocked"] and not renamed["drift"] and candidate["evidence_dependencies"][0]["path"] == "src/moved.py")
     (repo / "src/duplicate.py").write_text((repo / "src/moved.py").read_text())
@@ -2705,8 +2929,8 @@ def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
 
     manifest = repo / ".noru" / "privacy-datamap.yml"
     scan_state = json.loads(
-        (repo / ".noru" / ".cache" / "privacy-datamap.scan.json").read_text(encoding="utf-8")
-    )
+        (repo / ".noru" / ".cache" / "privacy-datamap.derived.json").read_text(encoding="utf-8")
+    )["_scan"]
     manifest.write_text(
         accepted_datamap_text(scan_state["legacy_derived_digest"]), encoding="utf-8"
     )
@@ -2810,12 +3034,12 @@ def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
         delta_payload["collection_review_required"],
     )
     proposals_document = json.loads(
-        (repo / ".noru" / ".cache" / "privacy-datamap.proposals.json").read_text(
+        (repo / ".noru" / ".cache" / "privacy-datamap.analysis.json").read_text(
             encoding="utf-8"
         )
     )
     proposals_schema = json.loads(
-        (ROOT / "contract" / "privacy-datamap-proposals.schema.json").read_text(
+        (ROOT / "contract" / "privacy-datamap-analysis.schema.json").read_text(
             encoding="utf-8"
         )
     )
@@ -2824,18 +3048,45 @@ def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
         validate_json_schema(proposals_document, proposals_schema, proposals_schema) == [],
         validate_json_schema(proposals_document, proposals_schema, proposals_schema),
     )
-    review_report = (
-        repo / ".noru" / ".cache" / "privacy-datamap.review.md"
-    ).read_text(encoding="utf-8")
-    results.check(
-        "[privacy-datamap] proposal review is compact and grouped by collection and field family",
-        "## db / accounts" in review_report
-        and "content and structured values" in review_report
-        and "profile_notes" in review_report
-        and "observation_digest" not in review_report
-        and "shape" not in review_report,
-        review_report[:1000],
-    )
+    results.check("[privacy-datamap] reconciliation does not generate a review report",
+                  not (repo / ".noru/.cache/privacy-datamap.review.md").exists())
+
+
+    (repo / "db" / "schema.sql").write_text(SQL_FIXTURE.replace("    weird_column  TEXT,\n", ""))
+    datamap_scan(repo)
+    removed = run(["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"])
+    removed_result = json.loads(removed.stdout)
+    removal_cache = json.loads((repo / ".noru/.cache/privacy-datamap.analysis.json").read_text())
+    results.check("[privacy-datamap] collection disappearance scope queues an investigation on real scans",
+                  removed_result["agent_required"] and len(removed_result["removal_required"]) == 1
+                  and removed_result["removal_required"][0]["entity_id"] == "collection:db/accounts"
+                  and len(removal_cache["removal_proposals"]) == 1, removed_result["removal_required"])
+    import review as renderer
+    removal_cache["discovery_proposals"] = [{"path": change["path"],
+        "observation_digest": renderer.workflow.dependencies.digest(change), "outcome": "analysed",
+        "decision_summary": "Account schema removes one field without adding processing scope.",
+        "rationale": "The fixture changed only by removal of the reviewed account field.",
+        "confidence": "high", "refs": ["db/schema.sql:1"]} for change in removal_cache.get("discovery_required", [])]
+    (repo / ".noru/.cache/privacy-datamap.analysis.json").write_text(json.dumps(removal_cache))
+    prior_manifest = renderer.workflow.load_manifest(manifest)
+    reviewed_candidate = load_datamap_candidate(repo / ".noru/.cache/privacy-datamap.analysis.json")
+    for collection in reviewed_candidate["dataset"][0]["collections"]:
+        collection.pop("needs_review", None)
+        collection["interpretation"] = prior_manifest["dataset"][0]["collections"][0]["interpretation"]
+    manifest.write_text(renderer.workflow.to_yaml(reviewed_candidate))
+    protected_lock = (repo / ".noru/privacy-datamap.lock.json").read_bytes()
+    rejected_seal = run(["python3", str(reconcile), f"--repo={repo}", "--seal", "--output=json"])
+    results.check("[privacy-datamap] seal CLI blocks uninvestigated disappearance despite resolved manifest flags",
+                  rejected_seal.returncode == 1 and "cannot seal unexplained removals" in rejected_seal.stderr
+                  and (repo / ".noru/privacy-datamap.lock.json").read_bytes() == protected_lock,
+                  rejected_seal.stderr)
+    removal_cache["removal_proposals"][0].update(outcome="retired", refs=["db/schema.sql:1"], confidence="high",
+        rationale="The fixture's reviewed schema no longer contains the retired field.",
+        decision_summary="Retire the obsolete account field.")
+    (repo / ".noru/.cache/privacy-datamap.analysis.json").write_text(json.dumps(removal_cache))
+    accepted_seal = run(["python3", str(reconcile), f"--repo={repo}", "--seal", "--output=json"])
+    results.check("[privacy-datamap] seal CLI accepts a valid manifest with investigated retirement",
+                  accepted_seal.returncode == 0, accepted_seal.stderr)
 
 
 def test_datamap_bootstrap_ignores_invalid_manifest_baseline(results, tmp):
@@ -2881,9 +3132,9 @@ system:
         ["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"]
     )
     payload = json.loads(completed.stdout)
-    candidate_path = repo / ".noru" / ".cache" / "privacy-datamap.candidate.yml"
-    candidate_text = candidate_path.read_text(encoding="utf-8")
-    candidate = load_datamap_yaml(candidate_path)
+    candidate_path = repo / ".noru" / ".cache" / "privacy-datamap.analysis.json"
+    candidate_text = json.dumps(load_datamap_candidate(candidate_path))
+    candidate = load_datamap_candidate(candidate_path)
     declaration = candidate["system"][0]["privacy_declarations"][0]
     results.check(
         "[privacy-datamap] bootstrap candidate ignores every invalid manifest semantic",
@@ -3285,152 +3536,180 @@ def test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, t
     )
 
 
-def test_datamap_reads_evidence_backed_supplemental_stores(results, tmp):
-    supplement = {
-        "$schema": "https://raw.githubusercontent.com/noru-tech/noru-grc-engineering/v0/contract/privacy-datamap-stores.schema.json",
-        "version": "1.0.0",
-        "datastores": [
-            {
-                "fides_key": "customer_objects",
-                "name": "Customer object storage",
-                "store_type": "object_storage",
-                "provider": "gcs",
-                "refs": ["src/storage.ts:5"],
-                "system_references": ["src"],
-                "collections": [
-                    {
-                        "name": "uploaded_files",
-                        "refs": ["src/storage.ts:1"],
-                        "fields": [
-                            {
-                                "name": "object_key",
-                                "shape": "string",
-                                "evidence_kind": "typed_contract",
-                                "refs": ["src/storage.ts:2"],
-                            },
-                            {
-                                "name": "content_type",
-                                "shape": "string",
-                                "evidence_kind": "upload_payload",
-                                "refs": ["src/storage.ts:3"],
-                            },
-                        ],
-                    }
-                ],
-            }
-        ],
+def test_datamap_normalized_storage(results, tmp):
+    sys.path.insert(0, str(PRIVACY_DATAMAP / "scripts"))
+    import analysis_storage as storage
+    prose = "Read the declared relationship and serializer; purpose remains unresolved. " * 20
+    document = {"proposals": [{"entity_id": f"records/items/field_{i}", "rationale": prose,
+                   "analysis": {"schema": prose, "relationships": prose, "service_or_serialization": prose},
+                   "refs": [f"src/model.ts:{i + 1}"], "needs_review": True,
+                   "unresolved_question": "Which process uses this data?"} for i in range(500)],
+                "evidence_dependencies": [], "store_investigation": {"findings": [{"status": "gap"}]},
+                "preview": {"derived": {"datasets": []}, "scan": {"derived_digest": "fixture"}}}
+    original = json.loads(json.dumps(document))
+    materialized = {**document, "evidence": {"agent_analysis": document}, "candidate": {}, "reconciliation": {}}
+    path = pathlib.Path(tmp) / "normalized-analysis.json"
+    storage.save(path, materialized)
+    stored = json.loads(path.read_text())
+    results.check("[privacy-datamap] normalized storage preserves all unique reasoning, flags, gaps and preview inputs",
+                  storage.load(path) == original and document == original
+                  and not storage.DERIVED_SECTIONS & stored.keys())
+    results.check("[privacy-datamap] repeated long reasoning is stored once and scales with field references",
+                  len(stored["shared_reasoning"]) == 2 and path.stat().st_size < len(json.dumps(original).encode()) / 5)
+    saved = path.read_bytes(); storage.save(path, storage.load(path))
+    results.check("[privacy-datamap] normalized cache round trips are byte-identical", path.read_bytes() == saved)
+    broken = json.loads(path.read_text()); broken["shared_reasoning"] = {}
+    try:
+        storage.save(path, broken)
+        rejected = False
+    except ValueError:
+        rejected = True
+    results.check("[privacy-datamap] missing shared reasoning fails without overwriting the previous cache",
+                  rejected and path.read_bytes() == saved)
+
+
+def load_datamap_candidate(path):
+    completed = run(["python3", str(PRIVACY_DATAMAP / "scripts/reconcile.py"),
+                     f"--repo={path.parent.parent.parent}", "--render-candidate"])
+    if completed.returncode:
+        raise RuntimeError(completed.stderr)
+    sys.path.insert(0, str(PRIVACY_DATAMAP / "scripts"))
+    import validate_manifest
+    return validate_manifest.load_yaml(completed.stdout)[0]
+
+
+def datamap_evidence(repo, candidate=False):
+    completed = run(["python3", str(PRIVACY_DATAMAP / "scripts/review.py"), f"--repo={repo}", "--output=evidence"]
+                    + (["--candidate"] if candidate else []))
+    if completed.returncode not in (0, 1):
+        raise RuntimeError(completed.stderr)
+    return json.loads(completed.stdout)
+
+
+def test_datamap_reads_evidence_backed_datasets(results, tmp):
+    sys.path.insert(0, str(PRIVACY_DATAMAP / "scripts"))
+    from reconcile import to_yaml as yaml
+    dataset = {
+        "fides_key": "customer_objects",
+        "name": "Customer object storage",
+        "meta": {"noru": {"origin": "supplemental", "refs": ["src/storage.ts:5"]}},
+        "collections": [{
+            "name": "uploaded_files",
+            "refs": ["src/storage.ts:1"],
+            "fields": [
+                {"name": "object_key", "refs": ["src/storage.ts:2"], "data_categories": [], "needs_review": True,
+                 "meta": {"noru": {"shape": "string", "evidence_kind": "typed_contract"}}},
+                {"name": "content_type", "refs": ["src/storage.ts:3"], "data_categories": [], "needs_review": True,
+                 "meta": {"noru": {"shape": "string", "evidence_kind": "upload_payload"}}},
+            ],
+        }],
     }
-    schema = json.loads(
-        (ROOT / "contract" / "privacy-datamap-stores.schema.json").read_text(encoding="utf-8")
-    )
-    results.check(
-        "[privacy-datamap] the supplemental datastore fixture satisfies its public contract",
-        validate_json_schema(supplement, schema, schema) == [],
-        validate_json_schema(supplement, schema, schema),
-    )
-    derived, _repo = datamap_repo(
-        tmp,
-        "supplemental-store",
-        {
-            "src/storage.ts": (
-                "export type StoredObject = {\n"
-                "  object_key: string\n"
-                "  content_type: string\n"
-                "}\n"
-                "const bucket = storage.bucket('uploads')\n"
-                "export const upload = (value: StoredObject) => bucket.upload(value)\n"
-                "serve(() => 'ok')\n"
-            ),
-            ".noru/privacy-datamap-stores.json": json.dumps(supplement, indent=2) + "\n",
-        },
-    )
-    dataset = derived["datasets"][0]
-    results.check(
-        "[privacy-datamap] an evidence-backed non-schema store joins the logical topology",
-        dataset["fides_key"] == "customer_objects"
-        and dataset["store_type"] == "object_storage"
-        and dataset["provider"] == "gcs"
-        and set(fields_of(derived, "uploaded_files")) == {"object_key", "content_type"},
-        dataset,
-    )
-    results.check(
-        "[privacy-datamap] supplemental system references attach the store to discovered runtime evidence",
-        derived["systems"][0]["fides_key"] == "src"
-        and derived["systems"][0]["dataset_references"] == ["customer_objects"],
-        derived["systems"],
-    )
+    document = {"version": "0.9.0", "piece": "privacy-datamap", "dataset": [dataset], "system": [
+        {"fides_key": "src", "name": "src", "system_type": "Application", "dataset_references": ["customer_objects"], "privacy_declarations": [],
+         "meta": {"noru": {"refs": ["src/storage.ts:5"]}}, "egress": [{"fides_key": "object_service", "type": "system", "data_categories": []}]},
+        {"fides_key": "object_service", "name": "Object service", "system_type": "Third Party", "dataset_references": ["customer_objects"],
+         "meta": {"noru": {"origin": "external", "refs": ["src/storage.ts:5"]}}, "privacy_declarations": []}]}
+    source = "export type StoredObject = {\n object_key: string\n content_type: string\n}\nconst bucket = storage.bucket('uploads')\nserve(() => 'ok')\n"
+    derived, repo = datamap_repo(tmp, "supplemental-datasets", {"src/storage.ts": source, ".noru/privacy-datamap.yml": yaml(document)})
+    results.check("[privacy-datamap] supplemental fields are collected directly from manifest datasets",
+                  derived["datasets"][0]["fides_key"] == "customer_objects" and set(fields_of(derived, "uploaded_files")) == {"object_key", "content_type"})
+    systems = {row["fides_key"]: row for row in derived["systems"]}
+    results.check("[privacy-datamap] external systems and native Fides flows join evidenced runtimes",
+                  systems["object_service"]["system_type"] == "Third Party" and systems["src"]["egress"][0]["fides_key"] == "object_service")
+    collector = PRIVACY_DATAMAP / "scripts/collect.mjs"
+    manifest = repo / ".noru/privacy-datamap.yml"
+    bad = json.loads(json.dumps(document)); bad["dataset"][0]["collections"][0]["fields"][0]["refs"] = ["src/storage.ts:99"]
+    manifest.write_text(yaml(bad))
+    failed = run(["node", str(collector), f"--repo={repo}", "--quiet"])
+    results.check("[privacy-datamap] supplemental dataset evidence outside the source stops collection", failed.returncode == 2 and "cites line 99" in failed.stderr, failed.stderr)
+    bad = json.loads(json.dumps(document));bad["system"][0]["egress"][0]["fides_key"] = "missing"
+    manifest.write_text(yaml(bad))
+    failed = run(["node", str(collector), f"--repo={repo}", "--quiet"])
+    results.check("[privacy-datamap] native flows cannot reference undiscovered systems", failed.returncode == 2 and "evidenced system" in failed.stderr)
+    manifest.write_text(yaml(document))
+    cache = repo / ".noru/.cache/privacy-datamap.analysis.json"
+    cache.write_text(json.dumps({"structural_proposal": {"dataset": document["dataset"], "system": document["system"]}}))
+    protected = manifest.read_bytes()
+    preview = run(["node", str(collector), f"--repo={repo}", "--candidate", "--quiet"])
+    results.check("[privacy-datamap] structural-only candidate preview needs no invented relationship graph",
+                  preview.returncode == 0 and manifest.read_bytes() == protected, preview.stderr)
+    reconciled = run(["python3", str(PRIVACY_DATAMAP / "scripts/reconcile.py"), f"--repo={repo}", "--candidate", "--output=json"])
+    results.check("[privacy-datamap] candidate reconciliation retains supplemental structural metadata",
+                  reconciled.returncode == 0 and load_datamap_candidate(repo / '.noru/.cache/privacy-datamap.analysis.json')['dataset'][0]['meta']['noru']['origin'] == 'supplemental', reconciled.stderr)
+    import dependencies
+    staged = json.loads(cache.read_text())
+    dep = {"id": "input", "path": "src/storage.ts", "method": "text", "targets": ["customer_objects/uploaded_files"]}
+    dep["fingerprint"] = dependencies.observe(repo, dep)["fingerprint"]
+    staged["structural_proposal"]["evidence_dependencies"] = [dep]
+    cache.write_text(json.dumps(staged))
+    (repo / "src/storage.ts").write_text(source + "export const destination = 'changed';\n")
+    stale = run(["node", str(collector), f"--repo={repo}", "--candidate", "--quiet"])
+    results.check("[privacy-datamap] stale structural proposal evidence blocks candidate collection", stale.returncode == 2 and "structural evidence changed" in stale.stderr)
+    (repo / "src/storage.ts").write_text(source)
+    sdk, _ = datamap_repo(tmp, "sdk-no-dataset", {"src/storage.ts": "const bucket = storage.bucket('uploads')\n"})
+    results.check("[privacy-datamap] provider SDK calls alone do not invent datasets", sdk["datasets"] == [])
 
-    sdk_only, _repo = datamap_repo(
-        tmp,
-        "object-sdk-only",
-        {"src/storage.ts": "const bucket = storage.bucket('uploads')\n"},
-    )
-    results.check(
-        "[privacy-datamap] a bucket client call alone never invents object fields or a dataset",
-        sdk_only["datasets"] == [],
-        sdk_only["datasets"],
-    )
 
-    collector = PRIVACY_DATAMAP / "scripts" / "collect.mjs"
-    bad_citation = json.loads(json.dumps(supplement))
-    bad_citation["datastores"][0]["collections"][0]["fields"][0]["refs"] = [
-        "src/storage.ts:99"
-    ]
-    bad_repo = write_files(
-        pathlib.Path(tmp) / "supplement-bad-citation",
-        {
-            "src/storage.ts": (
-                "export type StoredObject = {\n"
-                "  object_key: string\n"
-                "  content_type: string\n"
-                "}\n"
-                "const bucket = storage.bucket('uploads')\n"
-                "export const upload = (value: StoredObject) => bucket.upload(value)\n"
-                "serve(() => 'ok')\n"
-            ),
-            ".noru/privacy-datamap-stores.json": json.dumps(bad_citation),
-        },
-    )
-    bad_result = run(["node", str(collector), f"--repo={bad_repo}", "--quiet"])
-    results.check(
-        "[privacy-datamap] a supplemental field citation beyond the source file stops the scan",
-        bad_result.returncode == 2 and "cites line 99" in bad_result.stderr,
-        bad_result.stderr,
-    )
-
-    unknown_system = json.loads(json.dumps(supplement))
-    unknown_system["datastores"][0]["system_references"] = ["missing_runtime"]
-    unknown_repo = write_files(
-        pathlib.Path(tmp) / "supplement-unknown-system",
-        {
-            "src/storage.ts": (
-                "export type StoredObject = {\n"
-                "  object_key: string\n"
-                "  content_type: string\n"
-                "}\n"
-                "const bucket = storage.bucket('uploads')\n"
-            ),
-            ".noru/privacy-datamap-stores.json": json.dumps(unknown_system),
-        },
-    )
-    unknown_result = run(["node", str(collector), f"--repo={unknown_repo}", "--quiet"])
-    results.check(
-        "[privacy-datamap] a supplemental link to an undiscovered runtime stops the scan",
-        unknown_result.returncode == 2 and "references undiscovered system" in unknown_result.stderr,
-        unknown_result.stderr,
-    )
-
-    tracked_repo = git_repo(
-        pathlib.Path(tmp) / "supplement-untracked",
-        {"src/storage.ts": "export const storage = true\n"},
-        then={".noru/privacy-datamap-stores.json": json.dumps(supplement)},
-    )
-    untracked_result = run(["node", str(collector), f"--repo={tracked_repo}", "--quiet"])
-    results.check(
-        "[privacy-datamap] an untracked supplemental declaration stops a git-backed scan",
-        untracked_result.returncode == 2 and "exists but is not tracked" in untracked_result.stderr,
-        untracked_result.stderr,
-    )
+def test_datamap_native_input_acceptance(results, tmp):
+    sys.path.insert(0, str(PRIVACY_DATAMAP / "scripts"))
+    import reconcile as workflow
+    repo = write_files(pathlib.Path(tmp) / "native-input-acceptance", {"src/storage.ts": "export const payload = {email: account.email};\nserve(() => 'ok')\n"})
+    interpretation = {"owner": "Fixture Reviewer", "decided_at": "2026-08-20", "expires_at": "2027-08-20", "rationale": "Synthetic acceptance fixture for service delivery."}
+    field = {"name": "content", "refs": ["src/storage.ts:1"], "data_categories": [], "meta": {"noru": {"shape": "JSON object", "evidence_kind": "serializer"}},
+             "fields": [{"name": "email", "refs": ["src/storage.ts:1"], "data_categories": ["user.contact.email"], "meta": {"noru": {"shape": "string", "evidence_kind": "serializer"}}}]}
+    dataset = {"fides_key": "objects", "name": "Objects", "meta": {"noru": {"origin": "supplemental", "refs": ["src/storage.ts:1"]}, "description_hint": "Synthetic metadata"},
+               "collections": [{"name": "documents", "refs": ["src/storage.ts:1"], "fields": [field], "interpretation": interpretation,
+                                "structure_digest": workflow.sha256_bytes(b"content\ncontent.email")}]}
+    declaration = {"name": "Provide the service", "data_use": "essential.service", "data_categories": ["user.contact.email"], "data_subjects": ["customer"], "refs": ["src/storage.ts:1"], "interpretation": interpretation}
+    systems = [{"fides_key": "src", "name": "API", "system_type": "Application", "dataset_references": ["objects"], "privacy_declarations": [declaration],
+                "meta": {"noru": {"refs": ["src/storage.ts:1"]}}, "egress": [{"fides_key": "archive", "type": "system", "data_categories": ["user.contact.email"]}]},
+               {"fides_key": "archive", "name": "Archive", "system_type": "Third Party", "dataset_references": ["objects"], "privacy_declarations": [declaration],
+                "meta": {"noru": {"origin": "external", "refs": ["src/storage.ts:1"]}}}]
+    spec = {"id": "payload", "path": "src/storage.ts", "method": "typescript_ast", "selector": "payload", "targets": ["objects/documents", "system:src", "system:archive"]}
+    spec["fingerprint"] = workflow.dependencies.observe(repo, spec)["fingerprint"]
+    doc = {"version": "0.9.0", "piece": "privacy-datamap", "source": {"slug": "fixture/objects", "commit_sha": "a"*40, "branch": "main", "generated_by": "privacy-datamap@0.9.0", "derived_digest": "0"*64},
+           "dataset": [dataset], "system": systems, "evidence_dependencies": [spec]}
+    manifest = repo / ".noru/privacy-datamap.yml";manifest.parent.mkdir(exist_ok=True)
+    manifest.write_text(workflow.to_yaml(doc))
+    summary, derived = datamap_scan(repo);doc["source"]["derived_digest"] = summary["derived_digest"];manifest.write_text(workflow.to_yaml(doc))
+    cmd = ["python3", str(PRIVACY_DATAMAP / "scripts/reconcile.py"), f"--repo={repo}", "--output=json"]
+    sealed = run(cmd + ["--seal"])
+    results.check("[privacy-datamap] evidenced native supplemental datasets and external systems can be accepted", sealed.returncode == 0, sealed.stderr)
+    if sealed.returncode: return
+    parsed = repo / '.noru/.cache/privacy-datamap.parsed.json'
+    validated = run(['python3', str(PRIVACY_DATAMAP / 'scripts/validate_manifest.py'), str(manifest), f'--emit-parsed={parsed}', '--quiet'])
+    results.check("[privacy-datamap] native supplemental manifest validates for export", validated.returncode == 0, validated.stderr)
+    summary, _ = datamap_scan(repo, export=True)
+    output = (repo / '.fides/datamap.yml').read_text()
+    exported = workflow.VALIDATOR.load_yaml(output)[0]
+    results.check("[privacy-datamap] Fides export retains nested fields and native flows without local provenance",
+                  exported['dataset'][0]['collections'][0]['fields'][0]['fields'][0]['name'] == 'email'
+                  and exported['system'][0]['egress'][0]['type'] == 'system' and 'evidence_kind' not in output
+                  and exported['dataset'][0]['meta']['description_hint'] == 'Synthetic metadata')
+    without_dependencies = json.loads(json.dumps(doc));without_dependencies.pop('evidence_dependencies')
+    report, _ = workflow.VALIDATOR.validate(without_dependencies, workflow.VALIDATOR.load_vocabulary())
+    results.check("[privacy-datamap] supplemental fields and external services require registered evidence at acceptance", any('structural input citation' in str(e) for e in report.errors))
+    repeated = json.loads(run(cmd).stdout)
+    results.check("[privacy-datamap] accepted supplemental definitions remain current on an unchanged scan", repeated['accepted_current'])
+    import review
+    proposal_document = json.loads((repo / '.noru/.cache/privacy-datamap.analysis.json').read_text())
+    outputs = review.build_outputs(proposal_document, repeated, derived, doc, [])
+    rendered, _ = review.render_outputs(outputs)
+    results.check("[privacy-datamap] review data map displays native system transfers", 'src → archive' in rendered)
+    candidate = load_datamap_candidate(repo / '.noru/.cache/privacy-datamap.analysis.json')
+    results.check("[privacy-datamap] reconciliation preserves nested supplemental provenance and non-personal parents",
+                  candidate['dataset'][0]['collections'][0]['fields'][0]['fields'][0]['meta']['noru']['shape'] == 'string')
+    (repo / 'src/storage.ts').write_text('export const payload = {email: account.email, phone: account.phone};\nserve(() => "ok")\n')
+    datamap_scan(repo)
+    changed = json.loads(run(cmd).stdout)
+    results.check("[privacy-datamap] changed supplemental payload evidence blocks acceptance without erasing dataset structure",
+                  not changed['accepted_current'] and bool(changed['investigation_required']) and run(cmd + ['--seal']).returncode == 1)
+    (repo / 'src/storage.ts').write_text("export const payload = {email: account.email};\nserve(() => 'ok')\n")
+    doc['system'][0]['egress'] = []
+    manifest.write_text(workflow.to_yaml(doc));datamap_scan(repo)
+    changed = json.loads(run(cmd).stdout)
+    results.check("[privacy-datamap] native flow removal is structural drift requiring review",
+                  changed['drift'] and any('flow' in row['reason'] for row in changed['system_changes']))
 
 
 def test_datamap_keys_are_unique_or_fail_actionably(results, tmp):
@@ -3563,7 +3842,7 @@ system:
     reconcile = PRIVACY_DATAMAP / "scripts" / "reconcile.py"
     completed = run(["python3", str(reconcile), f"--repo={repo}", "--output=json", "--quiet"])
     payload = json.loads(completed.stdout)
-    candidate = (repo / ".noru" / ".cache" / "privacy-datamap.candidate.yml").read_text(encoding="utf-8")
+    candidate = json.dumps(load_datamap_candidate(repo / ".noru" / ".cache" / "privacy-datamap.analysis.json"))
     results.check(
         "[privacy-datamap] unique evidence-supported file identities migrate without add/remove churn",
         completed.returncode == 0
@@ -3574,7 +3853,7 @@ system:
     )
     results.check(
         "[privacy-datamap] identity migration carries the accepted field classification",
-        "fides_key: db\n" in candidate and "user.contact.email" in candidate,
+        '"fides_key": "db"' in candidate and "user.contact.email" in candidate,
         candidate[:1200],
     )
     lock["entities"]["db_migrations_002/users/email"] = {
@@ -3663,7 +3942,10 @@ def test_datamap_render_is_gated_and_matches_the_push(results, tmp):
     ):
         return
 
-    scan = run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+    normal = run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+    results.check("[privacy-datamap] normal scans never export even an accepted manifest",
+                  normal.returncode == 0 and not (repo / ".fides/datamap.yml").exists())
+    scan = run(["node", str(collector), f"--repo={repo}", "--export", "--output=json", "--quiet"])
     rendered = json.loads(scan.stdout).get("rendered")
     results.check(
         "[privacy-datamap] a validated manifest renders the Fides export",
@@ -3676,6 +3958,10 @@ def test_datamap_render_is_gated_and_matches_the_push(results, tmp):
         SQL_FIXTURE.replace("weird_column  TEXT,", "weird_column  TEXT,\n    phone_number  TEXT,"),
         encoding="utf-8",
     )
+    before_export = (repo / ".fides/datamap.yml").read_bytes()
+    rejected_export = run(["node", str(collector), f"--repo={repo}", "--export", "--output=json", "--quiet"])
+    results.check("[privacy-datamap] stale explicit exports fail without replacing prior output",
+                  rejected_export.returncode != 0 and (repo / ".fides/datamap.yml").read_bytes() == before_export)
     (repo / ".fides" / "datamap.yml").unlink()
     run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
     results.check(
@@ -3686,7 +3972,7 @@ def test_datamap_render_is_gated_and_matches_the_push(results, tmp):
 
     # Put it back, render again, and compare the export against what :push would send.
     (repo / "db" / "schema.sql").write_text(SQL_FIXTURE, encoding="utf-8")
-    run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"])
+    run(["node", str(collector), f"--repo={repo}", "--export", "--output=json", "--quiet"])
     (repo / ".noru" / ".cache" / "noru-state.json").write_text(
         json.dumps(
             {
@@ -4286,6 +4572,7 @@ def main(argv):
             test_datamap_candidate_collection(results, tmp)
             test_datamap_connection_graph(results, tmp)
             test_datamap_repeatable_evidence_baseline(results, tmp)
+            test_datamap_semantic_regressions(results, tmp)
             test_datamap_enrichment_gate(results, tmp)
             test_datamap_reconciles_only_the_privacy_delta(results, tmp)
             test_datamap_bootstrap_ignores_invalid_manifest_baseline(results, tmp)
@@ -4297,7 +4584,9 @@ def main(argv):
             test_datamap_separates_datastores_and_falls_back_for_runtime(results, tmp)
             test_datamap_runtime_discovery_ignores_test_files(results, tmp)
             test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, tmp)
-            test_datamap_reads_evidence_backed_supplemental_stores(results, tmp)
+            test_datamap_reads_evidence_backed_datasets(results, tmp)
+            test_datamap_native_input_acceptance(results, tmp)
+            test_datamap_normalized_storage(results, tmp)
             test_datamap_keys_are_unique_or_fail_actionably(results, tmp)
             test_datamap_output_is_byte_deterministic(results, tmp)
             test_datamap_reconciles_file_ids_to_logical_ids(results, tmp)

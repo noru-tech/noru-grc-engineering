@@ -8,7 +8,7 @@
 
 | Command | Writes to Noru? | What it does |
 |---|---|---|
-| `/privacy-datamap:scan` | no | Reads schemas and evidence-backed supplemental stores → `.noru/privacy-datamap.yml` — and, once that manifest validates, renders `.fides/datamap.yml` |
+| `/privacy-datamap:scan` | no | Reads schemas and evidence-backed supplemental stores → `.noru/privacy-datamap.yml` ; an explicit export renders `.fides/datamap.yml` after acceptance |
 | `/privacy-datamap:diff` | no | Reads current state, prints the exact plan |
 | `/privacy-datamap:push` | **yes** | Executes the confirmed plan |
 
@@ -29,7 +29,7 @@ the accountable owner rather than handing over the raw structural inventory.
 | Python ORM | `*.py` | Django `models.Model` and SQLAlchemy declarative classes; an attribute assigned from `Column(...)`, `mapped_column(...)` or a `*Field(...)` call |
 | Protobuf | `*.proto` | `message` → collection, each numbered field |
 | GraphQL SDL | `*.graphql`, `*.gql`, `*.graphqls` | `type` and `input` → collection, each field |
-| Supplemental stores | `.noru/privacy-datamap-stores.json` | explicitly declared object stores, queues, search indexes and third-party stores; every field needs its own repository citation |
+| Supplemental datasets | `.noru/privacy-datamap.yml` | ordinary datasets with `meta.noru.origin: supplemental`; every field cites its structural evidence |
 
 Drizzle parsing is deliberately static: literal table names and object-literal column maps are
 supported, including comments between field declarations. Spreads, shorthand properties and
@@ -122,43 +122,28 @@ evidence of a deployed system.
 
 ## Stores without a declarative schema
 
-SDK initialization or a bucket, queue, index or third-party client call can show that a store
-exists, but it cannot show which object fields the repository persists. The collector therefore
-never invents a dataset or fields from a client call alone. For structures that cannot be derived
-safely, commit `.noru/privacy-datamap-stores.json`, validated by
-[`contract/privacy-datamap-stores.schema.json`](../../contract/privacy-datamap-stores.schema.json).
+Supplemental structures use ordinary `dataset` entries in `.noru/privacy-datamap.yml`.
+Set `meta.noru.origin: supplemental` and `meta.noru.refs` on the dataset. Its collections and
+fields retain source `refs`; each field adds `meta.noru.shape` and `meta.noru.evidence_kind`
+(`typed_contract`, `serializer`, `upload_payload` or `download_result`). There is one definition
+of the collections and fields, shared by collection, review and export. Nested payload properties
+remain nested fields. Opaque file bytes remain a content field with explicit classification gaps.
 
-Each datastore and collection cites the integration or contract that establishes it. Every field
-also carries an `evidence_kind` and its own repository `file:line` citation. Accepted evidence kinds
-are `typed_contract`, `serializer`, `upload_payload` and `download_result`; a citation to the
-supplement itself is rejected. Optional `system_references` attach the datastore to system keys
-that runtime discovery actually found. Invalid citations, unknown system keys, duplicate identities
-and untracked supplements fail the scan instead of creating a guessed map.
+External services use ordinary `system` entries with `meta.noru.origin: external`, source refs in
+`meta.noru.refs`, and a suitable `system_type`. Use `dataset_references` to associate their data,
+and native `ingress`/`egress` to represent evidenced transfers. A provider name alone does not
+establish a connection identity, a flow direction, a processing purpose or field contents.
 
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/noru-tech/noru-grc-engineering/v0/contract/privacy-datamap-stores.schema.json",
-  "version": "1.0.0",
-  "datastores": [{
-    "fides_key": "customer_objects",
-    "name": "Customer object storage",
-    "store_type": "object_storage",
-    "provider": "gcs",
-    "refs": ["src/storage.ts:18"],
-    "system_references": ["src"],
-    "collections": [{
-      "name": "uploaded_files",
-      "refs": ["src/storage.ts:5"],
-      "fields": [{
-        "name": "object_key",
-        "shape": "string",
-        "evidence_kind": "typed_contract",
-        "refs": ["src/storage.ts:6"]
-      }]
-    }]
-  }]
-}
-```
+Propose additions in `structural_proposal.dataset` and `structural_proposal.system` in the normal
+proposal cache, then run candidate collection, reconciliation and review. Include their monitoring
+specs in `structural_proposal.evidence_dependencies`. Candidate previews do not modify accepted
+files. After human acceptance, copy the reviewed definitions and dependencies to the main manifest,
+collect normally, validate and seal. Supplemental field citations and external-system citations
+must have registered evidence dependencies before acceptance. Unchanged evidence retains decisions.
+
+The local `meta.noru` namespace records provenance, not a new Fides resource. Export strips it while
+retaining other metadata. Supplemental datasets export like schema-extracted datasets; external
+services and transfers export as systems and ingress/egress.
 
 ## What it scans
 
@@ -243,14 +228,16 @@ On later scans `scripts/reconcile.py` compares every current field with that obs
 | removed field | remove it from the candidate; re-sign the collection |
 | unique logical-identity migration | carry the decision forward under the new datastore key |
 
-The reconciler writes the structural delta, proposal work queue and candidate manifest in
-`.noru/.cache/`. After agent enrichment, `scripts/review.py --repo=<repo> --output=json` produces
-three outputs: `privacy-datamap.map.md` summarizes stores and processing, `privacy-datamap.review.md`
-groups human decisions, and `privacy-datamap.evidence.json` retains the full field inventory and
+The reconciler records pending investigations and proposals in
+`.noru/.cache/privacy-datamap.analysis.json`. Candidate models, reconciliation results and review
+views are reconstructed from current observations and the baseline rather than saved again.
+After enrichment, `scripts/review.py --repo=<repo> --output=json` generates
+`privacy-datamap.review.md`: the concise map followed by decisions. `--output=evidence` emits the
+full evidence view as JSON on stdout without persisting a second inventory or copy of the
 reasoning. Explicit decision IDs group related fields despite differences in reasoning; short decision
 summaries replace detailed rationale in review. Technical fields remain in evidence. Evidence-backed
 activities need no questions; a question must identify the privacy decision its answer changes. Each processing activity and actionable uncertainty has its own description. Structural
-errors block review readiness until corrected. The reconciler's initial index is only navigation.
+errors block review readiness until corrected. The reconciler emits machine-readable work items; the review renderer presents privacy decisions.
 These are working files and must
 not be committed. The candidate never overwrites the accepted manifest. In bootstrap mode an
 invalid manifest contributes no descriptions, systems, declarations or references to the
@@ -340,11 +327,6 @@ tools this piece reads. `write:datamaps` is documented as "Push fideslang privac
 
 ## Artifacts
 
-`.noru/privacy-datamap-stores.json`, schema at
-[`contract/privacy-datamap-stores.schema.json`](../../contract/privacy-datamap-stores.schema.json),
-is an optional committed structural input for stores that no supported schema describes. It is
-reviewed source, not generated output.
-
 `.noru/privacy-datamap.yml`, schema at [`contract/privacy-datamap.schema.json`](../../contract/privacy-datamap.schema.json).
 
 Commit it — it is the reviewable artifact. Keep `.noru/.cache/` out of git.
@@ -366,7 +348,8 @@ Complete citations and shapes remain in derived facts and the accepted lock. `.f
 contains only privacy-relevant fields: non-personal leaves and empty collections or datasets are
 removed, and system references are restricted to retained datasets. It is only ever written from a
 manifest that validated against the repository as it stands right now. Edit the manifest, never the
-export: the next scan overwrites the export and will not warn you.
+export: explicitly regenerate it with `collect.mjs --repo=<repo> --export`. Normal scans do not
+write an export. Invalid or unresolved manifests fail explicit export without replacing an older file.
 
 ## Idempotency
 
@@ -432,9 +415,9 @@ The proposal cache uses `relationship_proposal: {graph, evidence_dependencies, d
 Use `collect.mjs --candidate`, `reconcile.py --candidate`, then `review.py --candidate` with the
 same `--repo` to preview these proposals. Collection validates the graph and live evidence before
 applying its bindings. The complete proposed graph replaces the mapping only within the preview.
-Corrected observations, candidate manifest, enrichment queue and three review outputs live under
-`.noru/.cache/privacy-datamap-preview/`. Normal scan/review artifacts, the accepted manifest, lock,
-and Fides export stay unchanged. Candidate mode also works when no accepted manifest exists.
+Corrected observations live in the analysis file’s `preview` section. Candidate reconciliation and
+review update the same analysis file and review report. Normal scan observations, the accepted
+manifest, lock and Fides export stay unchanged. Candidate mode also works when no accepted manifest exists.
 
 Complete the preview's enrichment queue before requesting acceptance. The rendered map uses the
 corrected candidate stores and fields; missing processing context remains an explicit question.
@@ -448,3 +431,65 @@ records relationships. Automatic client/import tracing is not implemented yet. E
 and static migration configuration provide discovery; the agent traces client wrappers and records
 missing bindings. Without an explicit graph, the legacy directory grouping remains provisional.
 A graph does not create payload fields: unsupported structures still require supplemental evidence.
+
+### Privacy review
+
+The report leads with personal-data categories, data subjects, purposes, systems and sharing,
+then meaningful changes and actionable decisions. Raw field inventories and collector lookup labels
+stay in the evidence view. Missing field analysis is summarized as agent work; it cannot establish
+review readiness. Technical fields use aggregate coverage counts, and possible special-category
+data stays visible by collection. Full field citations, diagnostics and fingerprints are retained
+for explicit evidence inspection.
+
+### Working artifacts
+
+The shared manifest/derived/parsed pattern is retained. Scan provenance and fingerprints live in
+`privacy-datamap.derived.json` under `_scan`, with no separate scan metadata file. Privacy adds an
+accepted lock and a reusable analysis cache for proposals, investigation coverage and dependencies.
+The analysis cache retains candidate observations under `preview` when needed; it does not persist
+candidate manifests, reconciliation results or generated review/evidence views.
+
+Identical long investigation text is stored once in `shared_reasoning`; proposal `analysis_ref` and
+`rationale_ref` fields identify those exact blocks. `analysis_storage.load` resolves them for the
+validator and renderer; `analysis_storage.save` deduplicates and atomically writes compact JSON.
+Agents should load and save through these helpers, editing inline reasoning in the loaded document.
+Never read an entire large analysis cache into conversational context: select the relevant entity,
+decision or reasoning group. Group shared reasoning before writing, keeping field-specific evidence.
+
+Generate views only when needed:
+
+```bash
+python3 <plugin>/scripts/reconcile.py --repo=. --render-candidate
+python3 <plugin>/scripts/review.py --repo=. --output=json
+python3 <plugin>/scripts/review.py --repo=. --output=evidence
+node <plugin>/scripts/collect.mjs --repo=. --export
+```
+
+Candidate YAML and full evidence JSON go to stdout. The review command writes the readable report;
+the export command requires an accepted valid manifest and writes `.fides/datamap.yml`. The accepted
+manifest and lock are committed; caches remain local. Deleting the analysis cache loses unaccepted
+investigations and proposals; accepted decisions remain in the committed manifest and lock.
+
+Readiness also checks purpose-specific activity categories, stored versus transient processing,
+recipient assessment, and system investigation covering runtime processing, sharing and storage.
+Disappeared field scope and systems require evidence-backed retirement, replacement or gap proposals.
+The validator enforces recorded coverage; it cannot prove that an agent's explanation is correct or
+that all integrations have been discovered. Continue broad repository investigation on every scan.
+
+Semantic review compares proposals and manifest edits with the compact accepted meaning in the
+existing lock. Personal-to-non-personal changes, collections lost through export filtering, and
+narrowed activity categories, subjects, purpose keys or recipients require evidence-backed
+explanations in the existing `removal_proposals` queue. Use `amended` for a justified reclassification
+or scope correction, or an actionable `gap` while unresolved. Field changes are grouped by collection;
+full differences remain in evidence. Rerun reconciliation after editing proposals to refresh the queue.
+An activity rename is conservatively treated as removal of the prior activity until explained.
+Ordering and citation changes do not count as narrowing. Seal reviewed amendments before export.
+The manifest remains authoritative; the lock retains only compact comparison data, not another map.
+A baseline without a semantic snapshot cannot establish past meaning; the next reviewed seal starts
+semantic comparison. Do not claim historical semantic coverage where that baseline is absent.
+
+Review readiness requires recorded infrastructure investigation for queued systems and structural
+boundary reasoning for covered stores. The core workflow also requires checking classification use,
+transient flows, identity continuity and separation of approval provenance from descriptions.
+These are agent review obligations; the validator checks missing records, not whether an explanation
+proves deployed behavior. Missing deployed evidence must remain visible.

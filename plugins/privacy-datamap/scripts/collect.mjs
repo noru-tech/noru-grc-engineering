@@ -5,7 +5,7 @@
 // scripts/contract_test.py runs this twice and diffs the result, so a timestamp or an unsorted
 // directory listing anywhere in here will fail the build.
 //
-// Usage: node collect.mjs [--repo=<path>] [--check | --candidate] [--output=json|text] [--quiet]
+// Usage: node collect.mjs [--repo=<path>] [--check | --candidate | --export] [--output=json|text] [--quiet]
 // Exit codes: 0 ok, 1 drift against the manifest (--check), 2 usage/IO error.
 
 import { createHash } from "node:crypto";
@@ -29,7 +29,7 @@ const TABLE = JSON.parse(
 // A schema file is small. Anything past this is generated data or a checked-in dump, and
 // reading it would cost more than it could ever tell us.
 const MAX_BYTES = 1_000_000;
-const SUPPLEMENT_PATH = ".noru/privacy-datamap-stores.json";
+const MANIFEST_INPUT_PATH = ".noru/privacy-datamap.yml";
 
 // Directories that are in the repository but are not the repository: a checked-in vendor/ or dist/
 // describes a dependency's schema or a build's output, not anything this codebase decided to store.
@@ -40,7 +40,7 @@ const SKIP_DIRS = new Set([
   "vendor", "target", ".venv", "venv", "__pycache__", ".noru",
 ]);
 const USAGE =
-  "usage: collect.mjs [--repo=<path>] [--check | --candidate] [--output=json|text] [--quiet]\n";
+  "usage: collect.mjs [--repo=<path>] [--check | --candidate | --export] [--output=json|text] [--quiet]\n";
 
 function parseArgs(argv) {
   const opts = { repo: process.cwd(), check: false, candidate: false, json: false, quiet: false };
@@ -48,12 +48,14 @@ function parseArgs(argv) {
     if (arg.startsWith("--repo=")) opts.repo = arg.slice(7);
     else if (arg === "--check") opts.check = true;
     else if (arg === "--candidate") opts.candidate = true;
+    else if (arg === "--export") opts.export = true;
     else if (arg === "--output=json") opts.json = true;
     else if (arg === "--output=text") opts.json = false;
     else if (arg === "--quiet") opts.quiet = true;
     else if (arg === "-h" || arg === "--help") return { help: true };
     else return { error: `unknown option '${arg}'` };
   }
+  if (opts.export && (opts.check || opts.candidate)) return { error: "--export requires a normal accepted scan" };
   if (opts.check && opts.candidate) return { error: "--candidate cannot be used with --check" };
   return opts;
 }
@@ -104,7 +106,7 @@ function trackedFiles(repo) {
   // A Set because an unmerged path is listed once per conflict stage.
   const out = new Set();
   for (const rel of raw.split("\0")) {
-    if (rel === "" || (rel !== SUPPLEMENT_PATH && isSkipped(rel))) continue;
+    if (rel === "" || (rel !== MANIFEST_INPUT_PATH && isSkipped(rel))) continue;
     let stat;
     try {
       stat = lstatSync(join(repo, rel));
@@ -967,171 +969,6 @@ function cloneCollections(collections, rel) {
   }));
 }
 
-const SUPPLEMENT_VERSION = "1.0.0";
-const SUPPLEMENT_STORE_TYPES = new Set([
-  "object_storage", "queue", "search_index", "third_party_store", "other",
-]);
-const SUPPLEMENT_EVIDENCE_KINDS = new Set([
-  "typed_contract", "serializer", "upload_payload", "download_result",
-]);
-const FIDES_KEY = /^[A-Za-z0-9_.<>-]+$/;
-
-function supplementalError(path, message) {
-  throw new Error(`${SUPPLEMENT_PATH}${path}: ${message}`);
-}
-
-function supplementalObject(value, path) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    supplementalError(path, "must be an object");
-  }
-}
-
-function supplementalKeys(value, allowed, path) {
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) supplementalError(path, `unknown key '${key}'`);
-  }
-}
-
-function supplementalString(value, path, pattern = null) {
-  if (typeof value !== "string" || value.trim() === "") supplementalError(path, "must be a non-empty string");
-  if (pattern && !pattern.test(value)) supplementalError(path, `has invalid value '${value}'`);
-  return value;
-}
-
-function supplementalArray(value, path) {
-  if (!Array.isArray(value) || value.length === 0) supplementalError(path, "must be a non-empty array");
-  return value;
-}
-
-function supplementalRefs(repo, refs, path, knownFiles, lineCounts) {
-  const out = supplementalArray(refs, path).map((ref, index) => {
-    supplementalString(ref, `${path}[${index}]`);
-    const match = ref.match(/^([^:\s][^:]*):([1-9][0-9]*)$/);
-    if (!match) supplementalError(`${path}[${index}]`, "must be a repository-relative file:line citation");
-    const rel = match[1].split("\\").join("/");
-    if (rel === SUPPLEMENT_PATH) {
-      supplementalError(`${path}[${index}]`, "must cite repository evidence, not the declaration itself");
-    }
-    if (rel.startsWith("/") || rel.split("/").includes("..") || !knownFiles.has(rel)) {
-      supplementalError(`${path}[${index}]`, `cites a file outside the scanned repository: '${rel}'`);
-    }
-    if (!lineCounts.has(rel)) {
-      const text = safeText(repo, rel);
-      if (text === null) supplementalError(`${path}[${index}]`, `cannot read cited file '${rel}'`);
-      lineCounts.set(rel, text.split("\n").length);
-    }
-    const line = Number(match[2]);
-    if (line > lineCounts.get(rel)) {
-      supplementalError(`${path}[${index}]`, `cites line ${line}, but '${rel}' has only ${lineCounts.get(rel)} line(s)`);
-    }
-    return `${rel}:${line}`;
-  });
-  if (new Set(out).size !== out.length) supplementalError(path, "must not contain duplicate citations");
-  return out.sort(BY_PATH);
-}
-
-/**
- * Read explicitly declared stores whose structure cannot be recovered from a supported schema.
- * A provider client proves only that a store exists; every declared field therefore needs its own
- * typed/payload/serialization citation. The collector never derives object fields from SDK calls.
- */
-function loadSupplementalDatastores(repo, files, enumeratedBy) {
-  const full = join(repo, SUPPLEMENT_PATH);
-  if (!existsSync(full)) return [];
-  if (enumeratedBy === "git" && !files.includes(SUPPLEMENT_PATH)) {
-    throw new Error(`${SUPPLEMENT_PATH}: exists but is not tracked; stage it before scanning`);
-  }
-  let document;
-  try {
-    document = JSON.parse(readFileSync(full, "utf8"));
-  } catch (error) {
-    throw new Error(`${SUPPLEMENT_PATH}: invalid JSON: ${error.message}`);
-  }
-  supplementalObject(document, "");
-  supplementalKeys(document, new Set(["$schema", "version", "datastores"]), "");
-  if (document.$schema !== undefined) supplementalString(document.$schema, ".$schema");
-  if (document.version !== SUPPLEMENT_VERSION) {
-    supplementalError(".version", `must be '${SUPPLEMENT_VERSION}'`);
-  }
-  const stores = supplementalArray(document.datastores, ".datastores");
-  const knownFiles = new Set(files);
-  const lineCounts = new Map();
-  const seenStores = new Set();
-  const normalized = stores.map((store, storeIndex) => {
-    const path = `.datastores[${storeIndex}]`;
-    supplementalObject(store, path);
-    supplementalKeys(store, new Set([
-      "fides_key", "name", "store_type", "provider", "refs", "system_references", "collections",
-    ]), path);
-    const fidesKey = supplementalString(store.fides_key, `${path}.fides_key`, FIDES_KEY);
-    if (seenStores.has(fidesKey)) supplementalError(`${path}.fides_key`, `duplicate datastore key '${fidesKey}'`);
-    seenStores.add(fidesKey);
-    const name = supplementalString(store.name, `${path}.name`);
-    const storeType = supplementalString(store.store_type, `${path}.store_type`);
-    if (!SUPPLEMENT_STORE_TYPES.has(storeType)) {
-      supplementalError(`${path}.store_type`, `must be one of ${[...SUPPLEMENT_STORE_TYPES].join(", ")}`);
-    }
-    const provider = store.provider === undefined
-      ? null
-      : supplementalString(store.provider, `${path}.provider`);
-    const refs = supplementalRefs(repo, store.refs, `${path}.refs`, knownFiles, lineCounts);
-    const systemReferences = store.system_references === undefined ? [] : store.system_references;
-    if (!Array.isArray(systemReferences)) supplementalError(`${path}.system_references`, "must be an array");
-    for (let index = 0; index < systemReferences.length; index += 1) {
-      supplementalString(systemReferences[index], `${path}.system_references[${index}]`, FIDES_KEY);
-    }
-    if (new Set(systemReferences).size !== systemReferences.length) {
-      supplementalError(`${path}.system_references`, "must not contain duplicate system keys");
-    }
-    const seenCollections = new Set();
-    const collections = supplementalArray(store.collections, `${path}.collections`).map((collection, collectionIndex) => {
-      const collectionPath = `${path}.collections[${collectionIndex}]`;
-      supplementalObject(collection, collectionPath);
-      supplementalKeys(collection, new Set(["name", "refs", "fields"]), collectionPath);
-      const collectionName = supplementalString(collection.name, `${collectionPath}.name`);
-      if (seenCollections.has(collectionName)) supplementalError(`${collectionPath}.name`, `duplicate collection '${collectionName}'`);
-      seenCollections.add(collectionName);
-      const collectionRefs = supplementalRefs(
-        repo, collection.refs, `${collectionPath}.refs`, knownFiles, lineCounts,
-      );
-      const seenFields = new Set();
-      const fields = supplementalArray(collection.fields, `${collectionPath}.fields`).map((field, fieldIndex) => {
-        const fieldPath = `${collectionPath}.fields[${fieldIndex}]`;
-        supplementalObject(field, fieldPath);
-        supplementalKeys(field, new Set(["name", "shape", "evidence_kind", "refs"]), fieldPath);
-        const fieldName = supplementalString(field.name, `${fieldPath}.name`);
-        if (seenFields.has(fieldName)) supplementalError(`${fieldPath}.name`, `duplicate field '${fieldName}'`);
-        seenFields.add(fieldName);
-        const shape = supplementalString(field.shape, `${fieldPath}.shape`);
-        const evidenceKind = supplementalString(field.evidence_kind, `${fieldPath}.evidence_kind`);
-        if (!SUPPLEMENT_EVIDENCE_KINDS.has(evidenceKind)) {
-          supplementalError(
-            `${fieldPath}.evidence_kind`,
-            `must be one of ${[...SUPPLEMENT_EVIDENCE_KINDS].join(", ")}`,
-          );
-        }
-        return {
-          name: fieldName,
-          shape,
-          evidence_kind: evidenceKind,
-          refs: supplementalRefs(repo, field.refs, `${fieldPath}.refs`, knownFiles, lineCounts),
-        };
-      });
-      return { name: collectionName, refs: collectionRefs, fields };
-    });
-    return {
-      fides_key: fidesKey,
-      name,
-      store_type: storeType,
-      ...(provider ? { provider } : {}),
-      refs,
-      system_references: [...systemReferences].sort(BY_PATH),
-      collections,
-    };
-  });
-  return normalized.sort((a, b) => BY_PATH(a.fides_key, b.fides_key));
-}
-
 function splitSqlStatements(text) {
   // Drizzle uses this exact comment as an out-of-band statement delimiter. Removing only the
   // marker, while preserving its newline, keeps the next statement's citation on its real line.
@@ -1386,7 +1223,7 @@ function safeText(repo, rel) {
 /** Package metadata is consulted only when an executable script points to an existing entrypoint. */
 export function discoverServices(repo, files) {
   const evidence = new Map();
-  const runtimeFiles = files.filter((rel) => rel !== SUPPLEMENT_PATH);
+  const runtimeFiles = files.filter((rel) => rel !== MANIFEST_INPUT_PATH);
   const fileSet = new Set(runtimeFiles);
   const packageRoots = new Set(
     runtimeFiles
@@ -1453,7 +1290,7 @@ export function discoverServices(repo, files) {
   }
   if (evidence.size === 0) {
     evidence.set("", [{
-      ref: runtimeFiles.length > 0 ? `${runtimeFiles[0]}:1` : `${SUPPLEMENT_PATH}:1`,
+      ref: runtimeFiles.length > 0 ? `${runtimeFiles[0]}:1` : `${MANIFEST_INPUT_PATH}:1`,
       kind: "repository_fallback",
     }]);
   }
@@ -1481,12 +1318,9 @@ function assertUniqueKeys(kind, rows) {
 
 export function collectFacts(repo, { candidate = false } = {}) {
   const listing = listFiles(repo);
-  const supplementalStores = loadSupplementalDatastores(
-    repo, listing.files, listing.enumeratedBy,
-  );
-  const files = existsSync(join(repo, SUPPLEMENT_PATH)) && !listing.files.includes(SUPPLEMENT_PATH)
-    ? [...listing.files, SUPPLEMENT_PATH].sort(BY_PATH)
-    : listing.files;
+  const inputs = JSON.parse(execFileSync("python3", [join(HERE, "dataset_inputs.py"), `--repo=${repo}`, ...(candidate ? ["--candidate"] : [])], {encoding: "utf8"}));
+  const supplementalDatasets = inputs.datasets;
+  const files = listing.files;
   const enumeratedBy = listing.enumeratedBy;
   const discovery = JSON.parse(execFileSync("python3", [join(HERE, "dependencies.py"), "--discover", `--repo=${repo}`],
     { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
@@ -1592,8 +1426,8 @@ export function collectFacts(repo, { candidate = false } = {}) {
     needsReview += normalized.counts.needsReview;
     specialRefs.push(...normalized.specialRefs);
   }
-  for (const store of supplementalStores) {
-    parsedFiles.add(SUPPLEMENT_PATH);
+  for (const store of supplementalDatasets) {
+    parsedFiles.add(MANIFEST_INPUT_PATH);
     const normalized = normalizedDataset(
       store.fides_key,
       store.collections.map((collection) => ({
@@ -1605,7 +1439,7 @@ export function collectFacts(repo, { candidate = false } = {}) {
           refs: field.refs,
         })),
       })),
-      ["supplemental_datastore"],
+      ["supplemental_dataset"],
       store.fides_key,
       store.name,
     );
@@ -1613,14 +1447,13 @@ export function collectFacts(repo, { candidate = false } = {}) {
     normalized.dataset.refs = [...new Set([
       ...store.refs, ...normalized.dataset.refs,
     ])].sort(BY_PATH);
-    normalized.dataset.store_type = store.store_type;
-    if (store.provider) normalized.dataset.provider = store.provider;
+    normalized.dataset.definition = store.definition;
     normalized.dataset.system_references = store.system_references;
     datasets.push(normalized.dataset);
     observations.push({
-      path: SUPPLEMENT_PATH,
+      path: MANIFEST_INPUT_PATH,
       boundary: store.fides_key,
-      kind: "supplemental_datastore",
+      kind: "supplemental_dataset",
       role: "supplemental",
       refs: store.refs,
       collections: store.collections,
@@ -1629,17 +1462,17 @@ export function collectFacts(repo, { candidate = false } = {}) {
     classified += normalized.counts.classified;
     needsReview += normalized.counts.needsReview;
     specialRefs.push(...normalized.specialRefs);
-    parsedByKind.supplemental_datastore = (parsedByKind.supplemental_datastore ?? 0) + 1;
+    parsedByKind.supplemental_dataset = (parsedByKind.supplemental_dataset ?? 0) + 1;
   }
   assertUniqueKeys("dataset", datasets);
 
   const services = discoverServices(repo, files);
-  const systemKeys = new Set(services.map(({ root }) => fidesKeyFor(root || "repository")));
+  const systemKeys = new Set([...services.map(({ root }) => fidesKeyFor(root || "repository")), ...inputs.external_systems.map(s => s.fides_key)]);
   for (const dataset of datasets) {
     for (const systemKey of dataset.system_references ?? []) {
       if (!systemKeys.has(systemKey)) {
         throw new Error(
-          `${SUPPLEMENT_PATH}: datastore '${dataset.fides_key}' references undiscovered system '${systemKey}'`,
+          `${MANIFEST_INPUT_PATH}: datastore '${dataset.fides_key}' references undiscovered system '${systemKey}'`,
         );
       }
     }
@@ -1664,6 +1497,19 @@ export function collectFacts(repo, { candidate = false } = {}) {
         .map((dataset) => dataset.fides_key).sort(BY_PATH),
     };
   });
+  for (const external of inputs.external_systems) {
+    systems.push({...external, ref: external.refs[0], runtime_evidence: []});
+  }
+  for (const system of systems) {
+    const declared = inputs.systems.find(s => s.fides_key === system.fides_key);
+    for (const direction of ["ingress", "egress"]) {
+      if (declared?.[direction]) system[direction] = declared[direction];
+    }
+    if (declared?.meta) system.meta = declared.meta;
+    for (const edge of [...(system.ingress ?? []), ...(system.egress ?? [])]) {
+      if (edge.type !== "system" || !systemKeys.has(edge.fides_key)) throw new Error("Flow must reference an evidenced system");
+    }
+  }
   assertUniqueKeys("system", systems);
 
   return {
@@ -1672,6 +1518,7 @@ export function collectFacts(repo, { candidate = false } = {}) {
     files_scanned: files.length,
     datasets,
     systems,
+    input_dependencies: inputs.evidence_dependencies,
     observations,
     datastore_links: drizzleTopology.links,
     relationship_mapping: relationships,
@@ -1706,7 +1553,7 @@ export function collectFacts(repo, { candidate = false } = {}) {
         ...sourceReadGaps,
         ...relationships.errors.map((reason) => ({ format: "relationship_graph", ref: ".noru/privacy-datamap.yml:1", reason })),
         ...Object.keys(relationships.bindings).filter((path) => !observations.some((o) => o.path === path)
-          && !relationships.bindings[path].every((key) => supplementalStores.some((store) => store.fides_key === key
+          && !relationships.bindings[path].every((key) => supplementalDatasets.some((store) => store.fides_key === key
             && store.collections.some((collection) => collection.fields.some((field) => field.refs.some((ref) => ref.slice(0, ref.lastIndexOf(":")) === path))))))
           .map((path) => ({ format: "relationship_payload", ref: `${path}:1`, reason: "Bound schema/payload has no supported extracted structure; supply typed supplemental evidence." })),
         ...Object.values(relationships.flows).flat().filter((key) => !systems.some((s) => s.fides_key === key))
@@ -1773,7 +1620,8 @@ export function previousDigestOf(derived) {
   // clear. Coverage is reported to CI from the derived facts directly, where it can be acted on.
   // Raw observations retain the evidence needed to audit normalization, but historical migration
   // files that lose to a canonical schema are not part of the current logical topology.
-  const { generated_by, coverage, observations, migration_operations, ...facts } = derived;
+  const { generated_by, coverage, observations, migration_operations, _scan, ...facts } = derived;
+  void _scan;
   void generated_by;
   void coverage;
   void observations;
@@ -1794,6 +1642,8 @@ export function digestOf(derived) {
     })).sort((a, b) => BY_PATH(a.key, b.key)),
     systems: (derived.systems ?? []).map((system) => ({
       key: system.fides_key, datasets: [...(system.dataset_references ?? [])].sort(BY_PATH),
+      ...Object.fromEntries(["ingress", "egress"].filter(k => system[k]?.length).map(k => [k,
+        system[k].map(edge => ({...edge, ...(edge.data_categories ? {data_categories: [...edge.data_categories].sort(BY_PATH)} : {})})).sort((a, b) => BY_PATH(a.fides_key, b.fides_key))])),
     })).sort((a, b) => BY_PATH(a.key, b.key)),
   });
 }
@@ -1943,9 +1793,8 @@ export function readParsedManifest(repo, digest) {
 
 const FIDES_HEADER = `# .fides/datamap.yml — rendered by ${GENERATED_BY}
 #
-# GENERATED. Edit .noru/${PIECE}.yml instead: this file is overwritten on every scan that finds a
-# validated manifest, and it will not warn you, because it cannot tell your edit from its own
-# output.
+# GENERATED. Edit .noru/${PIECE}.yml instead. An explicit export overwrites this file
+# only after validating the current manifest.
 #
 # This is the same content that :push sends to Noru: privacy-relevant fields projected to plain
 # Fideslang. Review bookkeeping and compact non-personal fields stay local; empty collections and
@@ -1995,16 +1844,24 @@ function main(argv) {
     return 2;
   }
   const manifestPath = join(opts.repo, ".noru", "privacy-datamap.yml");
-  const cachePath = join(opts.repo, ".noru", ".cache", ...(opts.candidate ? ["privacy-datamap-preview"] : []));
+  const cachePath = join(opts.repo, ".noru", ".cache");
   const derivedPath = join(cachePath, "privacy-datamap.derived.json");
-  const scanStatePath = join(cachePath, "privacy-datamap.scan.json");
 
   let wroteSkeleton = false;
   let drift = false;
   let rendered = null;
   try {
+    const scanState = {
+      piece: PIECE,
+      ...(opts.candidate ? { candidate_context: derived.relationship_mapping.candidate_context,
+        candidate_artifact_sha256: execFileSync("python3", ["-c", "import json,sys,hashlib; print(hashlib.sha256(json.dumps(json.load(sys.stdin), sort_keys=True, separators=(\",\", \":\")).encode()).hexdigest())"], {input: JSON.stringify(derived), encoding: "utf8"}).trim() } : {}),
+      derived_digest: digest,
+      legacy_derived_digest: legacyDigest,
+      previous_derived_digest: previousDigestOf(derived),
+      provenance,
+    };
     mkdirSync(cachePath, { recursive: true });
-    writeFileSync(derivedPath, `${JSON.stringify(derived, null, 2)}\n`, "utf8");
+    if (!opts.candidate) writeFileSync(derivedPath, `${JSON.stringify({...derived, _scan: scanState}, null, 2)}\n`, "utf8");
     const existing = readManifestDigest(manifestPath);
     if (opts.candidate) {
       drift = false;
@@ -2022,7 +1879,7 @@ function main(argv) {
     // nothing to render until a human has resolved the review flags and the validator has passed.
     // A parsed cache is not acceptance: revalidate the current manifest and watched evidence.
     let exportValidated = false;
-    if (!opts.candidate && !opts.check && existsSync(join(opts.repo, ".noru", ".cache", `${PIECE}.parsed.json`))) {
+    if (opts.export) {
       try {
         execFileSync("python3", [join(dirname(fileURLToPath(import.meta.url)), "validate_manifest.py"), manifestPath,
           `--emit-parsed=${join(opts.repo, ".noru", ".cache", `${PIECE}.parsed.json`)}`, "--quiet"], { stdio: "pipe" });
@@ -2032,23 +1889,18 @@ function main(argv) {
         rendered = null;
       }
     }
+    if (opts.export && !exportValidated) throw new Error("Cannot export: accept and validate the current manifest first");
     const parsed = readParsedManifest(opts.repo, digest);
-    if (parsed && exportValidated && !opts.check) {
+    if (parsed && exportValidated && opts.export) {
       rendered = relative(opts.repo, renderFides(opts.repo, parsed)).split(sep).join("/");
     }
-    writeFileSync(
-      scanStatePath,
-      `${JSON.stringify({
-        piece: PIECE,
-        ...(opts.candidate ? { candidate_context: derived.relationship_mapping.candidate_context,
-          candidate_artifact_sha256: createHash("sha256").update(`${JSON.stringify(derived, null, 2)}\n`).digest("hex") } : {}),
-        derived_digest: digest,
-        legacy_derived_digest: legacyDigest,
-        previous_derived_digest: previousDigestOf(derived),
-        provenance,
-      }, null, 2)}\n`,
-      "utf8",
-    );
+    if (opts.candidate) {
+      const analysisPath = join(cachePath, "privacy-datamap.analysis.json");
+      const analysis = JSON.parse(readFileSync(analysisPath, "utf8"));
+      analysis.preview = { derived, scan: scanState };
+      writeFileSync(analysisPath, `${JSON.stringify(analysis)}\n`, "utf8");
+    }
+
   } catch (error) {
     process.stderr.write(`error: ${error.message}\n`);
     return 2;
@@ -2060,7 +1912,7 @@ function main(argv) {
     ...(opts.candidate ? { mode: "candidate", status: "structure collected" } : {}),
     repo: opts.repo,
     manifest: relative(opts.repo, manifestPath).split(sep).join("/"),
-    derived_facts: relative(opts.repo, derivedPath).split(sep).join("/"),
+    derived_facts: opts.candidate ? ".noru/.cache/privacy-datamap.analysis.json#/preview/derived" : relative(opts.repo, derivedPath).split(sep).join("/"),
     derived_digest: digest,
     legacy_derived_digest: legacyDigest,
     drift,

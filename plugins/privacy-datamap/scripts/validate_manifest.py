@@ -34,6 +34,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import dependencies
 import relationships
 import analysis_cache
+import dataset_inputs
 
 # --- BEGIN VENDORED yaml_mini ---
 # Canonical copy: contract/lib/yaml_mini.py. Every piece validator embeds this block verbatim so
@@ -390,19 +391,19 @@ DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 TOP_LEVEL_KEYS = {"version", "piece", "source", "dataset", "system", "evidence_dependencies", "relationship_graph"}
 SOURCE_KEYS = {"slug", "commit_sha", "branch", "generated_by", "derived_digest"}
 INTERPRETATION_KEYS = {"owner", "decided_at", "expires_at", "rationale", "refs"}
-DATASET_KEYS = {"fides_key", "name", "description", "collections"}
+DATASET_KEYS = {"fides_key", "name", "description", "collections", "meta"}
 COLLECTION_KEYS = {
     "name", "description", "refs", "interpretation", "needs_review", "fields",
     "non_personal_fields", "structure_digest",
 }
-FIELD_KEYS = {"name", "description", "data_categories", "refs", "needs_review", "fields"}
+FIELD_KEYS = {"name", "description", "data_categories", "refs", "needs_review", "fields", "meta"}
 SYSTEM_KEYS = {
     "fides_key", "name", "description", "system_type", "dataset_references",
-    "privacy_declarations",
+    "privacy_declarations", "meta", "ingress", "egress",
 }
 DECLARATION_KEYS = {
     "name", "data_use", "data_categories", "data_subjects", "refs", "interpretation",
-    "needs_review",
+    "needs_review", "ingress", "egress",
 }
 
 
@@ -800,6 +801,17 @@ def check_systems(rep, doc, vocab, dataset_keys, counts, as_of):
                         + suggest(str(ref), dataset_keys),
                     )
 
+        for direction in ("ingress", "egress"):
+            flows = system.get(direction, [])
+            if not isinstance(flows, list):
+                rep.err(f"{path}.{direction}", "must be a list")
+                continue
+            for flow in flows:
+                if not isinstance(flow, dict) or set(flow) - {"fides_key", "type", "data_categories"} or flow.get("type") != "system" or flow.get("fides_key") not in {s.get("fides_key") for s in systems if isinstance(s, dict)}:
+                    rep.err(f"{path}.{direction}", "flow must reference a system defined in this manifest")
+                elif not isinstance(flow.get("data_categories", []), list) or any(c not in vocab["data_categories"] for c in flow.get("data_categories", [])):
+                    rep.err(f"{path}.{direction}", "flow contains invalid data categories")
+
         declarations = system.get("privacy_declarations")
         if declarations is None:
             rep.err(f"{path}.privacy_declarations", "missing required `privacy_declarations`")
@@ -815,6 +827,10 @@ def check_systems(rep, doc, vocab, dataset_keys, counts, as_of):
             check_unknown_keys(rep, dpath, decl, DECLARATION_KEYS)
             if not decl.get("name"):
                 rep.err(f"{dpath}.name", "missing required `name` — say what this processing is for")
+            for direction in ("ingress", "egress"):
+                links = decl.get(direction, [])
+                if not isinstance(links, list) or any(link not in {s.get("fides_key") for s in systems if isinstance(s, dict)} for link in links):
+                    rep.err(f"{dpath}.{direction}", "must list systems defined in this manifest")
             use = decl.get("data_use")
             if not use:
                 rep.err(f"{dpath}.data_use", "missing required `data_use`")
@@ -837,6 +853,8 @@ def check_systems(rep, doc, vocab, dataset_keys, counts, as_of):
                             + suggest(str(subject), vocab["data_subjects"]),
                         )
             cats = check_categories(rep, dpath, decl, vocab)
+            if not cats:
+                rep.err(f"{dpath}.data_categories", "identify the data categories used for this processing purpose before acceptance")
             check_refs(rep, dpath, decl)
             check_interpretation(rep, dpath, decl)
             block = decl.get("interpretation")
@@ -898,7 +916,7 @@ def check_observed_structure(rep, doc, derived):
             rep.err(identity, f"unobserved field(s) present in fields/non_personal_fields: {', '.join(extra)}")
 
 
-def validate(doc, vocab, as_of=None, observed=None, repo=None, allow_discovery_review=False):
+def validate(doc, vocab, as_of=None, observed=None, repo=None, allow_discovery_review=False, allow_semantic_review=False):
     rep = Report()
     counts = {
         "datasets": 0,
@@ -923,6 +941,8 @@ def validate(doc, vocab, as_of=None, observed=None, repo=None, allow_discovery_r
         rep.err("piece", f"expected '{PIECE}', found '{doc.get('piece')}'")
 
     check_source(rep, doc)
+    for error in dataset_inputs.dependency_gaps(doc):
+        rep.err("evidence_dependencies", error)
     dataset_keys = check_datasets(rep, doc, vocab, counts, as_of)
     check_systems(rep, doc, vocab, dataset_keys, counts, as_of)
     if isinstance(observed, dict):
@@ -958,6 +978,14 @@ def validate(doc, vocab, as_of=None, observed=None, repo=None, allow_discovery_r
                 rep.err("discovery", f"{change['path']}: investigate new code/configuration scope and seal the reviewed baseline before export")
         except (OSError, ValueError, TypeError, KeyError) as error:
             rep.err("discovery", f"cannot verify discovery baseline: {error}")
+    if repo is not None and not allow_semantic_review:
+        try:
+            lock_path = pathlib.Path(repo) / ".noru" / "privacy-datamap.lock.json"
+            lock = json.loads(lock_path.read_text()) if lock_path.is_file() else {}
+            if analysis_cache.semantic_changes(lock.get("semantic_snapshot"), analysis_cache.semantic_snapshot(doc)):
+                rep.err("semantic_review", "privacy meaning narrowed: investigate, review and seal the changed baseline before export")
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            rep.err("semantic_review", f"cannot verify accepted meaning: {error}")
     counts["datasets"] = len(doc.get("dataset") or [])
     return rep, counts
 

@@ -79,15 +79,15 @@ not the agent, decides what needs semantic analysis:
 
 On a first scan the mode is `bootstrap`. A valid manifest created before locks existed is
 `migration` and must seed its first lock without reclassification. Later scans are `maintenance`.
-Agent suggestions live in `.noru/.cache/privacy-datamap.proposals.json`; they are not decisions and
+Agent suggestions live in `.noru/.cache/privacy-datamap.analysis.json`; they are not decisions and
 cannot update the accepted manifest or lock by themselves. Analyse repository context before asking
 the user, mark each proposal as personal, non-personal, ambiguous or special-category, and present
 the results grouped by dataset and collection. The user can accept or amend a collection group;
 only accepted groups may be patched into the candidate.
 
 Bootstrap has no accepted semantic baseline. An invalid manifest cannot seed descriptions, systems,
-declarations or references. Use `.noru/.cache/privacy-datamap.review.md` as the compact
-collection/family index; the larger proposal JSON is the machine work queue, not the user review.
+declarations or references. Generate `.noru/.cache/privacy-datamap.review.md` for the privacy conclusions and human
+decisions; machine work items and field inventories remain supporting evidence.
 
 Read `coverage.migration_gaps`, `coverage.schema_conflicts` and `identity_ambiguities` before
 proposing anything. Declarative schemas take precedence over migration history at the same
@@ -109,12 +109,11 @@ with an entrypoint establish a boundary. A library package alone does not. With 
 boundary, expect one repository-level fallback system. Never infer processing purpose, data use,
 subjects, or cross-directory datastore access from those markers.
 
-If repository evidence establishes an object store, queue, search index or third-party store that
-no supported schema describes, look for the committed `.noru/privacy-datamap-stores.json`. Its
-datastores and collections cite their integration evidence, and each field must separately cite a
-typed contract, serializer, upload payload or download result. Never derive object fields from a
-provider client call alone. Treat a missing supplement as missing structural coverage to report,
-not permission to copy fields from an older manifest.
+Represent supplemental structures as ordinary datasets and external processing services as systems.
+Use the proposal cache's `structural_proposal` to preview additions without editing accepted files.
+Read the supplemental dataset section in README and follow commands/scan.md for provenance metadata,
+field evidence and native ingress/egress. Do not invent fields from SDK calls, shared connection
+identities from provider names, or purposes from storage alone.
 
 When you resolve one, read `references/classification-guide.md` and use the surrounding context —
 the table's name, the other columns, what the service does. If you genuinely cannot tell, say so and
@@ -145,9 +144,23 @@ completed proposal work only while its source snapshot, baseline and taxonomy bi
 
 ## Keep the review focused on meaningful decisions
 
-The core scan outputs are a concise data map (`privacy-datamap.map.md`), a human decision queue
-(`privacy-datamap.review.md`), and a full evidence record (`privacy-datamap.evidence.json`), all in
-the cache. Follow the output contracts and `commands/scan.md`; do not recreate ad hoc field-by-field
+The user-facing deliverable is a privacy review: what personal data is processed, whose data it
+is, the distinct purposes, holding systems and sharing destinations, meaningful changes, and
+specific unresolved decisions. Do not present collector field inventories, lookup provenance
+(`exact lookup`, `operational`, `unclassified`), fingerprints or per-field validation diagnostics
+as the review. Keep those in machine-readable evidence, available only when requested.
+
+Complete the agent investigation before asking the human to classify unresolved fields. When
+analysis is incomplete, say so and summarize the remaining investigation by scope. Show supported
+privacy conclusions alongside actionable business questions; do not replace the missing analysis
+with a table of unclassified columns. Technical coverage is a count, and special-category findings
+remain prominent and grouped by collection with detailed field citations in evidence.
+
+The core scan provides three views in two working artifacts: `privacy-datamap.review.md` contains
+the concise map followed by human decisions; `privacy-datamap.analysis.json` contains proposals,
+investigation coverage, evidence dependencies and shared reasoning. Preview observations use its
+`preview` section. Candidate, reconciliation and evidence views are reconstructed on demand. Use
+`analysis_storage.load/save` for edits and select only relevant entries for agent context. Follow the output contracts and `commands/scan.md`; do not recreate ad hoc field-by-field
 reports. The map summarizes stores, categories, subjects, distinct processing purposes and flows.
 The queue asks about proposed changes, actual ambiguities and human acceptance. Evidence preserves
 every observed field and its citations, reasoning, confidence or carried decision state.
@@ -217,20 +230,17 @@ reviewer must not have to go looking for.
 
 ## Committed inputs and outputs
 
-- `.noru/privacy-datamap-stores.json` — an **optional structural input** for evidence-backed stores
-  that no supported schema describes. Commit it when used; the collector rejects an untracked copy.
 - `.noru/privacy-datamap.yml` — the **manifest**. Privacy-relevant and unresolved field details,
   compact non-personal names, interpretation blocks and review flags. Commit it; reviewing it in a
   pull request is the point.
 - `.noru/privacy-datamap.lock.json` — the **accepted observation**. Generated only after a current
-  manifest validates. It records stable structural fingerprints and citations, never business
-  meaning or agent reasoning. Commit it and do not edit it by hand.
+  manifest validates. It records stable structural fingerprints, citations and a compact snapshot
+  of accepted privacy meaning, without full agent reasoning. Commit it and do not edit it by hand.
 - `.fides/datamap.yml` — the **export**, in Ethyca's own format, for `fides push` and anything else
   that reads a Fides manifest. It contains only privacy-relevant fields, drops empty collections
-  and datasets, and repairs system dataset references. Regenerated on every scan that finds a
-  validated manifest.
+  and datasets, and repairs system dataset references. Generated explicitly with `collect.mjs --export` after acceptance and validation.
 
-Edit the manifest, never the export. The next scan overwrites the export without warning, because it
+Edit the manifest, never the export. The next explicit export overwrites that output, because it
 cannot tell an edit from its own output.
 
 ## When a signature stops counting
@@ -256,3 +266,61 @@ make the error go away — that is forging a signature.
 
 Scopes: `read:datamaps` for `:scan`; `:diff` also needs `read:organization` to bind its plan to the
 target; `:push` adds `write:datamaps`.
+
+### Privacy coverage before readiness
+
+For each queued system, record `system_type` from its architectural role and an `investigation`
+covering `runtime_processing`, `external_recipients` and `storage`. Cite the inspected code in the
+system proposal. Explain absent scope from evidence; a SQL-only inventory is not a completed scan.
+Each activity must include `proposed_categories` for that purpose, `processing_mode` (`stored`,
+`transient` or `unknown`), `recipient_systems` and `recipient_rationale`. Stored processing needs a
+represented dataset; transient processing can have none. Unknown processing or empty categories
+requires an actionable unresolved question. Represent evidenced recipients as systems and reference
+them; explain no sharing or an unresolved destination rather than silently omitting the assessment.
+Keep activity categories specific to the purpose, not a copy of every category in a shared database.
+On acceptance, carry the reviewed categories and architectural types into the manifest.
+
+Reconciliation queues disappeared field scope by collection and disappeared systems in
+`removal_proposals`. Investigate each as `retired`, `replaced` or `gap`, citing current evidence and
+explaining the privacy impact in `decision_summary`. A replacement must reference a represented
+dataset or system; a gap needs an actionable question. Never equate disappearance from extraction
+with retirement from the architecture. These proposals remain in the existing analysis cache and
+appear as grouped privacy decisions, not a new report or a per-field inventory.
+
+Semantic review compares proposals and manifest edits with the compact accepted meaning in the
+existing lock. Personal-to-non-personal changes, collections lost through export filtering, and
+narrowed activity categories, subjects, purpose keys or recipients require evidence-backed
+explanations in the existing `removal_proposals` queue. Use `amended` for a justified reclassification
+or scope correction, or an actionable `gap` while unresolved. Field changes are grouped by collection;
+full differences remain in evidence. Rerun reconciliation after editing proposals to refresh the queue.
+An activity rename is conservatively treated as removal of the prior activity until explained.
+Ordering and citation changes do not count as narrowing. Seal reviewed amendments before export.
+The manifest remains authoritative; the lock retains only compact comparison data, not another map.
+A baseline without a semantic snapshot cannot establish past meaning; the next reviewed seal starts
+semantic comparison. Do not claim historical semantic coverage where that baseline is absent.
+
+### Review standard before adoption
+
+Apply these checks to the proposed map as a whole, using the accepted baseline where available:
+
+1. Account for relevant sources, persistent stores, configurable integrations and external services.
+2. Trace the personal-data categories used by each purpose; a nonempty category list alone does not prove completeness.
+3. Classify fields from their actual use and relationships, including operational-looking names.
+4. Account for transient processing and transfers independently of database references.
+5. Compare nested paths with typed contracts and serialized payloads. Distinguish stored objects,
+   SDK request envelopes and response wrappers; do not copy or flatten nesting without evidence.
+6. Keep field descriptions about data meaning and expected contents. Put review notes, questions,
+   named approvals and approval dates in the existing proposal/interpretation records, not descriptions.
+   An upload policy or owner statement does not establish what files actually contain.
+7. Reconcile system roles and client/connection relationships with repository deployment configuration.
+8. Establish identity continuity before renaming keys. Explain replacements and check existing resource
+   identity before a separately requested migration or publication; do not assume new keys update old resources.
+9. Validate against current code and available infrastructure evidence. Separate repository configuration
+   from verified deployed state and observed processing; report unavailable evidence explicitly.
+
+Record `investigation.infrastructure` on each queued system: what configuration was inspected, how it
+supports the proposed bindings, and what deployed context remains unknown. Cite its evidence in the
+system proposal. For each covered store finding, record `structure_rationale` explaining the modeled
+boundary and the nested paths checked against evidence. Missing records block readiness. These checks
+establish recorded investigation, not the truth of prose or exhaustive discovery. Resolve material
+questions before adoption; never clear flags just to make an export validate.

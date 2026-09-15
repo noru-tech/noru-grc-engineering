@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/privacy-datamap-review.schema.json",
   "title": "Privacy scan data map, review queue and evidence record",
-  "description": "Cache-only review outputs. Proposed meaning never constitutes acceptance. Markdown views render data_map and review_queue; the evidence JSON preserves all three.",
+  "description": "On-demand review views. Proposed meaning never constitutes acceptance. Markdown renders data_map and review_queue; explicit evidence JSON output includes all three without persisting a duplicate inventory.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -93,6 +93,12 @@
             "object",
             "null"
           ]
+        },
+        "system_flows": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         }
       }
     },

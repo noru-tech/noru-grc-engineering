@@ -31,10 +31,8 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
   `.noru/privacy-datamap.yml` decisions
 - [`privacy-datamap-lock.schema.json`](./privacy-datamap-lock.schema.json) — the accepted structural
   observation paired with that manifest
-- [`privacy-datamap-proposals.schema.json`](./privacy-datamap-proposals.schema.json) — the
-  non-authoritative, cache-only work queue selected for agent analysis
-- [`privacy-datamap-stores.schema.json`](./privacy-datamap-stores.schema.json) — committed,
-  evidence-backed structures for stores that a supported declarative schema cannot describe
+- [`privacy-datamap-analysis.schema.json`](./privacy-datamap-analysis.schema.json) — the
+  non-authoritative analysis cache: reusable proposals, shared reasoning, dependencies and preview observations
 - [`privacy-baseline.schema.json`](./privacy-baseline.schema.json) — `.noru/privacy-baseline.yml`,
   the agreed privacy taxonomy the CI policy gate is judged against. Not a piece artifact: a floor
   pinned from Noru so the gate can run with no credential
