@@ -11,6 +11,12 @@ one version number; the release workflow fails if they disagree.
 - The three GitHub Actions carry one Marketplace description each, at most 125 characters, and
   one branding family: `gray-dark` with `check-circle` (`noru-ci`), `shield` (`noru-review`) and
   `lock` (`enforce`, previously `shield` on `purple`).
+- Each Marketplace mirror README now opens with the action's description, a quick start copied
+  from the in-tree `## Usage` example on `@v0` with how to pin a full commit SHA, and the exact
+  `permissions:` it needs and why, before the distribution note. Every mirror also ships a
+  `SECURITY.md` pointing at private vulnerability reporting on this repository.
+  `publish_actions.py --check` asserts the new README head, the `SECURITY.md`, one shared branding
+  color and a distinct icon per action.
 
 ## 0.9.0 — 2026-09-09
 

@@ -194,7 +194,11 @@ publish step moves to each newest release, so documentation never carries a vers
 stale; `scripts/check_repo.py` rejects an in-tree path or an exact version in a copyable example.
 Both `uses:` forms — the in-tree path and the mirror — are the same code at the same tag. The
 mirrors are generated: never edit them by hand, the next release overwrites the tree. Each carries a
-`DISTRIBUTION.json` naming the source commit it was built from.
+`DISTRIBUTION.json` naming the source commit it was built from, and a `SECURITY.md` sending
+vulnerability reports to this repository's private vulnerability reporting. Each mirror README
+opens with the `description` from `action.yml`, a quick start copied from the in-tree README's
+`## Usage` example, and the `permissions:` that example needs, before the distribution note;
+`publish_actions.py --check` asserts all of it.
 
 **Republishing** is safe and idempotent. Re-run the `release` workflow with `workflow_dispatch` and
 the version, or from a checkout of the tag:
