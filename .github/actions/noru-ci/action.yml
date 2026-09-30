@@ -1,5 +1,5 @@
 name: "Noru last-mile CI check"
-description: "Re-check a committed Noru compliance manifest on each pull request, fail on drift or expired claims. Offline, no credentials."
+description: "Re-check a committed Noru compliance manifest on each pull request and fail when it drifts from the code. Offline by default."
 author: "Noru"
 
 branding:
