@@ -6,6 +6,17 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Added
+
+- Repository health files: `CITATION.cff`, `KNOWN-LIMITATIONS.md` (an index of limitations
+  already stated in `docs/verification.md`, `docs/ci-mode.md`, `docs/repository-enforcement.md`
+  and the contract's non-goals), `.github/CODEOWNERS`, issue forms for bug reports and feature
+  requests, a pull request template, and Dependabot for the GitHub Actions the workflows pin.
+  `check_repo.py` fails when `CITATION.cff` does not name the current release and its changelog
+  date, and the release runbook now bumps it.
+- `SECURITY.md` names GitHub private vulnerability reporting as the preferred channel, states that
+  the latest 0.x release is supported, and covers the generated Marketplace repositories.
+
 ### Changed
 
 - The three GitHub Actions carry one Marketplace description each, at most 125 characters, and

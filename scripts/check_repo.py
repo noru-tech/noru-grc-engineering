@@ -18,6 +18,7 @@ What it covers, and why each one is here rather than left to review:
     same enums. Two sources of truth is one too many, so this makes them one in effect.
   * **Schema evaluability** — no contract schema uses a JSON Schema keyword scripts/jsonschema_mini.py
     cannot evaluate, so the schemas can never quietly outgrow the checker that enforces them.
+  * **Citation** — CITATION.cff names the current release and its changelog date.
   * **Secret hygiene** — this repository is public.
 
 Usage:
@@ -274,6 +275,42 @@ def check_marketplaces(problems):
             )
 
     return sorted(claude_entries)
+
+
+def check_citation(problems):
+    """CITATION.cff names the current release, so a citation never points at a stale version.
+
+    It is one more copy of the shared version number, and a copy nobody reads until someone cites
+    the toolkit, which is exactly the copy that goes stale.
+    """
+    citation = ROOT / "CITATION.cff"
+    marketplace = ROOT / ".claude-plugin" / "marketplace.json"
+    if not citation.is_file() or not marketplace.is_file():
+        if not citation.is_file():
+            problems.append("missing CITATION.cff")
+        return
+    entries = {e.get("name"): e for e in json.loads(marketplace.read_text(encoding="utf-8")).get("plugins", [])}
+    expected = (entries.get("noru") or {}).get("version")
+    text = citation.read_text(encoding="utf-8")
+    version = re.search(r'^version:\s*"?([^"\n]+)"?\s*$', text, re.M)
+    released = re.search(r'^date-released:\s*"?(\d{4}-\d{2}-\d{2})"?\s*$', text, re.M)
+    if not version or version.group(1).strip() != expected:
+        problems.append(
+            f"CITATION.cff version is {version.group(1).strip() if version else 'missing'}, expected "
+            f"{expected}; bump it with the rest of the release"
+        )
+        return
+    changelog = ROOT / "CHANGELOG.md"
+    heading = re.search(
+        rf"^## {re.escape(expected)} \S+ (\d{{4}}-\d{{2}}-\d{{2}})\s*$",
+        changelog.read_text(encoding="utf-8") if changelog.is_file() else "",
+        re.M,
+    )
+    if heading and (not released or released.group(1) != heading.group(1)):
+        problems.append(
+            f"CITATION.cff date-released is {released.group(1) if released else 'missing'}, but "
+            f"CHANGELOG.md dates {expected} {heading.group(1)}"
+        )
 
 
 def check_pieces_registered(problems, plugin_names):
@@ -867,6 +904,7 @@ def main(argv):
     try:
         plugin_names = check_marketplaces(problems)
         check_public_metadata(problems)
+        check_citation(problems)
         check_codex_manifests(problems)
         check_pieces_registered(problems, plugin_names)
         check_hub_routing(problems)

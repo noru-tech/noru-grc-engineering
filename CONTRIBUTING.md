@@ -163,7 +163,8 @@ any copy of it disagrees. A release is three steps, and the third one is automat
 
 1. **Bump.** Open a `chore: release X.Y.Z` pull request that moves the version everywhere at once:
    both marketplace manifests, the two `plugin.json` files of every piece, the `VERSION` constants,
-   and a `## X.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md`. Copyable `uses:` examples are not part
+   `version` and `date-released` in `CITATION.cff`, and a `## X.Y.Z — YYYY-MM-DD` section in
+   `CHANGELOG.md`. Copyable `uses:` examples are not part
    of a bump: they reference the floating major tag (`@v0`), which the publish step moves.
 2. **Tag.** After the merge, tag that commit and create the GitHub release for this repository:
 
