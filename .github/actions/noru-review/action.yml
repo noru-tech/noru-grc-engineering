@@ -1,5 +1,5 @@
 name: "Noru GRC pull-request review"
-description: "Route a pull-request diff to the affected Noru GRC pieces and run their local checks. Read-only; cannot push."
+description: "Route a pull request diff to the affected Noru compliance checks and report findings. Read-only, runs without credentials."
 author: "Noru"
 
 branding:

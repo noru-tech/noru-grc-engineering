@@ -1,0 +1,87 @@
+name: Bug report
+description: A wrong result, a crash, or a check that passed when it should have failed
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        This repository and its issues are public. Never paste an API key, a token, a customer
+        identifier, or output captured from a real organization. Reproduce against
+        `tests/fixture-repo/` or a synthetic repository, or redact before pasting.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - noru (hub)
+        - ai-inventory
+        - evidence-push
+        - governance-records
+        - review-signoff
+        - audit-pack
+        - privacy-datamap
+        - iac-scan
+        - change-control
+        - repo-enforcement
+        - noru-ci action
+        - noru-review action
+        - enforce action
+        - contract, schemas or scripts
+        - other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The plugin version, or the action ref you use (for example `@v0` or a commit SHA).
+      placeholder: 0.9.0
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: Where it ran
+      options:
+        - Claude Code
+        - Codex
+        - Cursor
+        - another MCP client
+        - GitHub Actions
+        - other CI or a plain shell
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command or workflow step
+      description: The exact command, or the workflow step with its inputs.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Exit code and output. Redact anything identifying.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: A synthetic file or manifest that shows the problem, if you can.
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Public-repository check
+      options:
+        - label: This issue contains no credential, customer identifier or output from a real organization.
+          required: true

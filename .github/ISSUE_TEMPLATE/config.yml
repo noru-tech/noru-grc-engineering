@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/noru-tech/noru-grc-engineering/security/advisories/new
+    about: Report privately; see SECURITY.md. Do not open a public issue for an unfixed vulnerability.
+  - name: Questions and ideas
+    url: https://github.com/noru-tech/noru-grc-engineering/discussions
+    about: Usage questions, rollout advice and early ideas that are not yet a concrete request.
+  - name: Noru product support
+    url: https://noru.tech
+    about: Questions about your Noru organization, account or data belong with Noru support, not in a public issue.

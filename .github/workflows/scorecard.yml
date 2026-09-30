@@ -1,0 +1,46 @@
+name: scorecard
+
+# OpenSSF Scorecard: supply-chain checks on this repository, published to scorecard.dev (the README
+# badge) and uploaded to code scanning. `publish_results: true` makes scorecard.dev verify this
+# workflow, which is why it stays in the shape the action documents: no top-level env or defaults,
+# read-only at the top, and write access only on the one job, for exactly what it needs.
+
+on:
+  branch_protection_rule:
+  schedule:
+    # Weekly, Tuesday morning, off the hour.
+    - cron: "17 5 * * 2"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    name: scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Upload the SARIF result to code scanning.
+      security-events: write
+      # Sign the published result, so scorecard.dev can verify it came from this workflow.
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: run the analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: upload to code scanning
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: results.sarif

@@ -1,0 +1,11 @@
+# This repository has no package manifests on purpose: runtime code is Node built-ins and the
+# Python standard library only (CONTRIBUTING.md, "Ground rules"). The only third-party code it runs
+# is the GitHub Actions its workflows pin by commit SHA, so that is the only ecosystem watched.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci

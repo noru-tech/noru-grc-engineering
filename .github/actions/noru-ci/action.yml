@@ -1,5 +1,5 @@
 name: "Noru last-mile CI check"
-description: "Run one Noru GRC piece headless: scan, validate, expiry and policy. Offline and credential-free by default."
+description: "Re-check a committed Noru compliance manifest on each pull request and fail when it drifts from the code. Offline by default."
 author: "Noru"
 
 branding:

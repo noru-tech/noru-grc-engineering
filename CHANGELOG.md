@@ -6,6 +6,39 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Added
+
+- Repository health files: `CITATION.cff`, `KNOWN-LIMITATIONS.md` (an index of limitations
+  already stated in `docs/verification.md`, `docs/ci-mode.md`, `docs/repository-enforcement.md`
+  and the contract's non-goals), `.github/CODEOWNERS`, issue forms for bug reports and feature
+  requests, a pull request template, and Dependabot for the GitHub Actions the workflows pin.
+  `check_repo.py` fails when `CITATION.cff` does not name the current release and its changelog
+  date, and the release runbook now bumps it.
+- `SECURITY.md` names GitHub private vulnerability reporting as the preferred channel, states that
+  the latest 0.x release is supported, and covers the generated Marketplace repositories.
+- An OpenSSF Scorecard workflow (`.github/workflows/scorecard.yml`): weekly, on every push to
+  `main` and on branch protection changes, publishing to scorecard.dev and uploading SARIF to code
+  scanning, with write access only on its one job.
+
+### Changed
+
+- The three GitHub Actions carry one Marketplace description each, at most 125 characters, and
+  one branding family: `gray-dark` with `check-circle` (`noru-ci`), `shield` (`noru-review`) and
+  `lock` (`enforce`, previously `shield` on `purple`).
+- Every third-party action in this repository's workflows is pinned to a full commit SHA, at the
+  same major version as before (`actions/checkout` v5, `actions/setup-node` v5,
+  `actions/setup-python` v6). `check_repo.py` now fails on an unpinned action, a missing top-level
+  `permissions:`, or a top-level write grant in any workflow under `.github/workflows/`.
+- The README and the Claude Code marketplace description open with one canonical sentence. The
+  README gains a release, CI and OpenSSF Scorecard badge, moves Install to the top, and adds
+  "What it is not" and "Trust" sections. No plugin is renamed.
+- Each Marketplace mirror README now opens with the action's description, a quick start copied
+  from the in-tree `## Usage` example on `@v0` with how to pin a full commit SHA, and the exact
+  `permissions:` it needs and why, before the distribution note. Every mirror also ships a
+  `SECURITY.md` pointing at private vulnerability reporting on this repository.
+  `publish_actions.py --check` asserts the new README head, the `SECURITY.md`, one shared branding
+  color and a distinct icon per action.
+
 ## 0.9.0 — 2026-09-09
 
 - Add framework-independent connection relationship proposals and manifest bindings, with per-edge

@@ -2,18 +2,25 @@
 
 ## Supported Versions
 
-This project is pre-1.0. Security fixes are applied to the latest release on `main`.
+This project is pre-1.0. Security fixes are applied to the latest release on `main`; every plugin
+and action shares one version number, listed in [CHANGELOG.md](./CHANGELOG.md).
 
 | Version | Supported |
 | ------- | --------- |
-| 0.1.x | Yes |
+| Latest 0.x release | Yes |
+| Earlier releases | No |
+
+The GitHub Marketplace repositories `noru-tech/noru-ci-action`, `noru-tech/noru-review-action` and
+`noru-tech/noru-enforce-action` are generated from this repository on each release. Report issues
+in them here.
 
 ## Reporting a Vulnerability
 
 Report security issues privately. Do not open a public issue for an unfixed vulnerability.
 
-- Email **security@noru.tech** with a subject line beginning `[SECURITY] noru-grc-engineering`.
-- On GitHub you may also use Private Vulnerability Reporting.
+- Preferred: GitHub private vulnerability reporting,
+  <https://github.com/noru-tech/noru-grc-engineering/security/advisories/new>.
+- Or email **security@noru.tech** with a subject line beginning `[SECURITY] noru-grc-engineering`.
 
 Include the affected file or version, reproduction steps, expected impact, and whether any secret or
 customer data exposure is involved.
