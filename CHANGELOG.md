@@ -29,6 +29,9 @@ one version number; the release workflow fails if they disagree.
   same major version as before (`actions/checkout` v5, `actions/setup-node` v5,
   `actions/setup-python` v6). `check_repo.py` now fails on an unpinned action, a missing top-level
   `permissions:`, or a top-level write grant in any workflow under `.github/workflows/`.
+- The README and the Claude Code marketplace description open with one canonical sentence. The
+  README gains a release, CI and OpenSSF Scorecard badge, moves Install to the top, and adds
+  "What it is not" and "Trust" sections. No plugin is renamed.
 - Each Marketplace mirror README now opens with the action's description, a quick start copied
   from the in-tree `## Usage` example on `@v0` with how to pin a full commit SHA, and the exact
   `permissions:` it needs and why, before the distribution note. Every mirror also ships a

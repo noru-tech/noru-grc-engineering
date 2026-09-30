@@ -5,7 +5,7 @@
     "name": "Noru",
     "email": "support@noru.tech"
   },
-  "description": "Last-mile GRC pieces: do the compliance work that lives in your repo, CI or laptop, and land it in Noru with provenance, idempotency and a human review step.",
+  "description": "Last-mile GRC engineering plugins for Claude Code and Codex: AI inventory, privacy data maps, infrastructure checks and change control, recorded in Noru.",
   "plugins": [
     {
       "name": "ai-inventory",

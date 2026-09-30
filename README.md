@@ -4,15 +4,20 @@
 
 # noru-grc-engineering
 
+Last-mile GRC engineering plugins for Claude Code and Codex: AI inventory, privacy data maps, infrastructure checks and change control, recorded in Noru.
+
+[![Release](https://img.shields.io/github/v/release/noru-tech/noru-grc-engineering)](https://github.com/noru-tech/noru-grc-engineering/releases)
+[![CI](https://github.com/noru-tech/noru-grc-engineering/actions/workflows/ci.yml/badge.svg)](https://github.com/noru-tech/noru-grc-engineering/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/noru-tech/noru-grc-engineering/badge)](https://scorecard.dev/viewer/?uri=github.com/noru-tech/noru-grc-engineering)
+[![License: MIT](https://img.shields.io/badge/Code-MIT-blue.svg)](./LICENSE)
+[![Codex Plugin](https://img.shields.io/badge/Codex-plugin-111827.svg)](./docs/clients/codex.md)
+[![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-da7756.svg)](./docs/clients/claude-code.md)
+
 > The compliance work that lives in your repo, your CI, or your laptop — done where it lives, and
 > landed in Noru with provenance, idempotency and a human review step. For file evidence, provenance
 > now means something you can check: `evidence-push` sends the SHA-256 of the bytes it uploads, and
 > compares it against the digest Noru computed over what it stored. Anyone holding the file can redo
 > that arithmetic.
-
-[![License: MIT](https://img.shields.io/badge/Code-MIT-blue.svg)](./LICENSE)
-[![Codex Plugin](https://img.shields.io/badge/Codex-plugin-111827.svg)](./docs/clients/codex.md)
-[![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-da7756.svg)](./docs/clients/claude-code.md)
 
 A GRC engineer's tooling usually stops at the API boundary. Some compliance work **structurally
 cannot** be done by a server-side integration, however good it is, because it needs something an API
@@ -27,6 +32,48 @@ key does not have:
 
 That is the last mile. These plugins do it, and **Noru holds the record.** There is no `grc-data/`
 directory, no flat-file risk register, no second source of truth to reconcile before an audit.
+
+## Install
+
+### Claude Code
+
+```text
+/plugin marketplace add noru-tech/noru-grc-engineering
+/plugin install noru@noru-grc-engineering
+/plugin install ai-inventory@noru-grc-engineering
+/plugin install evidence-push@noru-grc-engineering
+/plugin install governance-records@noru-grc-engineering
+/plugin install review-signoff@noru-grc-engineering
+/plugin install audit-pack@noru-grc-engineering
+/plugin install iac-scan@noru-grc-engineering
+/plugin install privacy-datamap@noru-grc-engineering
+/plugin install change-control@noru-grc-engineering
+```
+
+Then configure the Noru MCP connection: [Claude guide](./docs/clients/claude-code.md).
+
+### Codex
+
+```bash
+codex plugin marketplace add noru-tech/noru-grc-engineering
+codex plugin add noru@noru-grc-engineering
+codex plugin add ai-inventory@noru-grc-engineering
+codex plugin add evidence-push@noru-grc-engineering
+codex plugin add governance-records@noru-grc-engineering
+codex plugin add review-signoff@noru-grc-engineering
+codex plugin add audit-pack@noru-grc-engineering
+codex plugin add iac-scan@noru-grc-engineering
+codex plugin add privacy-datamap@noru-grc-engineering
+codex plugin add change-control@noru-grc-engineering
+```
+
+Then configure Noru MCP: [Codex guide](./docs/clients/codex.md).
+
+Also: [Cursor](./docs/clients/cursor.md) · [generic MCP clients](./docs/clients/generic-mcp.md) ·
+[marketplace capability metadata](./docs/marketplace.md)
+
+For an end-to-end repository rollout, including read-only pull-request checks and the separate
+publication boundary, follow [developer onboarding](./docs/developer-onboarding.md).
 
 ## Pieces
 
@@ -98,47 +145,25 @@ one of them mostly assembles rather than discovers.
   a variable block. It is the only piece whose every write is a documented server-side upsert, so
   filing a finding and closing one are the same call.
 
-## Install
+## What it is not
 
-### Claude Code
+Drawn from the [contract's non-goals](./contract/README.md#non-goals-stated-so-they-can-be-pointed-at)
+and [docs/verification.md](./docs/verification.md), where each one is argued in full:
 
-```text
-/plugin marketplace add noru-tech/noru-grc-engineering
-/plugin install noru@noru-grc-engineering
-/plugin install ai-inventory@noru-grc-engineering
-/plugin install evidence-push@noru-grc-engineering
-/plugin install governance-records@noru-grc-engineering
-/plugin install review-signoff@noru-grc-engineering
-/plugin install audit-pack@noru-grc-engineering
-/plugin install iac-scan@noru-grc-engineering
-/plugin install privacy-datamap@noru-grc-engineering
-/plugin install change-control@noru-grc-engineering
-```
-
-Then configure the Noru MCP connection: [Claude guide](./docs/clients/claude-code.md).
-
-### Codex
-
-```bash
-codex plugin marketplace add noru-tech/noru-grc-engineering
-codex plugin add noru@noru-grc-engineering
-codex plugin add ai-inventory@noru-grc-engineering
-codex plugin add evidence-push@noru-grc-engineering
-codex plugin add governance-records@noru-grc-engineering
-codex plugin add review-signoff@noru-grc-engineering
-codex plugin add audit-pack@noru-grc-engineering
-codex plugin add iac-scan@noru-grc-engineering
-codex plugin add privacy-datamap@noru-grc-engineering
-codex plugin add change-control@noru-grc-engineering
-```
-
-Then configure Noru MCP: [Codex guide](./docs/clients/codex.md).
-
-Also: [Cursor](./docs/clients/cursor.md) · [generic MCP clients](./docs/clients/generic-mcp.md) ·
-[marketplace capability metadata](./docs/marketplace.md)
-
-For an end-to-end repository rollout, including read-only pull-request checks and the separate
-publication boundary, follow [developer onboarding](./docs/developer-onboarding.md).
+- **Not a second register.** A manifest is an input to Noru and a record of provenance, never a
+  parallel store. There is no `grc-data/` directory and no state only a plugin reads.
+- **Not a framework catalogue.** No control text, guidance or evidence-item list is vendored here.
+  Pieces work the queue Noru serves.
+- **Not a credential store.** Authentication belongs to the MCP host. The one REST path,
+  `evidence-push:push`, reads `NORU_API_KEY` from the environment at the point of use.
+- **Not a SaaS connector.** Scheduled integrations with other SaaS products are Noru's job, run
+  server-side with encrypted credentials. The forge exporters in `change-control` are explicit,
+  read-only steps you run, not a connector.
+- **Not a check of Noru's record.** CI mode is offline: it proves the repository's own record is
+  true and current, not that Noru agrees with it.
+- **Not field-tested at scale.** Every piece is proven against fixtures on every build, not against
+  a live organization at production scale. The limits are collected in
+  [KNOWN-LIMITATIONS.md](./KNOWN-LIMITATIONS.md).
 
 ## First run
 
@@ -330,9 +355,32 @@ real organization.
 
 Report vulnerabilities privately: [SECURITY.md](./SECURITY.md).
 
+## Trust
+
+- **One version, verified at the tag.** Every plugin and action shares one version number, and
+  `scripts/check_repo.py` fails while any copy disagrees. A release is a reviewed
+  `chore: release X.Y.Z` pull request, then a `vX.Y.Z` tag on its merge commit. The `release`
+  workflow re-runs the full gate on that tag and asserts that the tag, both marketplaces and every
+  plugin manifest agree before anything is published.
+- **Generated, traceable Marketplace mirrors.** `noru-tech/noru-ci-action`,
+  `noru-tech/noru-review-action` and `noru-tech/noru-enforce-action` are built from the tag by
+  `scripts/publish_actions.py`. Each carries a `DISTRIBUTION.json` naming the source commit, and a
+  released tag that would point at a different tree is a hard failure, never overwritten.
+- **Pinned, least-privilege workflows.** Every workflow in this repository declares its top-level
+  `permissions:` and pins every third-party action to a full commit SHA; `scripts/check_repo.py`
+  fails the build otherwise.
+- **OpenSSF Scorecard.** The [`scorecard` workflow](./.github/workflows/scorecard.yml) publishes
+  results weekly and on every push to `main`:
+  [scorecard.dev](https://scorecard.dev/viewer/?uri=github.com/noru-tech/noru-grc-engineering).
+- **Private vulnerability reporting.** Report through
+  [GitHub private vulnerability reporting](https://github.com/noru-tech/noru-grc-engineering/security/advisories/new);
+  [SECURITY.md](./SECURITY.md) has the policy, response time and threat model.
+
 ## Related
 
 [`noru-tech/compliance-assistant`](https://github.com/noru-tech/compliance-assistant) is Noru's
 conversational compliance assistant over the same MCP server: it guides sequencing, gaps and
 roadmaps. This repository is the other half — the hands-on work in your own repository. They install
 side by side.
+
+Maintained by [Noru](https://noru.tech), a continuous compliance platform.
