@@ -6,6 +6,12 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Changed
+
+- The three GitHub Actions carry one Marketplace description each, at most 125 characters, and
+  one branding family: `gray-dark` with `check-circle` (`noru-ci`), `shield` (`noru-review`) and
+  `lock` (`enforce`, previously `shield` on `purple`).
+
 ## 0.9.0 — 2026-09-09
 
 - Add framework-independent connection relationship proposals and manifest bindings, with per-edge
