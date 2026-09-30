@@ -18,6 +18,8 @@ What it covers, and why each one is here rather than left to review:
     same enums. Two sources of truth is one too many, so this makes them one in effect.
   * **Schema evaluability** — no contract schema uses a JSON Schema keyword scripts/jsonschema_mini.py
     cannot evaluate, so the schemas can never quietly outgrow the checker that enforces them.
+  * **Workflow hardening** — this repository's workflows declare top-level permissions, read-only,
+    and pin every third-party action to a full commit SHA.
   * **Citation** — CITATION.cff names the current release and its changelog date.
   * **Secret hygiene** — this repository is public.
 
@@ -842,6 +844,33 @@ def check_enforcement_action(problems):
         problems.append("actions/enforce must remove credential-like environment variables")
 
 
+def check_workflow_hardening(problems):
+    """This repository's own workflows: explicit top-level permissions, every action pinned by SHA.
+
+    A workflow with no top-level `permissions:` inherits the repository default, which can be
+    write-all; a tag is a pointer its owner can move. The templates under templates/ and the
+    plugin assets are what consumers copy and have their own checks; this covers what runs here.
+    """
+    workflows = ROOT / ".github" / "workflows"
+    uses_re = re.compile(r"^\s*(?:-\s+)?uses:\s*['\"]?([^\s'\"#]+)", re.M)
+    for path in sorted(workflows.glob("*.y*ml")) if workflows.is_dir() else []:
+        text = path.read_text(encoding="utf-8")
+        where = path.relative_to(ROOT)
+        top = re.search(r"^permissions:(.*)$", text, re.M)
+        if not top:
+            problems.append(f"{where}: declares no top-level permissions; add one, read-only")
+        elif re.search(r"write-all", top.group(1)) or re.search(r"^permissions:\n(?:  .*\n)*  [\w-]+:\s*write\b", text, re.M):
+            problems.append(f"{where}: top-level permissions grant write; grant it on the job that needs it")
+        for match in uses_re.finditer(text):
+            ref = match.group(1)
+            if ref.startswith("./") or ref.startswith("docker://"):
+                continue
+            _, _, version = ref.partition("@")
+            if not re.fullmatch(r"[0-9a-f]{40}", version):
+                line = text[: match.start()].count("\n") + 1
+                problems.append(f"{where}:{line}: {ref} is not pinned to a full commit SHA")
+
+
 def check_secrets(problems):
     for path in sorted(ROOT.rglob("*")):
         if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
@@ -917,6 +946,7 @@ def main(argv):
         check_schemas_evaluable(problems)
         check_enforcement_registry(problems)
         check_enforcement_action(problems)
+        check_workflow_hardening(problems)
         check_skills(problems, plugin_names)
         check_secrets(problems)
     except Exception as exc:  # noqa: BLE001
