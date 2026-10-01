@@ -35,7 +35,7 @@ body:
     attributes:
       label: Version
       description: The plugin version, or the action ref you use (for example `@v0` or a commit SHA).
-      placeholder: 0.9.1
+      placeholder: 0.10.0
     validations:
       required: true
   - type: dropdown
