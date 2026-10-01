@@ -434,6 +434,9 @@ Report vulnerabilities privately: [SECURITY.md](./SECURITY.md).
 - **OpenSSF Scorecard.** The [`scorecard` workflow](./.github/workflows/scorecard.yml) publishes
   results weekly and on every push to `main`:
   [scorecard.dev](https://scorecard.dev/viewer/?uri=github.com/noru-tech/noru-grc-engineering).
+- **OpenSSF Best Practices, prepared.** The passing-level criteria are answered, Met, Unmet or N/A
+  with evidence, in [docs/openssf-best-practices.md](./docs/openssf-best-practices.md). No badge is
+  claimed until the form is submitted.
 - **Private vulnerability reporting.** Report through
   [GitHub private vulnerability reporting](https://github.com/noru-tech/noru-grc-engineering/security/advisories/new);
   [SECURITY.md](./SECURITY.md) has the policy, response time and threat model.
