@@ -31,9 +31,9 @@ fill it in.
 | `source.source` | `git-subdir` |
 | `source.url` | `https://github.com/noru-tech/noru-grc-engineering.git` |
 | `source.path` | `plugins/<name>` |
-| `source.ref` | `v0.9.1` |
-| `source.sha` | `37e17dda3f66b0ed08b106e8147be6f7d4ce9fb6` (the `v0.9.1` tag) |
-| `version` | `0.9.1` |
+| `source.ref` | `v0.10.0` |
+| `source.sha` | `ebda88164caf01c26c1fba1fe2228cde39c1f05e` (the `v0.10.0` tag) |
+| `version` | `0.10.0` |
 | `category` | `security` (see below) |
 
 **Category.** The official marketplace has no `compliance` category. The values in use there are
@@ -43,7 +43,7 @@ not a published enumeration. `security` is the closest fit for compliance and GR
 offers a compliance category, choose it instead. This repository's own marketplace keeps
 `compliance`.
 
-**Re-pin before submitting.** If a release is newer than `v0.9.1` when you submit, use that tag and
+**Re-pin before submitting.** If a release is newer than `v0.10.0` when you submit, use that tag and
 the full commit it points to.
 
 ## Per plugin
@@ -118,6 +118,12 @@ as a hidden character.
 The only issue the tooling found was I1 (`plugins[]` not sorted by name) on the previous ordering,
 which listed `review-signoff` before `repo-enforcement`. The marketplaces are now sorted. The CLI was
 Claude Code 2.1.286.
+
+Re-checked at the `v0.10.0` pin: `claude plugin validate` (Claude Code 2.1.195) passes for the
+marketplace and each of the ten `plugins/*`, every `.mcp.json` parses, and the skill and command
+count is still 45. The invariants I1–I11 and `validate-frontmatter.ts` were not re-run: since the
+tree the results above were recorded on (#64), the marketplace and plugin manifests, `.mcp.json`
+files and skill front matter changed only in their version.
 
 Two directory checks could not be run locally:
 
