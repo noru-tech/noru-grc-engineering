@@ -288,8 +288,8 @@ jobs:
   inventory:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
       - uses: noru-tech/noru-ci-action@v0
@@ -380,8 +380,8 @@ pull request cannot safely fetch that state. What happens after the diff depends
     runs-on: ubuntu-latest
     environment: compliance     # so a human can require an approval on the write
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
       - uses: noru-tech/noru-ci-action@v0
