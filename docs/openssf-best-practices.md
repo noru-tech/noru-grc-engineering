@@ -47,7 +47,7 @@ SHOULD and SUGGESTED criteria left Unmet (`test_most`, `warnings_strict`, `dynam
 | `sites_https` | MUST | **Met** | The project site is the GitHub repository, served over HTTPS; installs and releases come from GitHub over HTTPS. | <https://github.com/noru-tech/noru-grc-engineering> |
 | `discussion` | MUST | **Met** | GitHub Issues and GitHub Discussions: searchable, URL-addressable, no proprietary client needed. | <https://github.com/noru-tech/noru-grc-engineering/discussions> |
 | `english` | SHOULD | **Met** | Documentation is in English and issues are accepted in English. | <https://github.com/noru-tech/noru-grc-engineering/blob/main/README.md> |
-| `maintained` | MUST | **Met** | Regular releases (0.9.1 on 2026-10-01) and commits on main. | <https://github.com/noru-tech/noru-grc-engineering/releases> |
+| `maintained` | MUST | **Met** | Regular releases (0.10.0 on 2026-10-02) and commits on main. | <https://github.com/noru-tech/noru-grc-engineering/releases> |
 
 ## Basics: source repository, versions and release notes
 
