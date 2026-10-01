@@ -13,10 +13,16 @@
 /plugin install iac-scan@noru-grc-engineering
 /plugin install privacy-datamap@noru-grc-engineering
 /plugin install change-control@noru-grc-engineering
+/plugin install compliance-assistant@noru-grc-engineering
 ```
 
 Install `noru` (the hub) alongside whichever pieces you want. Each piece works on its own, but the
 hub is where `connect`, `doctor` and `context` live.
+
+This one marketplace lists every Noru plugin. `compliance-assistant` lives in its own repository,
+[`noru-tech/compliance-assistant`](https://github.com/noru-tech/compliance-assistant); the entry
+here is a `git-subdir` source pinned to that plugin's release commit, so it installs the released
+version under the same name, with its own version number.
 
 ## Connect to Noru
 

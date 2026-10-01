@@ -35,6 +35,11 @@ directory, no flat-file risk register, no second source of truth to reconcile be
 
 ## Install
 
+One marketplace gives access to every Noru plugin: the pieces in this repository and
+[`compliance-assistant`](https://github.com/noru-tech/compliance-assistant), which the marketplace
+lists from its own repository, pinned to its release commit. Add the marketplace once, then install
+the plugins you want.
+
 ### Claude Code
 
 ```text
@@ -48,6 +53,7 @@ directory, no flat-file risk register, no second source of truth to reconcile be
 /plugin install iac-scan@noru-grc-engineering
 /plugin install privacy-datamap@noru-grc-engineering
 /plugin install change-control@noru-grc-engineering
+/plugin install compliance-assistant@noru-grc-engineering
 ```
 
 Then configure the Noru MCP connection: [Claude guide](./docs/clients/claude-code.md).
@@ -65,9 +71,21 @@ codex plugin add audit-pack@noru-grc-engineering
 codex plugin add iac-scan@noru-grc-engineering
 codex plugin add privacy-datamap@noru-grc-engineering
 codex plugin add change-control@noru-grc-engineering
+codex plugin add compliance-assistant@noru-grc-engineering
 ```
 
 Then configure Noru MCP: [Codex guide](./docs/clients/codex.md).
+
+### GitHub Copilot CLI
+
+```bash
+copilot plugin marketplace add noru-tech/noru-grc-engineering
+copilot plugin install ai-inventory@noru-grc-engineering
+copilot plugin install compliance-assistant@noru-grc-engineering
+```
+
+Copilot CLI reads `.github/plugin/marketplace.json`, the same catalogue as the Claude marketplace.
+Read the [Copilot CLI guide](./docs/clients/copilot-cli.md) for what has and has not been verified there.
 
 Also: [Cursor](./docs/clients/cursor.md) · [generic MCP clients](./docs/clients/generic-mcp.md) ·
 [marketplace capability metadata](./docs/marketplace.md)
@@ -303,6 +321,7 @@ week, the contract is wrong — come back and fix the contract.
 noru-grc-engineering/
 ├── .claude-plugin/marketplace.json     # Claude Code marketplace
 ├── .agents/plugins/marketplace.json    # Codex marketplace
+├── .github/plugin/marketplace.json     # GitHub Copilot CLI marketplace (mirrors the Claude one)
 ├── contract/                           # the piece contract + manifest schemas (the durable asset)
 ├── plugins/
 │   ├── noru/                           # hub: connect, doctor, context

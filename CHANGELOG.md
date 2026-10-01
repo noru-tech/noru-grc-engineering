@@ -6,6 +6,32 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+### Added
+
+- One marketplace for every Noru plugin: `compliance-assistant` (from
+  `noru-tech/compliance-assistant`) is now listed in the Claude Code and Codex marketplaces as a
+  `git-subdir` source pinned to its 0.1.1 release commit. `/plugin install
+  compliance-assistant@noru-grc-engineering` and `codex plugin add
+  compliance-assistant@noru-grc-engineering` work after the one `marketplace add`. It keeps its own
+  version.
+- `.github/plugin/marketplace.json` for GitHub Copilot CLI, which reads it before
+  `.claude-plugin/marketplace.json`. It is the Claude marketplace with the external source written
+  as a `github` source, because Copilot CLI rejects a marketplace that contains `git-subdir`.
+  Install guide: `docs/clients/copilot-cli.md`.
+- `docs/plugin-directory-submission.md`: the values to submit for each plugin to the Anthropic
+  plugin directory, and the results of the directory's own validation tooling run against these
+  manifests.
+
+### Changed
+
+- Both marketplaces list plugins sorted by name, which the Anthropic directory's I1 invariant
+  expects.
+- `check_repo.py` checks an external marketplace entry for a `noru-tech` https URL, a relative
+  path, a ref, a full commit sha, an identical pointer in every marketplace, and no local plugin of
+  the same name. It exempts that entry from the shared-version and manifest rules and checks that
+  the Copilot CLI file mirrors the Claude one. The release workflow skips external entries when it
+  asserts the shared version.
+
 ## 0.9.1 — 2026-10-01
 
 ### Added

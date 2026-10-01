@@ -97,7 +97,8 @@ node scripts/scaffold-piece.mjs <piece-name>
 
 You get a piece that already satisfies most of the contract. What is yours to write: the collector
 (requirement 2), the queue source (requirement 9), and the push plan (requirement 4). Then add it to
-both marketplace manifests — `scripts/check_repo.py` fails if you forget.
+the three marketplace manifests (Claude Code, Codex, and the GitHub Copilot CLI mirror at
+`.github/plugin/marketplace.json`) — `scripts/check_repo.py` fails if you forget.
 
 Read [`contract/README.md`](./contract/README.md) first and
 [`docs/authoring-a-piece.md`](./docs/authoring-a-piece.md) second.
@@ -162,7 +163,8 @@ Every plugin and every action shares one version number, and `scripts/check_repo
 any copy of it disagrees. A release is three steps, and the third one is automatic:
 
 1. **Bump.** Open a `chore: release X.Y.Z` pull request that moves the version everywhere at once:
-   both marketplace manifests, the two `plugin.json` files of every piece, the `VERSION` constants,
+   the three marketplace manifests (not the pinned `compliance-assistant` entry, which keeps its own
+   version), the two `plugin.json` files of every piece, the `VERSION` constants,
    `version` and `date-released` in `CITATION.cff`, and a `## X.Y.Z — YYYY-MM-DD` section in
    `CHANGELOG.md`. Copyable `uses:` examples are not part
    of a bump: they reference the floating major tag (`@v0`), which the publish step moves.
