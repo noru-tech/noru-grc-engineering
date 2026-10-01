@@ -219,6 +219,40 @@ def policy_validation_tests(results, repo):
     results.check("ruleset drift can never be baselined", never["baselineable"] is False, never)
 
 
+def piece_error_tests(results, repo, action_env):
+    # iac-scan is queue-driven: with no queue its scan step is blocked, ci_check.py reports
+    # status "error" and emits no finding. A required check that never ran must not pass.
+    policy_path = repo / ".noru" / "enforcement.yml"
+    original_policy = policy_path.read_text(encoding="utf-8")
+    head, rest = original_policy.split("adoption:\n", 1)
+    _adoption, rest = rest.split("pieces:\n", 1)
+    _pieces, rest = rest.split("\nreviews:\n", 1)
+    policy_path.write_text(
+        head + "adoption:\n  mode: strict\n\npieces:\n  iac-scan:\n    required: true\n\nreviews:\n" + rest,
+        encoding="utf-8",
+    )
+    strict = run([
+        sys.executable, str(ENFORCE), "validate", f"--repo={repo}", f"--suite-root={ROOT}",
+        f"--registry={REGISTRY}", "--as-of=2026-09-04", "--output=json", "--quiet",
+    ])
+    payload = json.loads(strict.stdout)
+    results.check(
+        "a required piece that errors without a finding fails as a tooling violation",
+        strict.returncode == 1 and not payload["ok"]
+        and [row["piece"] for row in payload["pieces"]] == ["iac-scan"]
+        and payload["pieces"][0]["status"] == "error"
+        and any(
+            row["piece"] == "iac-scan" and row["rule"] == "tooling" and not row["baselineable"]
+            and "no queue" in row["message"]
+            for row in payload["new_violations"]
+        ),
+        strict.stderr or payload,
+    )
+    action = subprocess.run(["node", str(ACTION)], cwd=repo, env=action_env, text=True, capture_output=True, check=False, timeout=180)
+    results.check("the bundled action fails when a required piece never ran", action.returncode == 1, action.stderr or action.stdout)
+    policy_path.write_text(original_policy, encoding="utf-8")
+
+
 def github_tests(results, repo, commit):
     state = json.loads((PLUGIN / "fixtures" / "github-no-ruleset.json").read_text(encoding="utf-8"))
     state["repository_commit"] = commit
@@ -325,6 +359,16 @@ def main(argv):
         applied = run(["node", str(CONFIGURE), "apply", f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
         codeowners = (repo / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
         results.check("confirmed setup preserves existing CODEOWNERS and protects itself", applied.returncode == 0 and "/docs/ @example/docs" in codeowners and "/.github/CODEOWNERS @example/grc-reviewers" in codeowners, applied.stderr or codeowners)
+        # The fixture has no iac-scan queue from Noru, so a required iac-scan never runs and is an
+        # unbaselineable tooling failure (piece_error_tests covers that). The ratchet tests are about
+        # accepted debt, so they run without it.
+        policy_path = repo / ".noru" / "enforcement.yml"
+        policy_path.write_text(
+            policy_path.read_text(encoding="utf-8").replace(
+                "  iac-scan:\n    required: true\n", "  iac-scan:\n    required: false\n"
+            ),
+            encoding="utf-8",
+        )
         policy_validation_tests(results, repo)
         action_env = {
             **dict(os.environ), "GITHUB_WORKSPACE": str(repo),
@@ -334,6 +378,7 @@ def main(argv):
         action = subprocess.run(["node", str(ACTION)], cwd=repo, env=action_env, text=True, capture_output=True, check=False, timeout=180)
         action_report = repo / ".noru" / ".cache" / "noru-grc-enforcement.json"
         results.check("the bundled action fails closed and writes its JSON report", action.returncode == 1 and action_report.is_file() and not json.loads(action_report.read_text())["ok"], action.stderr or action.stdout)
+        piece_error_tests(results, repo, action_env)
         # GitHub planning reads policy only; baseline state is irrelevant from here.
         github_tests(results, repo, commit)
     return results.finish(output_json, quiet)

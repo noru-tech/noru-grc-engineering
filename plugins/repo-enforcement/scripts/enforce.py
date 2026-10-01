@@ -737,6 +737,34 @@ def load_baseline(path):
     return value, errors
 
 
+def with_error_finding(piece_result, registry_row):
+    """A piece that errored without saying why still never ran: make that a tooling violation.
+
+    ci_check.py exits with status "error" and no finding when a step it needed could not run (for
+    example a queue-driven scan with no queue under --on-missing-prerequisite=fail). Without a
+    finding the piece would contribute nothing and the gate would pass on a check that never ran.
+    """
+    if piece_result.get("status") != "error":
+        return piece_result
+    findings = piece_result.get("findings", [])
+    if any(normalized_rule(finding) in {"tooling", "coverage"} for finding in findings):
+        return piece_result
+    failed = [
+        step for step in piece_result.get("steps", [])
+        if step.get("status") in {"error", "blocked"}
+    ]
+    step = failed[0] if failed else {}
+    detail = step.get("detail") or "the piece check reported an error without a finding"
+    name = piece_result["piece"]
+    finding = {
+        "kind": "tooling",
+        "message": redact(f"{step['step']}: {detail}" if step.get("step") else detail),
+        "path": registry_row["artifact"] if registry_row else f"pieces.{name}",
+        "step": step.get("step", "unknown"),
+    }
+    return {**piece_result, "findings": [*findings, finding]}
+
+
 def evaluate(opts):
     repo = opts["repo"]
     policy = load_policy(opts["policy"])
@@ -763,6 +791,7 @@ def evaluate(opts):
             }
         else:
             piece_result = run_piece(repo, opts["suite_root"], row, opts["as_of"])
+        piece_result = with_error_finding(piece_result, row)
         piece_results.append(piece_result)
         allowed = set(config.get("fail_on") or [
             "drift", "invalid", "needs_review", "missing_interpretation", "expired",

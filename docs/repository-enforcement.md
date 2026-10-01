@@ -24,7 +24,9 @@ Strict mode accepts no existing failure. Ratchet mode matches only a complete no
 fingerprint under the current policy digest. A candidate baseline is not an approval: every accepted
 entry needs a named person, rationale, decision date, and expiry. New, mutated, increased, expired,
 resolved, or reintroduced debt fails. Invalid records, tooling failures, credential exposure,
-expired exceptions, stale plans, and GitHub/workflow drift cannot be baselined.
+expired exceptions, stale plans, and GitHub/workflow drift cannot be baselined. A required piece
+whose check could not run, such as a queue-driven scan with no queue, is a tooling failure, never a
+pass.
 
 Use `/repo-enforcement:status` for the derived worklist. It groups current debt by owning piece and
 named person and sorts blockers, stale cleanup, entries due within seven days, and scheduled debt.

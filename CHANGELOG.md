@@ -32,6 +32,15 @@ one version number; the release workflow fails if they disagree.
   the Copilot CLI file mirrors the Claude one. The release workflow skips external entries when it
   asserts the shared version.
 
+### Fixed
+
+- Repository enforcement fails closed when a required piece's check errors without a finding.
+  `enforce.py` ignored a piece's `status`, so a piece that never ran (for example `iac-scan` with no
+  queue, whose blocked scan step makes `ci_check.py` exit 6 with no finding) contributed no
+  violations, and `validate` and the `enforce` action passed the merge gate. Such a piece now
+  produces a non-baselineable `tooling` violation carrying the failing step's detail. A repository
+  that requires `iac-scan` will now fail the gate until the scan can run there.
+
 ## 0.9.1 — 2026-10-01
 
 ### Added
