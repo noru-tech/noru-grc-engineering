@@ -6,8 +6,12 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.9.1 — 2026-10-01
+
 ### Added
 
+- `.github/workflows/codeql.yml`: CodeQL static analysis of the JavaScript, Python and workflow
+  code on every pull request, on main and weekly; results go to code scanning.
 - Repository health files: `CITATION.cff`, `KNOWN-LIMITATIONS.md` (an index of limitations
   already stated in `docs/verification.md`, `docs/ci-mode.md`, `docs/repository-enforcement.md`
   and the contract's non-goals), `.github/CODEOWNERS`, issue forms for bug reports and feature
