@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "noru-grc-engineering",
   "owner": {
     "name": "Noru",
@@ -74,8 +73,8 @@
     {
       "name": "compliance-assistant",
       "source": {
-        "source": "git-subdir",
-        "url": "https://github.com/noru-tech/compliance-assistant.git",
+        "source": "github",
+        "repo": "noru-tech/compliance-assistant",
         "path": "plugins/compliance-assistant",
         "ref": "compliance-assistant--v0.1.1",
         "sha": "1601fb3c99c1a8dd2c3f768e8b490f0037979f35"

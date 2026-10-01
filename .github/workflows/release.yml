@@ -72,6 +72,10 @@ jobs:
           marketplace = json.loads(pathlib.Path(".claude-plugin/marketplace.json").read_text())
           for entry in marketplace["plugins"]:
               name = entry["name"]
+              # An entry with an object source is a Noru plugin from another repository, pinned
+              # to a commit there; it has its own version and is not part of this release.
+              if not isinstance(entry["source"], str):
+                  continue
               if entry.get("version") != expected:
                   problems.append(
                       f"marketplace entry '{name}' is {entry.get('version')}, expected {expected}"
