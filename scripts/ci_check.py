@@ -76,6 +76,7 @@ from check_policy import (  # noqa: E402
     load_special_categories,
     parse_document as parse_manifest_text,
 )
+from finding_docs import see as see_finding_docs  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -969,7 +970,10 @@ def render_text(payload, quiet):
             continue
         label = ("BLOCKING" if broken and finding["kind"] not in fail_on else gating_label) if failing else "warn"
         where = finding.get("path") or finding.get("manifest") or ""
-        lines.append(f"  {label} [{finding['kind']}] {where}: {finding['message']}")
+        lines.append(
+            f"  {label} [{finding['kind']}] {where}: {finding['message']}"
+            + see_finding_docs(finding["kind"])
+        )
         explanation = finding.get("explanation")
         if explanation:
             rows = explanation.get("new_in_repository", [])

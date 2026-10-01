@@ -41,6 +41,8 @@ import pathlib
 import re
 import sys
 
+from finding_docs import see as see_finding_docs
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 
@@ -276,7 +278,10 @@ def render_text(payload, quiet):
             continue
         label = "ERROR" if failing else "warn "
         subject = f" \"{finding['subject']}\"" if finding.get("subject") else ""
-        lines.append(f"  {label} [{finding['kind']}] {finding['path']}{subject}: {finding['message']}")
+        lines.append(
+            f"  {label} [{finding['kind']}] {finding['path']}{subject}: {finding['message']}"
+            + see_finding_docs(finding["kind"])
+        )
     if not payload["ok"]:
         failing = sum(1 for f in payload["findings"] if f["kind"] in payload["policy"]["fail_on"])
         lines.append("")

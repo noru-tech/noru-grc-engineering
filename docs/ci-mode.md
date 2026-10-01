@@ -14,6 +14,10 @@ write access is not a check, it is a report someone remembers to run.
 Three things fail a build. Two are computable from the repository and a calendar; the third needs
 one more committed file, and no network either.
 
+Every finding line names its kind in brackets and ends with a link to that kind's page in
+[docs/findings/](./findings/README.md): the rule, why it matters, a failing and a passing example,
+and how to fix it or record a disposition.
+
 ## 1. Manifest drift
 
 The collector is deterministic and offline. It reduces everything it found in the repository to a
@@ -29,7 +33,7 @@ The failure is readable. Alongside the digests, the report lists what the collec
 repository that the manifest names nowhere, with the `file:line` where each was first seen:
 
 ```text
-  FAIL [drift] .noru/ai-inventory.yml: the committed manifest no longer matches the repository
+  FAIL [drift] .noru/ai-inventory.yml: the committed manifest no longer matches the repository (see https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/findings/drift.md)
          present in the repository, named nowhere in the manifest:
            + frameworks[0]: vercel-ai-sdk  (first seen at src/summarize.ts:1)
            + models[0]: claude-sonnet-4-5  (first seen at src/summarize.ts:5)

@@ -29,6 +29,14 @@ const report = process.env.INPUT_REPORT_PATH
   : resolve(process.env.RUNNER_TEMP || "/tmp", "noru-grc-enforcement.json");
 const asOf = process.env["INPUT_AS-OF"] || "";
 
+// Every annotation names a rule, and every rule has a page saying what it is and how to fix it or
+// record a disposition. The one place this runtime learns that URL; scripts/finding_docs.py is the
+// Python one, and scripts/test_repo_enforcement.py asserts they agree.
+const FINDINGS_DOCS_BASE = "https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/findings/";
+function seeFindingDocs(rule) {
+  return ` (see ${FINDINGS_DOCS_BASE}${rule}.md)`;
+}
+
 function workflowLine(file, value) {
   if (file) appendFileSync(file, `${value}\n`, "utf8");
 }
@@ -67,13 +75,13 @@ try {
 }
 require("node:fs").writeFileSync(report, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 for (const violation of payload.new_violations || []) {
-  process.stderr.write(`::error title=Noru GRC ${commandEscape(violation.piece)}/${commandEscape(violation.rule)}::${commandEscape(violation.subject)} — ${commandEscape(violation.message)}\n`);
+  process.stderr.write(`::error title=Noru GRC ${commandEscape(violation.piece)}/${commandEscape(violation.rule)}::${commandEscape(violation.subject)} — ${commandEscape(violation.message)}${seeFindingDocs(violation.rule)}\n`);
 }
 for (const entry of payload.expired_exceptions || []) {
-  process.stderr.write(`::error title=Noru GRC expired baseline::${commandEscape(entry.subject || entry.fingerprint)}\n`);
+  process.stderr.write(`::error title=Noru GRC expired baseline::${commandEscape(entry.subject || entry.fingerprint)}${seeFindingDocs("expired_exception")}\n`);
 }
 for (const entry of payload.stale_baseline_entries || []) {
-  process.stderr.write(`::error title=Noru GRC stale baseline::${commandEscape(entry.subject || entry.fingerprint)}\n`);
+  process.stderr.write(`::error title=Noru GRC stale baseline::${commandEscape(entry.subject || entry.fingerprint)}${seeFindingDocs("stale_baseline_entry")}\n`);
 }
 
 const summary = [

@@ -21,8 +21,32 @@ one version number; the release workflow fails if they disagree.
 - `docs/plugin-directory-submission.md`: the values to submit for each plugin to the Anthropic
   plugin directory, and the results of the directory's own validation tooling run against these
   manifests.
+- `docs/findings/`: a page for every finding kind the hub reports, named for the kind the tool
+  prints — the rule in one sentence, why it matters, controls (none mapped: the repository ships no
+  control catalogue), a failing and a passing example run against the repository's own fixtures,
+  and how to fix it or record a disposition. Covers the CI-mode kinds, the repository-enforcement
+  rules (`needs_review`, `missing_interpretation`, `tooling`, `invalid_baseline`,
+  `expired_exception`, `stale_baseline_entry`) and, on one page, the GitHub ruleset verification
+  kinds. `test_ci_mode.py` fails if a CI-mode kind has no page; `test_repo_enforcement.py` fails if
+  an enforcement rule has none.
+- `llms.txt` at the repository root, in the llmstxt.org format: the one-sentence summary, install
+  lines for the three marketplaces, the three actions at `@v0`, the CI exit codes, and links to the
+  key docs.
+- `docs/openssf-best-practices.md`: prepared answers to the OpenSSF Best Practices passing-level
+  criteria, with evidence, and what still blocks the badge.
+- README: a "Common questions" section, and links to the findings index.
 
 ### Changed
+
+- Every human-readable finding line now ends with a link to its page. `ci_check.py`,
+  `check_expiry.py` and `check_policy.py` text output appends
+  ` (see https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/findings/<kind>.md)`;
+  the `noru-ci` job summary links each kind; the `enforce` action's annotations append the same
+  suffix for the rule they name, `expired_exception` and `stale_baseline_entry` included. The base
+  URL is defined once per language (`scripts/finding_docs.py`, `actions/enforce/dist/enforce.js`)
+  and a test asserts the two agree. JSON reports are unchanged: repository enforcement fingerprints
+  every key of a finding, so a new field would re-key every accepted baseline entry. The Marketplace
+  actions pick this up at the next release.
 
 - Both marketplaces list plugins sorted by name, which the Anthropic directory's I1 invariant
   expects.

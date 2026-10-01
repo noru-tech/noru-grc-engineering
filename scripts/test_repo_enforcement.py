@@ -253,6 +253,37 @@ def piece_error_tests(results, repo, action_env):
     policy_path.write_text(original_policy, encoding="utf-8")
 
 
+def annotation_tests(results, stderr):
+    """Every annotation the action emits links the page for the rule it names, and that page exists."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from finding_docs import FINDINGS_DOCS_BASE  # noqa: PLC0415
+
+    source = ACTION.read_text(encoding="utf-8")
+    results.check(
+        "the action runtime and scripts/finding_docs.py agree on the findings URL",
+        f'const FINDINGS_DOCS_BASE = "{FINDINGS_DOCS_BASE}";' in source,
+        FINDINGS_DOCS_BASE,
+    )
+    annotations = [line for line in stderr.splitlines() if line.startswith("::error title=Noru GRC")]
+    linked = [line.rsplit(" (see ", 1) for line in annotations]
+    pages = [
+        row[1][len(FINDINGS_DOCS_BASE):-1] if len(row) == 2 and row[1].startswith(FINDINGS_DOCS_BASE) else None
+        for row in linked
+    ]
+    results.check(
+        "every enforcement annotation ends with a link to its finding page",
+        annotations and all(page and page.endswith(".md") for page in pages),
+        annotations[:3],
+    )
+    missing = sorted({page for page in pages if page and not (ROOT / "docs" / "findings" / page).is_file()})
+    results.check("every linked enforcement finding page exists", not missing, missing)
+    documented = {path.stem for path in (ROOT / "docs" / "findings").glob("*.md")}
+    offline_rules = {"needs_review", "missing_interpretation", "tooling", "invalid_baseline",
+                     "expired_exception", "stale_baseline_entry"}
+    undocumented = sorted(offline_rules - documented)
+    results.check("every offline enforcement rule has a finding page", not undocumented, undocumented)
+
+
 def github_tests(results, repo, commit):
     state = json.loads((PLUGIN / "fixtures" / "github-no-ruleset.json").read_text(encoding="utf-8"))
     state["repository_commit"] = commit
@@ -379,6 +410,7 @@ def main(argv):
         action_report = repo / ".noru" / ".cache" / "noru-grc-enforcement.json"
         results.check("the bundled action fails closed and writes its JSON report", action.returncode == 1 and action_report.is_file() and not json.loads(action_report.read_text())["ok"], action.stderr or action.stdout)
         piece_error_tests(results, repo, action_env)
+        annotation_tests(results, action.stderr)
         # GitHub planning reads policy only; baseline state is irrelevant from here.
         github_tests(results, repo, commit)
     return results.finish(output_json, quiet)
