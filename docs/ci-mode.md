@@ -70,13 +70,21 @@ manifest, finds every mapping that carries an `interpretation`, and reports:
 | `cadence` | outside the review cadence this pipeline declared with `--max-age-days` | yes |
 | `unparsable` | a date that cannot be compared, so the expiry cannot be trusted | yes |
 | `expiring` | expires inside the warning window (default 30 days). A heads-up, not a gate | no |
-| `unbounded` | no expiry at all — permitted by the contract for a point-in-time procedural claim | no |
+| `unbounded` | no expiry and no review date at all — permitted by the contract for a point-in-time procedural claim | no |
 | `dangling_ref` | a `file:line` citation that no longer resolves: the file is gone, or the line is past its end | no |
 
 `interpretation.expires_at` is the field the contract requires. Where a piece also records the
 expiry of the record it is about to create — `expiry_date` on an evidence upload — that field is
 compared the same way: a record that expires in Noru next week is not evidence of anything the week
 after.
+
+A procedural claim may carry a review date instead of an expiry: `ai-inventory` accepts
+`interpretation.next_review_due` in place of `expires_at`, and `governance-records` a
+`next_review_due` on the record. Past that date nobody has looked again, so it is aged exactly like
+`expires_at` — `expired` once it has passed, `expiring` inside the warning window, and against
+`--max-age-days` as the declared review window. It is read only in place of `expires_at`, so a claim
+carrying both is aged once. Releases up to 0.9.1 ignored it and reported those claims as
+`unbounded`.
 
 ### Two kinds of cadence, and who checks which
 
