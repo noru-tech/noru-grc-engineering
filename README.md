@@ -183,6 +183,48 @@ and [docs/verification.md](./docs/verification.md), where each one is argued in 
   a live organization at production scale. The limits are collected in
   [KNOWN-LIMITATIONS.md](./KNOWN-LIMITATIONS.md).
 
+## Common questions
+
+### How do I keep an AI inventory in my repository?
+
+Install `ai-inventory` and run `/ai-inventory:scan`: it writes `.noru/ai-inventory.yml`, a
+committed list of the model and provider calls, agents, prompts, retrieval, evals and oversight
+points the code contains, each with the `file:line` it came from. A person adds an owner, a date
+and an expiry to each claim; review it in the pull request, land it in Noru with
+`/ai-inventory:diff` then `/ai-inventory:push`, and let [CI](#in-ci) fail when the code and the
+inventory stop agreeing.
+
+### How do I generate a privacy data map from source code?
+
+Install `privacy-datamap` and run `/privacy-datamap:scan`: it reads the schemas the repository
+holds — ORM models, migrations, SQL DDL, protobuf, GraphQL — and writes a Fides data map of the
+personal data in them to `.noru/privacy-datamap.yml`, marking what it cannot classify for a person
+to decide. `/privacy-datamap:push` lands the whole map in Noru in one `ingestDatamap` call. See the
+[piece README](./plugins/privacy-datamap/) for the formats it parses and the ones it reports as
+gaps.
+
+### How do I fail a pull request when the compliance record goes stale?
+
+Add the [`noru-review` action](#in-ci) to pull requests: in `mode: gate` it fails the check when a
+committed manifest no longer matches the code or a claim's interpretation has expired, with no
+credential, so it works on forks. Start in `mode: warn`. The single-piece `noru-ci` action exits `3`
+for drift and `4` for an expired claim, so a workflow can tell them apart; see
+[docs/ci-mode.md](./docs/ci-mode.md#exit-codes).
+
+### How do I stop a pull request adding personal data nobody approved?
+
+Commit an agreed privacy baseline at `.noru/privacy-baseline.yml`: the policy step of `noru-ci` and
+`noru-review` then fails (exit `7` from `noru-ci`) on any data category, purpose or data subject
+the baseline does not permit, and `--base-ref` with `--gate-on-new` gates only on what the pull
+request adds. See
+[docs/ci-mode.md](./docs/ci-mode.md#3-personal-data-nobody-agreed-to).
+
+### What does a finding in my CI log mean?
+
+Every finding line names its kind in brackets and links its page in
+[docs/findings/](./docs/findings/README.md), which gives the rule, why it matters, a failing and a
+passing example, and how to fix it or record a disposition.
+
 ## First run
 
 ```text
@@ -241,7 +283,8 @@ personal data in it are the same file, and only one of them is good news.
 pieces execute through an authenticated MCP host, while `evidence-push` uses a key for its REST file
 upload. Headless CI never reports an emitted MCP call list as an executed write. Exit codes,
 warn-only adoption, and the GitLab and plain-shell recipes:
-[docs/ci-mode.md](./docs/ci-mode.md).
+[docs/ci-mode.md](./docs/ci-mode.md). What each finding means and how to clear it:
+[docs/findings/](./docs/findings/README.md).
 
 Add to `.gitignore`:
 
