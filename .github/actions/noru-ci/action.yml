@@ -277,7 +277,18 @@ runs:
         set -uo pipefail
         [ -f "${NORU_CI_REPORT:-}" ] || exit 0
         python3 - "$NORU_CI_REPORT" >> "$GITHUB_STEP_SUMMARY" <<'PY'
-        import json, sys
+        import json, os, pathlib, sys
+
+        # Link each kind to its page through the toolkit's one definition of that URL, found the
+        # same way the check step finds ci_check.py.
+        root = pathlib.Path(os.environ.get("GITHUB_ACTION_PATH", ".")).resolve()
+        while root != root.parent and not (root / "scripts" / "finding_docs.py").is_file():
+            root = root.parent
+        sys.path.insert(0, str(root / "scripts"))
+        try:
+            from finding_docs import finding_url
+        except ImportError:
+            finding_url = None
 
         report = json.load(open(sys.argv[1]))
         fail_on = set(report.get("policy", {}).get("fail_on", []))
@@ -316,7 +327,10 @@ runs:
                 note = (finding.get("explanation") or {}).get("note")
                 if note:
                     message += f"<br>{note}"
-                print(f"| {mark} | `{finding['kind']}` | `{where[:80]}` | {message[:600]} |")
+                kind = f"`{finding['kind']}`"
+                if finding_url is not None:
+                    kind = f"[{kind}]({finding_url(finding['kind'])})"
+                print(f"| {mark} | {kind} | `{where[:80]}` | {message[:600]} |")
             if len(findings) > 50:
                 print()
                 print(f"_{len(findings) - 50} further finding(s) in the JSON report._")

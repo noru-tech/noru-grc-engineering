@@ -974,6 +974,74 @@ def case_piece_agnostic(results, tmp):
     )
 
 
+def case_finding_docs(results, tmp):
+    """Every kind a finding line can name has a page, and the line links it.
+
+    The link lives on the human-readable line only. The JSON report stays as it was: a key added to
+    a finding would change every repo-enforcement fingerprint, which hashes the whole finding.
+    """
+    from finding_docs import FINDINGS_DOCS_BASE, finding_url  # noqa: PLC0415
+
+    findings_dir = ROOT / "docs" / "findings"
+    missing = [kind for kind in ci_check.FINDING_KINDS if not (findings_dir / f"{kind}.md").is_file()]
+    results.check("finding docs: every finding kind has a page", not missing, missing)
+    results.check(
+        "finding docs: the URL is under the repository's docs/findings/",
+        FINDINGS_DOCS_BASE.endswith("/blob/main/docs/findings/")
+        and finding_url("drift") == FINDINGS_DOCS_BASE + "drift.md",
+        FINDINGS_DOCS_BASE,
+    )
+
+    repo, manifest = build_green_repo(pathlib.Path(tmp) / "finding-docs")
+    add_new_provider(repo)
+    expire_every_claim(manifest)
+    completed = run(
+        [sys.executable, str(CI_CHECK), "--piece=ai-inventory", f"--repo={repo}",
+         f"--as-of={AS_OF}", "--output=text"]
+    )
+    lines = [line for line in completed.stdout.splitlines() if "] " in line and line.startswith("  ")]
+    finding_lines = [line for line in lines if line.lstrip().split(" ", 1)[0] in ("FAIL", "warn", "would-fail", "BLOCKING")]
+    results.check(
+        "finding docs: every ci_check finding line ends with its page",
+        finding_lines
+        and all(
+            line.endswith(f"(see {finding_url(line.split('[', 1)[1].split(']', 1)[0])})")
+            for line in finding_lines
+        ),
+        finding_lines[:3],
+    )
+    code, report = ci(repo)
+    results.check(
+        "finding docs: the JSON report carries no URL",
+        report is not None and all(set(f) & {"help_uri", "help_url", "url"} == set() for f in report["findings"]),
+        (report or {}).get("findings", [])[:1],
+    )
+    completed = run(
+        [sys.executable, str(CHECK_EXPIRY), str(manifest), f"--as-of={AS_OF}", "--output=text"]
+    )
+    expired_lines = [line for line in completed.stdout.splitlines() if "[expired]" in line]
+    results.check(
+        "finding docs: check_expiry finding lines end with their page",
+        expired_lines and all(line.endswith(f"(see {finding_url('expired')})") for line in expired_lines),
+        expired_lines[:2],
+    )
+
+    privacy, privacy_manifest = build_green_repo(pathlib.Path(tmp) / "finding-docs-policy", "privacy-datamap")
+    baseline = privacy / ".noru" / "privacy-baseline.yml"
+    baseline.write_text(BASELINE_STRICT, encoding="utf-8")
+    completed = run(
+        [sys.executable, str(ROOT / "scripts" / "check_policy.py"), str(privacy_manifest),
+         f"--baseline={baseline}", "--output=text"]
+    )
+    policy_lines = [line for line in completed.stdout.splitlines() if "[unpermitted_category]" in line]
+    results.check(
+        "finding docs: check_policy finding lines end with their page",
+        policy_lines
+        and all(line.endswith(f"(see {finding_url('unpermitted_category')})") for line in policy_lines),
+        policy_lines[:2],
+    )
+
+
 CASES = (
     case_green,
     case_policy,
@@ -991,6 +1059,7 @@ CASES = (
     case_every_piece,
     case_invalid_manifest,
     case_piece_agnostic,
+    case_finding_docs,
 )
 
 USAGE = "usage: test_ci_mode.py [--output=json] [--quiet] [--emit-fixture=<dir>]\n"
