@@ -78,8 +78,8 @@ pointing somewhere without the piece, or a policy naming a piece the pinned rele
 Under repository enforcement, a queue-driven piece such as `iac-scan` needs its queue
 (`.noru/.cache/iac-queue.json`, written by its `:scan` from Noru) in the checkout to run at all.
 The gate runs offline with no Noru credential, so either provide that file to the job or do not
-require the piece in `.noru/enforcement.yml`; a requirement the gate cannot check is reported, not
-ignored.
+require the piece in `.noru/enforcement.yml` (the policy setup writes does not require `iac-scan`);
+a requirement the gate cannot check is reported, not ignored.
 
 ## Recording a disposition
 

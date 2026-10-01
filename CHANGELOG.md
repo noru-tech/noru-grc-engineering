@@ -69,6 +69,16 @@ one version number; the release workflow fails if they disagree.
   `enforce.py`'s; the action inherits it. Repositories using the default setup policy, which
   requires `iac-scan`, now fail the gate unless the job provides the `iac-scan` queue or the policy
   stops requiring it. `test_repo_enforcement.py` reproduces both cases.
+- **The default enforcement policy no longer requires `iac-scan` (#69).** `configure.mjs` wrote
+  `iac-scan: required: true`, but `iac-scan` builds its manifest from Noru's queue
+  (`.noru/.cache/iac-queue.json`), and the installed PR workflow is offline, holds no Noru
+  credential and never has that file. With enforcement failing closed, every repository set up with
+  the defaults failed every pull request on an `iac-scan/tooling` violation it could not baseline.
+  New setups write `required: false` with a comment saying what the job needs before it can be
+  `true`. A committed `.noru/enforcement.yml` changes only when setup is re-planned and applied (the
+  plan shows it as an update) or edited by hand. In ratchet mode that changes the policy digest, so
+  re-bind the baseline's `policy_digest` in the same PR. `test_repo_enforcement.py` now runs the default
+  policy with no queue in the checkout and asserts every required piece runs.
 - **`next_review_due` is aged.** `check_expiry.py` (and so the expiry step of every action) read
   only `expires_at` and `expiry_date`, so a procedural claim bounded by a review date instead —
   `interpretation.next_review_due` in `ai-inventory`, a record's `next_review_due` in
