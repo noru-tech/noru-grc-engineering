@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.9.1 — 2026-10-01
+
 ### Added
 
 - `.github/workflows/codeql.yml`: CodeQL static analysis of the JavaScript, Python and workflow
