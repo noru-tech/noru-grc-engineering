@@ -38,6 +38,14 @@ OK: every requested check passed.
 It does not fail the build: `OK`, exit `0`. With `--warn-within-days=7` the same manifest reports
 nothing for these claims.
 
+A `next_review_due` review date, where a claim carries one in place of `expires_at`, is aged the
+same way. Both of the `ai-inventory` fixture's review dates set to 2026-09-10:
+
+```text
+  warn  [expiring] providers[0] "example-llm": expires in 14 day(s); ask dana.reed@example.com to re-own it before then (see https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/findings/expiring.md)
+  warn  [expiring] providers[0].claims[2] "DPA executed 2026-03-14, standard contractual clauses annexed": expires in 14 day(s); ask sam.okafor@example.com to re-own it before then (see https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/findings/expiring.md)
+```
+
 ## How to fix
 
 Re-own the claim before the date: update `decided_at`, `expires_at` and `rationale`.
