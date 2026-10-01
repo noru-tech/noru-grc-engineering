@@ -22,6 +22,11 @@ one version number; the release workflow fails if they disagree.
 
 ### Changed
 
+- GitHub Actions dependencies move to their latest majors: `actions/checkout` 7.0.1,
+  `actions/setup-node` 7.0.0 and `actions/setup-python` 7.0.0, in this repository's workflows, in
+  the installed `templates/github/noru-grc-review.yml` and `repo-enforcement` workflow (checkout
+  was pinned to 4.2.2 there), and in the documented examples. None of the workflows uses an input
+  these majors changed; re-running `/repo-enforcement:setup` offers existing installs the update.
 - The three GitHub Actions carry one Marketplace description each, at most 125 characters, and
   one branding family: `gray-dark` with `check-circle` (`noru-ci`), `shield` (`noru-review`) and
   `lock` (`enforce`, previously `shield` on `purple`).

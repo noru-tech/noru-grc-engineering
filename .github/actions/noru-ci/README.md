@@ -37,8 +37,8 @@ jobs:
   inventory:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
       - uses: noru-tech/noru-ci-action@v0
@@ -61,7 +61,7 @@ the lower-level tool for one explicitly adopted piece.
 findings while it burns the rest down. Needs the base branch in the checkout.
 
 ```yaml
-- uses: actions/checkout@v5
+- uses: actions/checkout@v7
   with:
     fetch-depth: 0
 - uses: noru-tech/noru-ci-action@v0
