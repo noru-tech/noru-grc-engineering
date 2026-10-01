@@ -56,6 +56,20 @@ one version number; the release workflow fails if they disagree.
   the Copilot CLI file mirrors the Claude one. The release workflow skips external entries when it
   asserts the shared version.
 
+### Fixed
+
+- **Repository enforcement fails closed (security-relevant).** A required piece whose check could
+  not run was reported as a pass: `enforce.py` turned only findings into violations, and
+  `ci_check.py` reports a check it could not run as status `error`, often with no finding. A strict
+  policy requiring `iac-scan` in a checkout with no `iac-scan` queue printed
+  `Repository enforcement: PASS` and the `enforce` action exited `0`. Now every required piece
+  whose check errored (collector cannot run, crash, timeout, non-JSON report, or a broken gate
+  whose own finding its `fail_on` omits) carries a `tooling` violation: `FAIL`, exit `1`, an
+  annotation in the action, and never acceptable through a ratchet baseline. The verdict is
+  `enforce.py`'s; the action inherits it. Repositories using the default setup policy, which
+  requires `iac-scan`, now fail the gate unless the job provides the `iac-scan` queue or the policy
+  stops requiring it. `test_repo_enforcement.py` reproduces both cases.
+
 ## 0.9.1 — 2026-10-01
 
 ### Added

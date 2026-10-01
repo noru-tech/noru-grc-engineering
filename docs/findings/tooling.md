@@ -39,7 +39,26 @@ $ echo $?
 
 ## Failing example — repository enforcement
 
-A policy requiring a piece the released registry does not contain:
+Every required piece whose check could not run gets a `tooling` violation, whatever else it
+reported: a collector that cannot run, a crashed or timed-out child, output that is not JSON, or a
+broken gate whose own finding (such as [`coverage`](./coverage.md) when nothing was parsed) the
+piece's `fail_on` omits. A strict policy requiring only `iac-scan`, in a checkout with no
+`iac-scan` queue (the case `scripts/test_repo_enforcement.py` runs):
+
+```text
+$ python3 plugins/repo-enforcement/scripts/enforce.py validate --repo=. --as-of=2026-09-04 --output=text
+Repository enforcement: FAIL
+new violations: 1
+baselined violations: 0
+expired exceptions: 0
+stale baseline entries: 0
+  FAIL [iac-scan/tooling] .noru/iac-scan.yml: required piece could not run — scan: error: no queue at /path/to/repo/.noru/.cache/iac-queue.json
+```
+
+The `enforce` action fails with
+`::error title=Noru GRC iac-scan/tooling::.noru/iac-scan.yml — required piece could not run — …`.
+Releases up to 0.9.1 reported this case as `PASS`. A policy requiring a piece the released
+registry does not contain is reported the same way:
 
 ```text
   FAIL [ai-inventory/tooling] pieces.ai-inventory: required piece is absent from the released registry
@@ -56,6 +75,14 @@ Read the step and detail on the `ERROR` line. The usual causes: `node` or `pytho
 runner (the actions install nothing), a wrong `--baseline`/`--state` path, a `plugins` input
 pointing somewhere without the piece, or a policy naming a piece the pinned release does not ship.
 
+Under repository enforcement, a queue-driven piece such as `iac-scan` needs its queue
+(`.noru/.cache/iac-queue.json`, written by its `:scan` from Noru) in the checkout to run at all.
+The gate runs offline with no Noru credential, so either provide that file to the job or do not
+require the piece in `.noru/enforcement.yml`; a requirement the gate cannot check is reported, not
+ignored.
+
 ## Recording a disposition
 
-None. Exit `6` is loud in warn mode on purpose, and repository enforcement never baselines it.
+None. Exit `6` is loud in warn mode on purpose, and repository enforcement never baselines it: a
+ratchet-baseline entry matching a `tooling` fingerprint is ignored and the violation stays new. It
+says nothing about the repository, only that the repository was not checked.

@@ -26,6 +26,14 @@ entry needs a named person, rationale, decision date, and expiry. New, mutated, 
 resolved, or reintroduced debt fails. Invalid records, tooling failures, credential exposure,
 expired exceptions, stale plans, and GitHub/workflow drift cannot be baselined.
 
+Enforcement fails closed. A required piece whose check could not run — its collector cannot start,
+a child process crashes or times out, its report is not JSON — is a `tooling` violation whatever
+else it reported, so the gate fails and no baseline entry can accept it
+([docs/findings/tooling.md](./findings/tooling.md)). Require only pieces the gate can run: the
+check is offline and holds no Noru credential, so a queue-driven piece such as `iac-scan` needs its
+queue file (`.noru/.cache/iac-queue.json`) in the job's checkout. The default policy setup writes
+requires `iac-scan`; drop it from `.noru/enforcement.yml` if the job cannot provide its queue.
+
 Use `/repo-enforcement:status` for the derived worklist. It groups current debt by owning piece and
 named person and sorts blockers, stale cleanup, entries due within seven days, and scheduled debt.
 `/repo-enforcement:work <fingerprint>` inspects one exact item, routes it to the owning piece, and

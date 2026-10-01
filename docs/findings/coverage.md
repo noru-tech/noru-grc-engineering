@@ -8,7 +8,7 @@ reported.
 |---|---|
 | Emitted by | `scripts/ci_check.py` scan step, for any piece whose derived facts carry a `coverage` block (today `privacy-datamap`) |
 | Gates by default | **nothing parsed:** always — exit `6`, even under `--mode=warn`. **Partial:** no — advisory; `--fail-on=coverage` makes it exit `6` |
-| Accepted in a ratchet baseline | yes; repository enforcement gates on it by default |
+| Accepted in a ratchet baseline | partial: yes. Nothing parsed: the accompanying [`tooling`](./tooling.md) violation cannot be |
 
 ## Why it matters
 
@@ -68,5 +68,7 @@ file format rather than a stored record is not counted.
   check that could not run is not a check that passed ([exit codes](../ci-mode.md#exit-codes)).
 - **Partial:** advisory unless `--fail-on=coverage`.
 - **Under [repository enforcement](../repository-enforcement.md#install-and-adoption):** `coverage`
-  is in the default `fail_on` list and can be accepted in a ratchet baseline like any other
-  baselineable violation.
+  is in the default `fail_on` list, and a partial map can be accepted in a ratchet baseline like
+  any other baselineable violation. When nothing was parsed, the piece could not run, so it also
+  carries a [`tooling`](./tooling.md) violation, which is gated even if the piece's `fail_on` omits
+  `coverage` and can never be baselined.
