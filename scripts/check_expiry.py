@@ -29,6 +29,12 @@ expiry of the record it is about to create — `expiry_date` on an evidence uplo
 compared the same way, because a record that expires in Noru next week is not evidence of anything
 the week after.
 
+`next_review_due` is compared the same way too, wherever a piece puts it: inside the interpretation
+block (`ai-inventory`, on a procedural claim) or on the record (`governance-records`). Those pieces
+accept it *in place of* `expires_at` — the validator rejects a claim with neither — so it is the bound
+the manifest declared. A review that was due last month has lapsed exactly as an expiry that passed
+last month has, and is reported as `expired`, with the field saying which date it was.
+
 Usage:
     python3 scripts/check_expiry.py <manifest.yml|parsed.json> [--as-of=YYYY-MM-DD]
         [--warn-within-days=N] [--max-age-days=N] [--fail-on=<kinds>|none]
@@ -50,10 +56,15 @@ KINDS = ("expired", "cadence", "expiring", "unbounded", "unparsable")
 DEFAULT_FAIL_ON = ("expired", "cadence", "unparsable")
 DEFAULT_WARN_WITHIN_DAYS = 30
 
+# Fields inside the interpretation block, after the contract's own `expires_at`, that bound the
+# claim. `ai-inventory` accepts `next_review_due` in place of `expires_at` on a procedural claim.
+INTERPRETATION_EXPIRY_FIELDS = ("next_review_due",)
+
 # Fields on the claim itself — not inside the interpretation block — that express the same thing:
-# a date after which this is no longer current. Kept as a tuple so adding a piece that records the
-# expiry under another name is a one-line change with a test, not a rewrite.
-RECORD_EXPIRY_FIELDS = ("expiry_date",)
+# a date after which this is no longer current. `governance-records` puts `next_review_due` here.
+# Kept as tuples so adding a piece that records the expiry under another name is a one-line change
+# with a test, not a rewrite.
+RECORD_EXPIRY_FIELDS = ("expiry_date", "next_review_due")
 
 USAGE = (
     "usage: check_expiry.py <manifest.yml|parsed.json> [--as-of=YYYY-MM-DD] "
@@ -165,8 +176,12 @@ def evaluate_claim(path, claim, as_of, warn_within_days, max_age_days):
             _unparsable_message(decided_raw),
         )
 
-    # interpretation.expires_at first, then any record-level expiry the piece also records.
+    # interpretation.expires_at first, then any other bound in the block, then any record-level
+    # expiry the piece also records.
     expiries = [("interpretation.expires_at", block.get("expires_at"))]
+    for field in INTERPRETATION_EXPIRY_FIELDS:
+        if field in block:
+            expiries.append((f"interpretation.{field}", block.get(field)))
     for field in RECORD_EXPIRY_FIELDS:
         if field in claim:
             expiries.append((field, claim.get(field)))
@@ -185,13 +200,14 @@ def evaluate_claim(path, claim, as_of, warn_within_days, max_age_days):
             )
             continue
         bounded = True
+        review = field.endswith("next_review_due")
         days = (expires - as_of).days
         if days < 0:
             add(
                 "expired",
                 field,
                 str(expires),
-                f"expired {abs(days)} day(s) ago"
+                (f"review was due {abs(days)} day(s) ago" if review else f"expired {abs(days)} day(s) ago")
                 + (f"; {owner} owned it" if owner else "")
                 + " — nobody has stood behind this claim since it went stale",
                 days=days,
@@ -201,7 +217,7 @@ def evaluate_claim(path, claim, as_of, warn_within_days, max_age_days):
                 "expiring",
                 field,
                 str(expires),
-                f"expires in {days} day(s)"
+                (f"review due in {days} day(s)" if review else f"expires in {days} day(s)")
                 + (f"; ask {owner} to re-own it before then" if owner else ""),
                 days=days,
             )

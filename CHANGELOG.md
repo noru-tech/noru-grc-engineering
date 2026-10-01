@@ -56,6 +56,20 @@ one version number; the release workflow fails if they disagree.
   the Copilot CLI file mirrors the Claude one. The release workflow skips external entries when it
   asserts the shared version.
 
+### Fixed
+
+- `check_expiry.py` (and so the CI-mode expiry step and all three actions) now compares
+  `next_review_due` like `expires_at`: inside the interpretation block, where `ai-inventory` accepts
+  it on a procedural claim, and on the record, where `governance-records` accepts it. Both pieces'
+  validators take it as the claim's bound in place of `expires_at`, but the expiry check read only
+  `expires_at` and `expiry_date`, so those claims were reported as advisory `unbounded` and a review
+  date in the past was never reported. A past `next_review_due` is now `expired` (gates by default,
+  exit `4`), one inside the warning window is `expiring`, and one that cannot be read is
+  `unparsable`. No new finding kind: the finding's `field` and its message ("review was due N
+  day(s) ago") say which date lapsed. A manifest with an overdue review that passed CI mode before
+  will now fail it; `--fail-on` or warn-only mode stages the change. Documented in `docs/ci-mode.md`
+  ("An expired interpretation") and `docs/findings/unbounded.md`.
+
 ## 0.9.1 — 2026-10-01
 
 ### Added

@@ -78,6 +78,23 @@ expiry of the record it is about to create — `expiry_date` on an evidence uplo
 compared the same way: a record that expires in Noru next week is not evidence of anything the week
 after.
 
+`next_review_due` is compared like `expires_at` too, and reported under the same kinds. Two pieces
+accept it **in place of** `expires_at` and reject a claim that has neither: `ai-inventory` on a
+procedural claim, inside the interpretation block, and `governance-records` on the record itself.
+So it is the bound the manifest declared, not a note beside it. A review that was due last month has
+lapsed in exactly the way an expiry that passed last month has, so a past `next_review_due` is
+`expired` and gates by default, one inside the warning window is `expiring`, one that cannot be read
+is `unparsable`, and a claim bounded by it is not `unbounded`. The finding's `field`
+(`interpretation.next_review_due` or `next_review_due`) and its message ("review was due N day(s)
+ago") say which date it was. Where a record carries both dates, each is checked, and each one that
+has passed is its own finding.
+
+A distinct kind for an overdue review was considered and not added. It would let a pipeline gate on
+a lapsed expiry and not on a lapsed review, and nothing in the contract distinguishes the two: the
+validators accept either date as the one bound a claim needs. If you are adopting CI mode on a
+manifest whose reviews have fallen behind, [warn-only mode](#warn-only-mode) or `--fail-on` is the
+way to stage it, as it is for any expired claim.
+
 ### Two kinds of cadence, and who checks which
 
 - **A cadence the manifest declares.** `review-signoff` puts `cadence: quarterly` on a review, and

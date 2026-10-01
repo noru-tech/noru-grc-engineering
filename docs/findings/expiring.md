@@ -1,7 +1,8 @@
 # `expiring`
 
-**Rule:** a claim whose expiry falls inside the warning window (default 30 days) is reported, so it
-can be re-owned before it becomes [`expired`](./expired.md).
+**Rule:** a claim whose expiry — `expires_at`, `next_review_due` or `expiry_date` — falls inside the
+warning window (default 30 days) is reported, so it can be re-owned before it becomes
+[`expired`](./expired.md).
 
 | | |
 |---|---|
@@ -40,7 +41,8 @@ nothing for these claims.
 
 ## How to fix
 
-Re-own the claim before the date: update `decided_at`, `expires_at` and `rationale`.
+Re-own the claim before the date: update `decided_at`, `expires_at` (or `next_review_due`, where
+that is the date the finding names) and `rationale`.
 
 ## Recording a disposition
 

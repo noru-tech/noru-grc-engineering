@@ -1,7 +1,7 @@
 # `expired`
 
-**Rule:** a claim whose `interpretation.expires_at` (or record-level `expiry_date`) is in the past
-fails the build — nobody has stood behind it since it went stale.
+**Rule:** a claim whose `interpretation.expires_at` (or `next_review_due`, or record-level
+`expiry_date`) is in the past fails the build — nobody has stood behind it since it went stale.
 
 | | |
 |---|---|
@@ -15,7 +15,10 @@ Contract requirement 8 puts an interpretation block on every claim: who decided 
 when, and why ([contract](../../contract/README.md#the-nine-requirements)). The validators check the
 block is well-formed and deliberately ignore the calendar; CI mode is where time is checked. An
 evidence record that expires in Noru next week is not evidence of anything the week after, which is
-why `expiry_date` on an upload is compared the same way. The privacy baseline carries an
+why `expiry_date` on an upload is compared the same way. So is `next_review_due`, which
+`ai-inventory` (procedural claims) and `governance-records` accept in place of `expires_at`: a
+review that is overdue has lapsed like an expiry that has passed, and the message says "review was
+due N day(s) ago". The privacy baseline carries an
 interpretation block too: `check_expiry.py .noru/privacy-baseline.yml` ages it (the `ci_check.py`
 expiry step ages the piece manifest, not the baseline). See
 [ci-mode.md, "An expired interpretation"](../ci-mode.md#2-an-expired-interpretation).
@@ -65,8 +68,8 @@ $ echo $?
 ## How to fix
 
 Ask the named owner (or whoever now owns the decision) to look at the claim again. If it still
-holds, update `decided_at` and `expires_at` and say why in `rationale`; if it does not, change or
-remove the claim and re-run `:scan`.
+holds, update `decided_at` and `expires_at` (or `next_review_due`) and say why in `rationale`; if
+it does not, change or remove the claim and re-run `:scan`.
 
 ## Recording a disposition
 

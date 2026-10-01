@@ -1,7 +1,7 @@
 # `unparsable`
 
-**Rule:** a date in an interpretation block (or a record-level `expiry_date`) that cannot be read as
-`YYYY-MM-DD` fails the build — an expiry that cannot be compared cannot be trusted.
+**Rule:** a date in an interpretation block (or a record-level `expiry_date` or `next_review_due`)
+that cannot be read as `YYYY-MM-DD` fails the build — an expiry that cannot be compared cannot be trusted.
 
 | | |
 |---|---|

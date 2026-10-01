@@ -889,6 +889,80 @@ def case_expiry_tool(results, tmp):
         sorted(fields),
     )
 
+    # next_review_due is the bound a piece accepts in place of expires_at, so it is compared too:
+    # inside the interpretation block (ai-inventory's procedural claims) and on the record
+    # (governance-records). The valid ai-inventory fixture has two claims bounded only by it.
+    def expiry_findings(manifest, as_of):
+        completed = run(
+            [sys.executable, str(CHECK_EXPIRY), str(manifest), f"--as-of={as_of}", "--output=json", "--quiet"]
+        )
+        return completed.returncode, json.loads(completed.stdout)["findings"]
+
+    review_paths = {"providers[0]", "providers[0].claims[2]"}
+    _, findings = expiry_findings(valid, AS_OF)
+    results.check(
+        "expiry tool: a claim bounded by next_review_due is not unbounded",
+        not [f for f in findings if f["kind"] == "unbounded"],
+        findings,
+    )
+    _, findings = expiry_findings(valid, "2027-01-15")
+    expiring = {f["path"] for f in findings if f["kind"] == "expiring" and f["field"] == "interpretation.next_review_due"}
+    results.check(
+        "expiry tool: a next_review_due inside the window is expiring",
+        expiring == review_paths,
+        sorted(expiring),
+    )
+    code, findings = expiry_findings(valid, "2027-03-01")
+    expired = [f for f in findings if f["kind"] == "expired" and f["field"] == "interpretation.next_review_due"]
+    results.check(
+        "expiry tool: a past interpretation.next_review_due is expired and gates",
+        code == 1 and {f["path"] for f in expired} == review_paths,
+        sorted(f["path"] for f in expired),
+    )
+    results.check(
+        "expiry tool: and the message says it is the review that lapsed",
+        bool(expired) and all(f["message"].startswith("review was due 28 day(s) ago") for f in expired),
+        [f["message"] for f in expired],
+    )
+
+    records = PLUGINS / "governance-records" / "fixtures" / "valid.governance-records.yml"
+    code, findings = expiry_findings(records, "2027-06-01")
+    expired = {f["path"] for f in findings if f["kind"] == "expired" and f["field"] == "next_review_due"}
+    results.check(
+        "expiry tool: a past record-level next_review_due is expired too",
+        code == 1 and "records[0]" in expired,
+        sorted(expired),
+    )
+
+    # A review date that cannot be read bounds nothing: it is unparsable, and the claim unbounded.
+    manifest = pathlib.Path(tmp) / "unparsable-review.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "claims": [
+                    {
+                        "key": "dpa",
+                        "interpretation": {
+                            "owner": "sam.okafor@example.com",
+                            "decided_at": "2026-03-20",
+                            "next_review_due": "next spring",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    code, findings = expiry_findings(manifest, AS_OF)
+    kinds = sorted((f["kind"], f["field"]) for f in findings)
+    results.check(
+        "expiry tool: an unreadable next_review_due is unparsable, not a bound",
+        code == 1
+        and kinds
+        == [("unbounded", "interpretation.expires_at"), ("unparsable", "interpretation.next_review_due")],
+        kinds,
+    )
+
 
 def case_every_piece(results, tmp):
     """Every piece in the marketplace, not just the one this file was written against."""
