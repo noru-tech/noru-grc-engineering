@@ -47,9 +47,9 @@ FAILED (5): see docs/ci-mode.md for what this exit code means.
 The piece validator on its own, against a shipped invalid fixture:
 
 ```text
-$ python3 plugins/ai-inventory/scripts/validate_manifest.py plugins/ai-inventory/fixtures/invalid-unknown-data-category.ai-inventory.yml --quiet
+$ python3 plugins/ai-inventory/scripts/validate_manifest.py plugins/ai-inventory/fixtures/invalid-unattributed-claim.ai-inventory.yml --quiet
   ERROR providers[0].interpretation.expires_at: no `expires_at` and no `next_review_due` — a procedural claim runs on a review cadence, so say when someone must look at this again. An open-ended claim is one nobody will ever revisit
-  ERROR ai_systems[0].data_categories: unknown fideslang data category 'user.contact.emai' (did you mean 'user.contact.email'?)
+  ERROR ai_systems[0]: missing required `refs` — every claim must cite the repository lines (file:line) that produced it
 
 FAILED: 2 error(s), 0 warning(s).
 ```
