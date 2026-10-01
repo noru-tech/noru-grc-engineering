@@ -56,6 +56,28 @@ one version number; the release workflow fails if they disagree.
   the Copilot CLI file mirrors the Claude one. The release workflow skips external entries when it
   asserts the shared version.
 
+### Fixed
+
+- **Repository enforcement fails closed (security-relevant).** A required piece whose check could
+  not run was reported as a pass: `enforce.py` turned only findings into violations, and
+  `ci_check.py` reports a check it could not run as status `error`, often with no finding. A strict
+  policy requiring `iac-scan` in a checkout with no `iac-scan` queue printed
+  `Repository enforcement: PASS` and the `enforce` action exited `0`. Now every required piece
+  whose check errored (collector cannot run, crash, timeout, non-JSON report, or a broken gate
+  whose own finding its `fail_on` omits) carries a `tooling` violation: `FAIL`, exit `1`, an
+  annotation in the action, and never acceptable through a ratchet baseline. The verdict is
+  `enforce.py`'s; the action inherits it. Repositories using the default setup policy, which
+  requires `iac-scan`, now fail the gate unless the job provides the `iac-scan` queue or the policy
+  stops requiring it. `test_repo_enforcement.py` reproduces both cases.
+- **`next_review_due` is aged.** `check_expiry.py` (and so the expiry step of every action) read
+  only `expires_at` and `expiry_date`, so a procedural claim bounded by a review date instead —
+  `interpretation.next_review_due` in `ai-inventory`, a record's `next_review_due` in
+  `governance-records` — was reported as advisory `unbounded`, and a review date years in the past
+  never failed the build. Read in place of `expires_at`, it is now `expired` once past (exit `4`),
+  `expiring` inside the warning window, and its window counts against `--max-age-days`. Findings
+  carry `field: interpretation.next_review_due` (or `next_review_due`); no field is added to any
+  finding. `test_ci_mode.py` reproduces it for both pieces.
+
 ## 0.9.1 — 2026-10-01
 
 ### Added

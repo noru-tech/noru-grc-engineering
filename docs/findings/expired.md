@@ -1,7 +1,8 @@
 # `expired`
 
-**Rule:** a claim whose `interpretation.expires_at` (or record-level `expiry_date`) is in the past
-fails the build — nobody has stood behind it since it went stale.
+**Rule:** a claim whose `interpretation.expires_at` (or record-level `expiry_date`, or — in place of
+`expires_at` — `next_review_due` review date) is in the past fails the build — nobody has stood
+behind it since it went stale.
 
 | | |
 |---|---|
@@ -62,10 +63,25 @@ $ echo $?
 0
 ```
 
+A procedural claim bounded by `next_review_due` instead of `expires_at` is aged against that date.
+The valid `ai-inventory` fixture with both review dates set to 2026-03-20:
+
+```text
+$ python3 scripts/check_expiry.py .noru/ai-inventory.yml --as-of=2026-08-27 --quiet
+  ERROR [expired] providers[0] "example-llm": expired 160 day(s) ago; dana.reed@example.com owned it — nobody has stood behind this claim since it went stale (see https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/findings/expired.md)
+  ERROR [expired] providers[0].claims[2] "DPA executed 2026-03-14, standard contractual clauses annexed": expired 160 day(s) ago; sam.okafor@example.com owned it — nobody has stood behind this claim since it went stale (see https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/findings/expired.md)
+
+FAILED: 2 claim finding(s) that --fail-on covers.
+```
+
+The finding's `field` is `interpretation.next_review_due` (or `next_review_due` for a
+`governance-records` record). Releases up to 0.9.1 reported these claims as advisory
+[`unbounded`](./unbounded.md) and never as expired.
+
 ## How to fix
 
 Ask the named owner (or whoever now owns the decision) to look at the claim again. If it still
-holds, update `decided_at` and `expires_at` and say why in `rationale`; if it does not, change or
+holds, update `decided_at` and `expires_at` (or `next_review_due`) and say why in `rationale`; if it does not, change or
 remove the claim and re-run `:scan`.
 
 ## Recording a disposition
