@@ -38,7 +38,10 @@ push.
 The pull-request workflow runs on every PR with no path filter. It has only `contents: read`, carries
 no Noru or GitHub administration credential, passes the current UTC date explicitly, and invokes the
 released action at the exact SHA recorded in policy. The action runs every configured piece
-independently and emits one JSON report, annotations, and a job summary.
+independently and emits one JSON report, annotations, and a job summary. Each annotation links the
+page for the rule it names; [docs/findings/](./findings/README.md) lists every rule, including the
+ratchet's own (`invalid_baseline`, `expired_exception`, `stale_baseline_entry`), and says which can
+be baselined.
 
 ## GitHub administration
 

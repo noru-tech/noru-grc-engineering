@@ -48,6 +48,8 @@ import json
 import pathlib
 import sys
 
+from finding_docs import see as see_finding_docs
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 KINDS = (
@@ -457,6 +459,7 @@ def render_text(payload, quiet):
         where = f" ({finding['ref']})" if finding.get("ref") else ""
         lines.append(
             f"  {label} [{finding['kind']}] {finding['path']}{subject}: {finding['message']}{where}"
+            + see_finding_docs(finding["kind"])
         )
     if not payload["ok"]:
         failing = sum(1 for f in payload["findings"] if f["kind"] in payload["policy"]["fail_on"])
