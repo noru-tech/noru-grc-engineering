@@ -70,6 +70,35 @@ def configure(repo):
     )
 
 
+def default_policy_tests(results, repo):
+    """The default setup must give a gate the offline, credential-free PR job can run (#69)."""
+    policy = (repo / ".noru" / "enforcement.yml").read_text(encoding="utf-8")
+    results.check(
+        "the default policy does not require iac-scan, whose queue the PR job cannot fetch",
+        "  iac-scan:\n    required: false\n" in policy,
+        policy,
+    )
+    # No queue of any kind in the checkout, exactly as on a pull request.
+    cache = repo / ".noru" / ".cache"
+    queues = sorted(path.name for path in cache.glob("*queue*.json")) if cache.is_dir() else []
+    validated = run([
+        sys.executable, str(ENFORCE), "validate", f"--repo={repo}", f"--suite-root={ROOT}",
+        f"--registry={REGISTRY}", "--as-of=2026-09-04", "--output=json", "--quiet",
+    ])
+    payload = json.loads(validated.stdout)
+    blockers = sorted(
+        (row["piece"], row["rule"]) for row in payload["new_violations"]
+        if row["rule"] in {"tooling", "invalid_baseline"}
+    )
+    results.check(
+        "every piece the default policy requires runs without a Noru queue",
+        not queues and not blockers
+        and all(row["status"] != "error" for row in payload["pieces"])
+        and "iac-scan" not in {row["piece"] for row in payload["pieces"]},
+        (queues, blockers, [(row["piece"], row["status"]) for row in payload["pieces"]]),
+    )
+
+
 def policy_validation_tests(results, repo):
     first = run([
         sys.executable, str(ENFORCE), "validate", f"--repo={repo}", f"--suite-root={ROOT}",
@@ -463,15 +492,7 @@ def main(argv):
         applied = run(["node", str(CONFIGURE), "apply", f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
         codeowners = (repo / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
         results.check("confirmed setup preserves existing CODEOWNERS and protects itself", applied.returncode == 0 and "/docs/ @example/docs" in codeowners and "/.github/CODEOWNERS @example/grc-reviewers" in codeowners, applied.stderr or codeowners)
-        # The default policy requires iac-scan, which works Noru's queue. Give it the (empty) queue
-        # its :scan would have fetched, so the debt below is debt about the repository; a missing
-        # queue is a gate that cannot run, which fail_closed_tests covers.
-        (repo / ".noru" / ".cache").mkdir(parents=True, exist_ok=True)
-        (repo / ".noru" / ".cache" / "iac-queue.json").write_text(json.dumps({
-            "fetched_at": "2026-09-01T09:00:00Z",
-            "via": ["getSecurityFindings", "getOrganizationAssets", "getOrganizationRisks"],
-            "source": "iac-scan", "open_findings": [], "assets": [], "risks": [],
-        }, indent=2) + "\n", encoding="utf-8")
+        default_policy_tests(results, repo)
         policy_validation_tests(results, repo)
         action_env = {
             **dict(os.environ), "GITHUB_WORKSPACE": str(repo),

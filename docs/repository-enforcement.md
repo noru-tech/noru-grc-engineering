@@ -31,8 +31,9 @@ a child process crashes or times out, its report is not JSON — is a `tooling` 
 else it reported, so the gate fails and no baseline entry can accept it
 ([docs/findings/tooling.md](./findings/tooling.md)). Require only pieces the gate can run: the
 check is offline and holds no Noru credential, so a queue-driven piece such as `iac-scan` needs its
-queue file (`.noru/.cache/iac-queue.json`) in the job's checkout. The default policy setup writes
-requires `iac-scan`; drop it from `.noru/enforcement.yml` if the job cannot provide its queue.
+queue file (`.noru/.cache/iac-queue.json`) in the job's checkout. The policy setup writes therefore
+lists `iac-scan` as `required: false`; set it to `true` only when the enforcement job provides that
+file.
 
 Use `/repo-enforcement:status` for the derived worklist. It groups current debt by owning piece and
 named person and sorts blockers, stale cleanup, entries due within seven days, and scheduled debt.
