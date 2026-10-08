@@ -530,7 +530,7 @@ def build_candidate(derived, scan, manifest, lock):
 
     provenance = scan.get("provenance") or {}
     return {
-        "version": manifest.get("version", "0.10.0") if manifest else "0.10.0",
+        "version": manifest.get("version", "0.11.0") if manifest else "0.11.0",
         "piece": PIECE,
         "source": {**provenance, "derived_digest": scan.get("derived_digest")},
         "dataset": datasets,
