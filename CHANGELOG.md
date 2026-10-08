@@ -6,6 +6,9 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Add provider-neutral privacy CI checks and an opt-in REST publisher with explicit source
+  metadata, dependency-free export parsing, and offline regression tests.
+
 ## 0.10.0 — 2026-10-02
 
 ### Added

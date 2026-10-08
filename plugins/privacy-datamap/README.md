@@ -448,3 +448,10 @@ records relationships. Automatic client/import tracing is not implemented yet. E
 and static migration configuration provide discovery; the agent traces client wrappers and records
 missing bindings. Without an explicit graph, the legacy directory grouping remains provisional.
 A graph does not create payload fields: unsupported structures still require supplemental evidence.
+
+## Portable CI checks and publication
+
+Run `scripts/check_privacy.py --repo=<repository>` from this plugin to check the reviewed
+baseline and export offline. `scripts/publish_datamap.py` provides opt-in REST publication
+with provider-neutral source metadata. See [portable privacy CI](../../docs/privacy-ci.md)
+for inputs, exit codes and the supported document format.
