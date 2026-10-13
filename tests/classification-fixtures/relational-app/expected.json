@@ -1,0 +1,193 @@
+{
+  "description": "Independent intended semantics for a synthetic contact, assignment and build application. Unknown engine results remain coverage debt.",
+  "fields": {
+    "people/id": {
+      "personal_data": "yes",
+      "categories": [
+        "user.unique_id"
+      ]
+    },
+    "people/email": {
+      "personal_data": "yes",
+      "categories": [
+        "user.contact.email"
+      ]
+    },
+    "people/first_name": {
+      "personal_data": "yes",
+      "categories": [
+        "user.name.first"
+      ]
+    },
+    "people/last_name": {
+      "personal_data": "yes",
+      "categories": [
+        "user.name.last"
+      ]
+    },
+    "people/created_at": {
+      "personal_data": "yes",
+      "categories": [],
+      "category_fit": "unresolved"
+    },
+    "people/account_enabled": {
+      "personal_data": "yes",
+      "categories": [
+        "user.authorization"
+      ]
+    },
+    "people/contact": {
+      "personal_data": "contains_personal_members",
+      "categories": []
+    },
+    "people/open_contact": {
+      "personal_data": "contains_personal_members",
+      "categories": []
+    },
+    "companies/id": {
+      "personal_data": "no",
+      "categories": []
+    },
+    "companies/registered_name": {
+      "personal_data": "no",
+      "categories": []
+    },
+    "companies/registry_number": {
+      "personal_data": "no",
+      "categories": []
+    },
+    "assignments/id": {
+      "personal_data": "yes",
+      "categories": [],
+      "category_fit": "unresolved"
+    },
+    "assignments/person_owner": {
+      "personal_data": "yes",
+      "categories": [
+        "user.unique_id"
+      ]
+    },
+    "assignments/company_owner": {
+      "personal_data": "no",
+      "categories": []
+    },
+    "assignments/completed_at": {
+      "personal_data": "yes",
+      "categories": [],
+      "category_fit": "unresolved"
+    },
+    "assignments/updated_at": {
+      "personal_data": "yes",
+      "categories": [],
+      "category_fit": "unresolved"
+    },
+    "assignments/source": {
+      "personal_data": "no",
+      "categories": []
+    },
+    "integrations/id": {
+      "personal_data": "yes",
+      "categories": [],
+      "category_fit": "unresolved"
+    },
+    "integrations/service_credential": {
+      "personal_data": "no",
+      "categories": []
+    },
+    "integrations/person_credential": {
+      "personal_data": "yes",
+      "categories": [
+        "user.authorization.credentials"
+      ]
+    },
+    "integrations/person_id": {
+      "personal_data": "yes",
+      "categories": [
+        "user.unique_id"
+      ]
+    },
+    "integrations/authorization_state": {
+      "personal_data": "yes",
+      "categories": [],
+      "category_fit": "unresolved"
+    },
+    "ambiguous_values/id": {
+      "personal_data": "mixed",
+      "categories": [],
+      "category_fit": "unresolved"
+    },
+    "ambiguous_values/email": {
+      "personal_data": "no",
+      "categories": [],
+      "forbidden_categories": [
+        "user.contact.email",
+        "user.unique_id"
+      ]
+    },
+    "ambiguous_values/fingerprint": {
+      "personal_data": "no",
+      "categories": [],
+      "forbidden_categories": [
+        "user.biometric.fingerprint"
+      ]
+    },
+    "ambiguous_values/race": {
+      "personal_data": "no",
+      "categories": [],
+      "forbidden_categories": [
+        "user.demographic.race_ethnicity"
+      ]
+    },
+    "ambiguous_values/owner_id": {
+      "personal_data": "unknown",
+      "categories": [],
+      "forbidden_categories": [
+        "user.unique_id"
+      ]
+    },
+    "ambiguous_values/opaque": {
+      "personal_data": "unknown",
+      "categories": []
+    },
+    "ambiguous_values/payload": {
+      "personal_data": "unknown",
+      "categories": []
+    },
+    "ambiguous_values/subject": {
+      "personal_data": "mixed",
+      "categories": []
+    },
+    "ambiguous_values/email_digest": {
+      "personal_data": "yes",
+      "categories": [
+        "user.unique_id.pseudonymous"
+      ],
+      "forbidden_categories": [
+        "user.contact.email"
+      ]
+    }
+  },
+  "nested_members": {
+    "people/contact": [
+      "primary",
+      "primary.email",
+      "primary.firstName",
+      "primary.lastName",
+      "addresses",
+      "addresses.email",
+      "addresses.verified",
+      "checksum"
+    ],
+    "people/open_contact": [
+      "contact",
+      "contact.email",
+      "contact.firstName",
+      "contact.lastName",
+      "extension"
+    ]
+  },
+  "excluded_collections": [
+    "retired_contacts",
+    "test_only"
+  ]
+}

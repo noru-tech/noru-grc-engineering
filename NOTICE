@@ -34,3 +34,14 @@ Snapshot provenance, and how to refresh it, are documented in
 contract/lib/taxonomy/SOURCE.md.
 
 This repository's own code is MIT-licensed. The taxonomy data directory remains CC BY 4.0.
+
+TypeScript compiler
+-------------------
+Files:   plugins/privacy-datamap/scripts/vendor/typescript/
+Source:  https://registry.npmjs.org/typescript/-/typescript-6.0.2.tgz
+Author:  Microsoft Corporation and contributors
+License: Apache License 2.0; see the bundled LICENSE.txt and ThirdPartyNoticeText.txt.
+
+Version and upstream tarball integrity, together with every shipped file's SHA-256, are recorded
+in INTEGRITY.json in that directory. The plugin uses this pinned compiler for offline static
+analysis only. It does not load or execute a compiler from the repository being scanned.

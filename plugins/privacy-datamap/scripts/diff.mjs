@@ -13,9 +13,10 @@
 //   2 = usage error
 
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { toFideslang } from "./lib/fides.mjs";
 import {
@@ -106,6 +107,34 @@ export function buildOperations(manifest, state) {
   ];
 }
 
+
+/** Re-read the actual manifest through the mandatory canonical gate before any plan/push. */
+export function validateCurrentManifest(repo) {
+  const manifestPath = join(repo, ".noru", "privacy-datamap.yml");
+  const parsedPath = join(repo, ".noru", ".cache", "privacy-datamap.parsed.json");
+  const validator = fileURLToPath(new URL("./validate_manifest.py", import.meta.url));
+  const checked = spawnSync("python3", [validator, manifestPath, "--output=json", "--quiet", `--emit-parsed=${parsedPath}`],
+    { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+  if (checked.error || checked.status !== 0) {
+    let detail = checked.stderr?.trim() || checked.error?.message || "Classification evidence is incomplete or stale.";
+    try {
+      const result = JSON.parse(checked.stdout);
+      detail = (result.errors ?? []).slice(0, 8).map(item => item.message).join("; ") || detail;
+    } catch { /* A validator setup error is already reported through stderr. */ }
+    return { ok: false, error: `current classification validation failed: ${detail}` };
+  }
+  const parsed = loadJson(parsedPath, "freshly validated manifest");
+  return parsed.error ? { ok: false, error: parsed.error } : { ok: true, manifest: parsed.value };
+}
+
+export function planMatchesManifest(plan, manifest) {
+  const wanted = digest(toFideslang(manifest));
+  return Array.isArray(plan.operations) && plan.operations.length === 1 && plan.operations.every(operation =>
+    operation.operation === "ingestDatamap" && operation.arguments?.slug === manifest.source.slug &&
+    operation.arguments?.commitSha === manifest.source.commit_sha && operation.arguments?.branch === manifest.source.branch &&
+    digest(operation.arguments?.manifest) === wanted);
+}
+
 function main(argv) {
   const opts = parseCommonArgs(argv);
   if (opts.help) {
@@ -124,16 +153,9 @@ function main(argv) {
     );
     return 1;
   }
-  const parsed = loadJson(
-    join(opts.repo, ".noru", ".cache", "privacy-datamap.parsed.json"),
-    "validated manifest"
-  );
-  if (parsed.error) {
-    process.stderr.write(
-      `error: ${parsed.error}\n` +
-        "hint: python3 <plugin>/scripts/validate_manifest.py .noru/privacy-datamap.yml " +
-        "--emit-parsed=.noru/.cache/privacy-datamap.parsed.json\n"
-    );
+  const validated = validateCurrentManifest(opts.repo);
+  if (!validated.ok) {
+    process.stderr.write(`error: ${validated.error}\n`);
     return 1;
   }
   const state = loadJson(
@@ -148,7 +170,7 @@ function main(argv) {
     return 1;
   }
 
-  const manifest = parsed.value;
+  const manifest = validated.manifest;
   const operations = buildOperations(manifest, state.value);
   const plan = writePlan(planPathFor(opts.repo, PIECE), {
     repo: opts.repo,

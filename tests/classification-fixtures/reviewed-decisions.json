@@ -1,0 +1,979 @@
+{
+  "version": 1,
+  "description": "Source-reviewed decisions for synthetic application evaluation. This is test data, never production classifier rules. Unavailable external contracts stay explicit human questions. Known member lists describe source contracts, not sampled production values.",
+  "fixtures": {
+    "relational-app": {
+      "fields": {
+        "people/id": {
+          "personal_data": "yes",
+          "categories": [
+            "user.unique_id"
+          ],
+          "association": "natural_person",
+          "basis": "relational",
+          "meaning": "createPerson generates a key for the individual contact record, and personOwner and personId reference that key.",
+          "refs": [
+            "src/schema.ts:5",
+            "src/schema.ts:23",
+            "src/schema.ts:34",
+            "src/writers.ts:10"
+          ],
+          "decision_summary": "createPerson generates a key for the individual contact record, and personOwner and personId reference that key.",
+          "counterevidence": "The classification is specific to this evidenced value; no other fields inherit it."
+        },
+        "people/email": {
+          "personal_data": "yes",
+          "categories": [
+            "user.contact.email"
+          ],
+          "association": "natural_person",
+          "basis": "direct",
+          "meaning": "createPerson stores the individual PersonalContact email directly in this scalar field.",
+          "refs": [
+            "src/writers.ts:8",
+            "src/writers.ts:10",
+            "src/contracts.ts:1"
+          ],
+          "decision_summary": "createPerson stores the individual PersonalContact email directly in this scalar field.",
+          "counterevidence": "The classification is specific to this evidenced value; no other fields inherit it."
+        },
+        "people/first_name": {
+          "personal_data": "yes",
+          "categories": [
+            "user.name.first"
+          ],
+          "association": "natural_person",
+          "basis": "direct",
+          "meaning": "createPerson stores the individual PersonalContact firstName directly in this scalar field.",
+          "refs": [
+            "src/writers.ts:8",
+            "src/writers.ts:10",
+            "src/contracts.ts:1"
+          ],
+          "decision_summary": "createPerson stores the individual PersonalContact firstName directly in this scalar field.",
+          "counterevidence": "The classification is specific to this evidenced value; no other fields inherit it."
+        },
+        "people/last_name": {
+          "personal_data": "yes",
+          "categories": [
+            "user.name.last"
+          ],
+          "association": "natural_person",
+          "basis": "direct",
+          "meaning": "createPerson stores the individual PersonalContact lastName directly in this scalar field.",
+          "refs": [
+            "src/writers.ts:8",
+            "src/writers.ts:10",
+            "src/contracts.ts:1"
+          ],
+          "decision_summary": "createPerson stores the individual PersonalContact lastName directly in this scalar field.",
+          "counterevidence": "The classification is specific to this evidenced value; no other fields inherit it."
+        },
+        "people/created_at": {
+          "personal_data": "yes",
+          "categories": [],
+          "association": "natural_person",
+          "basis": "person_linked",
+          "meaning": "Default creation timestamp for a record created from an individual contact. It is not itself evidence of a user action.",
+          "refs": [
+            "src/schema.ts:9",
+            "src/writers.ts:9"
+          ],
+          "decision_summary": "Default creation timestamp for a record created from an individual contact. It is not itself evidence of a user action.",
+          "counterevidence": "A Date value, a default or the label manual does not establish an individual action.",
+          "uncertainty": "category_fit",
+          "resolution_owner": "human",
+          "business_context_question": "Does this record creation represent account registration or administrative import?",
+          "resolution_needed": "Supply the absent consuming/actor contract.",
+          "decision_impact": "Determines the category; personal association remains established."
+        },
+        "people/account_enabled": {
+          "personal_data": "yes",
+          "categories": [
+            "user.authorization"
+          ],
+          "association": "natural_person",
+          "basis": "attribute",
+          "meaning": "The individual account receives an enabled-access state when createPerson provisions it.",
+          "refs": [
+            "src/schema.ts:10",
+            "src/writers.ts:8",
+            "src/writers.ts:11"
+          ],
+          "decision_summary": "The individual account receives an enabled-access state when createPerson provisions it.",
+          "counterevidence": "This boolean is an access-state attribute, not a person identifier or a recorded login event."
+        },
+        "people/contact.primary.email": {
+          "personal_data": "yes",
+          "categories": [
+            "user.contact.email"
+          ],
+          "association": "natural_person",
+          "basis": "content",
+          "meaning": "The declared PersonalContact member stores the individual contact email when that object is present.",
+          "refs": [
+            "src/contracts.ts:8",
+            "src/writers.ts:12",
+            "src/contracts.ts:1"
+          ],
+          "decision_summary": "The declared PersonalContact member stores the individual contact email when that object is present.",
+          "counterevidence": "Optional or union membership controls presence. The category applies only to this member, not the enclosing object or the company branch."
+        },
+        "people/contact.primary.firstName": {
+          "personal_data": "yes",
+          "categories": [
+            "user.name.first"
+          ],
+          "association": "natural_person",
+          "basis": "content",
+          "meaning": "The declared PersonalContact member stores the individual contact firstName when that object is present.",
+          "refs": [
+            "src/contracts.ts:8",
+            "src/writers.ts:12",
+            "src/contracts.ts:1"
+          ],
+          "decision_summary": "The declared PersonalContact member stores the individual contact firstName when that object is present.",
+          "counterevidence": "Optional or union membership controls presence. The category applies only to this member, not the enclosing object or the company branch."
+        },
+        "people/contact.primary.lastName": {
+          "personal_data": "yes",
+          "categories": [
+            "user.name.last"
+          ],
+          "association": "natural_person",
+          "basis": "content",
+          "meaning": "The declared PersonalContact member stores the individual contact lastName when that object is present.",
+          "refs": [
+            "src/contracts.ts:8",
+            "src/writers.ts:12",
+            "src/contracts.ts:1"
+          ],
+          "decision_summary": "The declared PersonalContact member stores the individual contact lastName when that object is present.",
+          "counterevidence": "Optional or union membership controls presence. The category applies only to this member, not the enclosing object or the company branch."
+        },
+        "people/open_contact.contact.email": {
+          "personal_data": "yes",
+          "categories": [
+            "user.contact.email"
+          ],
+          "association": "natural_person",
+          "basis": "content",
+          "meaning": "The declared PersonalContact member stores the individual contact email when that object is present.",
+          "refs": [
+            "src/contracts.ts:14",
+            "src/writers.ts:13",
+            "src/contracts.ts:1"
+          ],
+          "decision_summary": "The declared PersonalContact member stores the individual contact email when that object is present.",
+          "counterevidence": "Optional or union membership controls presence. The category applies only to this member, not the enclosing object or the company branch."
+        },
+        "people/open_contact.contact.firstName": {
+          "personal_data": "yes",
+          "categories": [
+            "user.name.first"
+          ],
+          "association": "natural_person",
+          "basis": "content",
+          "meaning": "The declared PersonalContact member stores the individual contact firstName when that object is present.",
+          "refs": [
+            "src/contracts.ts:14",
+            "src/writers.ts:13",
+            "src/contracts.ts:1"
+          ],
+          "decision_summary": "The declared PersonalContact member stores the individual contact firstName when that object is present.",
+          "counterevidence": "Optional or union membership controls presence. The category applies only to this member, not the enclosing object or the company branch."
+        },
+        "people/open_contact.contact.lastName": {
+          "personal_data": "yes",
+          "categories": [
+            "user.name.last"
+          ],
+          "association": "natural_person",
+          "basis": "content",
+          "meaning": "The declared PersonalContact member stores the individual contact lastName when that object is present.",
+          "refs": [
+            "src/contracts.ts:14",
+            "src/writers.ts:13",
+            "src/contracts.ts:1"
+          ],
+          "decision_summary": "The declared PersonalContact member stores the individual contact lastName when that object is present.",
+          "counterevidence": "Optional or union membership controls presence. The category applies only to this member, not the enclosing object or the company branch."
+        },
+        "ambiguous_values/subject.contact.email": {
+          "personal_data": "yes",
+          "categories": [
+            "user.contact.email"
+          ],
+          "association": "natural_person",
+          "basis": "content",
+          "meaning": "The declared PersonalContact member stores the individual contact email when that object is present.",
+          "refs": [
+            "src/contracts.ts:18",
+            "src/contracts.ts:19",
+            "src/contracts.ts:1"
+          ],
+          "decision_summary": "The declared PersonalContact member stores the individual contact email when that object is present.",
+          "counterevidence": "Optional or union membership controls presence. The category applies only to this member, not the enclosing object or the company branch."
+        },
+        "ambiguous_values/subject.contact.firstName": {
+          "personal_data": "yes",
+          "categories": [
+            "user.name.first"
+          ],
+          "association": "natural_person",
+          "basis": "content",
+          "meaning": "The declared PersonalContact member stores the individual contact firstName when that object is present.",
+          "refs": [
+            "src/contracts.ts:18",
+            "src/contracts.ts:19",
+            "src/contracts.ts:1"
+          ],
+          "decision_summary": "The declared PersonalContact member stores the individual contact firstName when that object is present.",
+          "counterevidence": "Optional or union membership controls presence. The category applies only to this member, not the enclosing object or the company branch."
+        },
+        "ambiguous_values/subject.contact.lastName": {
+          "personal_data": "yes",
+          "categories": [
+            "user.name.last"
+          ],
+          "association": "natural_person",
+          "basis": "content",
+          "meaning": "The declared PersonalContact member stores the individual contact lastName when that object is present.",
+          "refs": [
+            "src/contracts.ts:18",
+            "src/contracts.ts:19",
+            "src/contracts.ts:1"
+          ],
+          "decision_summary": "The declared PersonalContact member stores the individual contact lastName when that object is present.",
+          "counterevidence": "Optional or union membership controls presence. The category applies only to this member, not the enclosing object or the company branch."
+        },
+        "people/contact.addresses.email": {
+          "personal_data": "yes",
+          "categories": [
+            "user.contact.email"
+          ],
+          "association": "natural_person",
+          "basis": "content",
+          "meaning": "createPerson explicitly projects the individual contact email into each declared address object.",
+          "refs": [
+            "src/contracts.ts:9",
+            "src/writers.ts:12"
+          ],
+          "decision_summary": "createPerson explicitly projects the individual contact email into each declared address object.",
+          "counterevidence": "The classification is specific to this evidenced value; no other fields inherit it."
+        },
+        "people/contact.addresses.verified": {
+          "personal_data": "yes",
+          "categories": [
+            "user.contact"
+          ],
+          "association": "natural_person",
+          "basis": "attribute",
+          "meaning": "The address object records a verification attribute about the individual contact address; it is contact data, not the email value itself.",
+          "refs": [
+            "src/contracts.ts:9",
+            "src/writers.ts:12"
+          ],
+          "decision_summary": "The address object records a verification attribute about the individual contact address; it is contact data, not the email value itself.",
+          "counterevidence": "The only observed initial value is false. No observed verification action or permission grant supports a behavior or authorization category."
+        },
+        "people/contact.checksum": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "The observed constructor sets a technical checksum placeholder and the declared member is an integrity string.",
+          "refs": [
+            "src/contracts.ts:10",
+            "src/writers.ts:12"
+          ],
+          "decision_summary": "The observed constructor sets a technical checksum placeholder and the declared member is an integrity string.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "people/open_contact.extension": {
+          "personal_data": "unknown",
+          "categories": [],
+          "association": "unknown",
+          "basis": "unestablished",
+          "meaning": "An open Record<string, unknown> extension is currently initialized empty, but the stored contract allows additional values.",
+          "refs": [
+            "src/contracts.ts:15",
+            "src/writers.ts:13"
+          ],
+          "decision_summary": "An open Record<string, unknown> extension is currently initialized empty, but the stored contract allows additional values.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "open_content",
+          "resolution_owner": "human",
+          "business_context_question": "What content is permitted in the open contact extension beyond the included empty initializer?",
+          "resolution_needed": "Provide the allowed extension-data contract or confirm that runtime validation permanently restricts it to an empty object.",
+          "decision_impact": "Determines whether additional personal members must be modeled; the known contact members remain classified."
+        },
+        "companies/id": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "organization",
+          "basis": "operational",
+          "meaning": "registerCompany generates an identifier for the registered company, and companyOwner refers to that organization record.",
+          "refs": [
+            "src/schema.ts:15",
+            "src/schema.ts:24",
+            "src/writers.ts:17",
+            "src/writers.ts:18"
+          ],
+          "decision_summary": "registerCompany generates an identifier for the registered company, and companyOwner refers to that organization record.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "companies/registered_name": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "organization",
+          "basis": "operational",
+          "meaning": "The writer accepts the registered company name and stores it in the organization record.",
+          "refs": [
+            "src/schema.ts:17",
+            "src/writers.ts:17",
+            "src/writers.ts:18"
+          ],
+          "decision_summary": "The writer accepts the registered company name and stores it in the organization record.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "companies/registry_number": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "organization",
+          "basis": "operational",
+          "meaning": "The writer stores the company registration reference; no individual identity branch appears in this fixture contract.",
+          "refs": [
+            "src/schema.ts:18",
+            "src/writers.ts:17",
+            "src/writers.ts:18"
+          ],
+          "decision_summary": "The writer stores the company registration reference; no individual identity branch appears in this fixture contract.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "assignments/person_owner": {
+          "personal_data": "yes",
+          "categories": [
+            "user.unique_id"
+          ],
+          "association": "natural_person",
+          "basis": "relational",
+          "meaning": "The foreign key and writer identify the individual owner by the people primary key.",
+          "refs": [
+            "src/schema.ts:23",
+            "src/writers.ts:21",
+            "src/writers.ts:23"
+          ],
+          "decision_summary": "The foreign key and writer identify the individual owner by the people primary key.",
+          "counterevidence": "The classification is specific to this evidenced value; no other fields inherit it."
+        },
+        "assignments/company_owner": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "organization",
+          "basis": "operational",
+          "meaning": "The foreign key and writer identify the registered company, separately from the person owner.",
+          "refs": [
+            "src/schema.ts:24",
+            "src/writers.ts:21",
+            "src/writers.ts:23"
+          ],
+          "decision_summary": "The foreign key and writer identify the registered company, separately from the person owner.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "assignments/completed_at": {
+          "personal_data": "yes",
+          "categories": [],
+          "association": "natural_person",
+          "basis": "person_linked",
+          "meaning": "Server time produced by completeAssignment for a person-owned assignment; neither the actor nor who completed the work is established.",
+          "refs": [
+            "src/schema.ts:23",
+            "src/schema.ts:25",
+            "src/writers.ts:21",
+            "src/writers.ts:24"
+          ],
+          "decision_summary": "Server time produced by completeAssignment for a person-owned assignment; neither the actor nor who completed the work is established.",
+          "counterevidence": "A Date value, a default or the label manual does not establish an individual action.",
+          "uncertainty": "category_fit",
+          "resolution_owner": "human",
+          "business_context_question": "Does completion represent an individual action or a system/administrative outcome?",
+          "resolution_needed": "Supply the absent consuming/actor contract.",
+          "decision_impact": "Determines the category; personal association remains established."
+        },
+        "assignments/updated_at": {
+          "personal_data": "yes",
+          "categories": [],
+          "association": "natural_person",
+          "basis": "person_linked",
+          "meaning": "Default bookkeeping timestamp on a person-owned assignment, with no automatic update trigger or human actor established.",
+          "refs": [
+            "src/schema.ts:26",
+            "src/writers.ts:22"
+          ],
+          "decision_summary": "Default bookkeeping timestamp on a person-owned assignment, with no automatic update trigger or human actor established.",
+          "counterevidence": "A Date value, a default or the label manual does not establish an individual action.",
+          "uncertainty": "category_fit",
+          "resolution_owner": "human",
+          "business_context_question": "Is this timestamp consumed as record bookkeeping or an attributed assignment event?",
+          "resolution_needed": "Supply the absent consuming/actor contract.",
+          "decision_impact": "Determines the category; personal association remains established."
+        },
+        "assignments/source": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "The only included writer stores the constant provenance label manual.",
+          "refs": [
+            "src/schema.ts:27",
+            "src/writers.ts:24"
+          ],
+          "decision_summary": "The only included writer stores the constant provenance label manual.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "assignments/id": {
+          "personal_data": "yes",
+          "categories": [],
+          "association": "natural_person",
+          "basis": "unestablished",
+          "meaning": "The generated assignment-row identifier is stored alongside both person and company owners; no consumer establishes its external identity role.",
+          "refs": [
+            "src/schema.ts:22",
+            "src/writers.ts:23"
+          ],
+          "decision_summary": "The generated assignment-row identifier is stored alongside both person and company owners; no consumer establishes its external identity role.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "category_fit",
+          "resolution_owner": "human",
+          "business_context_question": "Is the assignment identifier used outside this code as a person-identifying activity reference, or solely as a task record key?",
+          "resolution_needed": "Identify the intended use of this record key in the omitted consuming system.",
+          "decision_impact": "Determines the supported category and correlation use; established personal association is retained."
+        },
+        "integrations/service_credential": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "service",
+          "basis": "operational",
+          "meaning": "rotateServiceCredential stores a service credential independently of any person argument.",
+          "refs": [
+            "src/schema.ts:32",
+            "src/writers.ts:28",
+            "src/writers.ts:29"
+          ],
+          "decision_summary": "rotateServiceCredential stores a service credential independently of any person argument.",
+          "counterevidence": "This remains security-sensitive even though the demonstrated credential subject is a service.",
+          "security_sensitivity": "credential"
+        },
+        "integrations/person_credential": {
+          "personal_data": "yes",
+          "categories": [
+            "user.authorization.credentials"
+          ],
+          "association": "natural_person",
+          "basis": "relational",
+          "meaning": "storeAuthorization stores an individual credential together with the people identity reference.",
+          "refs": [
+            "src/schema.ts:33",
+            "src/schema.ts:34",
+            "src/writers.ts:32",
+            "src/writers.ts:33"
+          ],
+          "decision_summary": "storeAuthorization stores an individual credential together with the people identity reference.",
+          "counterevidence": "The service credential uses a separate writer and is not included in this person-linked category.",
+          "security_sensitivity": "credential"
+        },
+        "integrations/person_id": {
+          "personal_data": "yes",
+          "categories": [
+            "user.unique_id"
+          ],
+          "association": "natural_person",
+          "basis": "relational",
+          "meaning": "The explicit foreign key stores the people identity used in the individual authorization record.",
+          "refs": [
+            "src/schema.ts:34",
+            "src/writers.ts:32",
+            "src/writers.ts:33"
+          ],
+          "decision_summary": "The explicit foreign key stores the people identity used in the individual authorization record.",
+          "counterevidence": "The classification is specific to this evidenced value; no other fields inherit it."
+        },
+        "integrations/id": {
+          "personal_data": "yes",
+          "categories": [],
+          "association": "natural_person",
+          "basis": "relational",
+          "meaning": "A new integration-row key is generated, but no consumer specifies whether it identifies an individual session or only an integration record.",
+          "refs": [
+            "src/schema.ts:31",
+            "src/writers.ts:33"
+          ],
+          "decision_summary": "A new integration-row key is generated, but no consumer specifies whether it identifies an individual session or only an integration record.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "category_fit",
+          "resolution_owner": "human",
+          "business_context_question": "What entity does the integration record key identify in the omitted consumer?",
+          "resolution_needed": "Specify whether consumers use this as an individual/session reference or solely as an integration-object identifier.",
+          "decision_impact": "Determines the supported category and correlation use; established personal association is retained."
+        },
+        "integrations/authorization_state": {
+          "personal_data": "yes",
+          "categories": [],
+          "association": "natural_person",
+          "basis": "relational",
+          "meaning": "The writer stores an unconstrained state argument next to a person credential; it does not establish permissions semantics.",
+          "refs": [
+            "src/schema.ts:35",
+            "src/writers.ts:32",
+            "src/writers.ts:33"
+          ],
+          "decision_summary": "The writer stores an unconstrained state argument next to a person credential; it does not establish permissions semantics.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "category_fit",
+          "resolution_owner": "human",
+          "business_context_question": "Does the external authorization state contain granted permissions, protocol correlation data, or provider status?",
+          "resolution_needed": "Provide the upstream state contract; no upstream caller or consumer is included in this fixture.",
+          "decision_impact": "Determines the supported category and correlation use; established personal association is retained."
+        },
+        "ambiguous_values/email": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "The field is a boolean and storeBuildManifest writes the constant false; it is not an address or identifier.",
+          "refs": [
+            "src/schema.ts:40",
+            "src/writers.ts:38"
+          ],
+          "decision_summary": "The field is a boolean and storeBuildManifest writes the constant false; it is not an address or identifier.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "ambiguous_values/fingerprint": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "The build writer hashes fileContents to represent artifact integrity; no biometric source is involved.",
+          "refs": [
+            "src/schema.ts:41",
+            "src/writers.ts:36",
+            "src/writers.ts:39"
+          ],
+          "decision_summary": "The build writer hashes fileContents to represent artifact integrity; no biometric source is involved.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "ambiguous_values/race": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "The build writer copies a numeric raceNumber ordinal; the value is not racial or ethnic data.",
+          "refs": [
+            "src/schema.ts:42",
+            "src/writers.ts:36",
+            "src/writers.ts:39"
+          ],
+          "decision_summary": "The build writer copies a numeric raceNumber ordinal; the value is not racial or ethnic data.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "ambiguous_values/email_digest": {
+          "personal_data": "yes",
+          "categories": [
+            "user.unique_id.pseudonymous"
+          ],
+          "association": "natural_person",
+          "basis": "relational",
+          "meaning": "A SHA-256 of the individual contact email used for suppression correlation; a derived pseudonymous identifier rather than raw email.",
+          "refs": [
+            "src/schema.ts:47",
+            "src/writers.ts:44",
+            "src/writers.ts:45"
+          ],
+          "decision_summary": "suppressContact creates a deterministic SHA-256 digest from the individual email, retaining a derived link to that person.",
+          "counterevidence": "The transform changes the stored representation. It is not a raw email address and hashing does not establish anonymity."
+        },
+        "ambiguous_values/subject.kind": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "The discriminated union uses person/company constants as entity-type labels, separately from its individual contact fields.",
+          "refs": [
+            "src/contracts.ts:18",
+            "src/contracts.ts:19",
+            "src/contracts.ts:20"
+          ],
+          "decision_summary": "The discriminated union uses person/company constants as entity-type labels, separately from its individual contact fields.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "ambiguous_values/subject.registeredName": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "organization",
+          "basis": "operational",
+          "meaning": "This member exists only in the company branch of AccountSubject and represents the registered organization name.",
+          "refs": [
+            "src/contracts.ts:18",
+            "src/contracts.ts:20"
+          ],
+          "decision_summary": "This member exists only in the company branch of AccountSubject and represents the registered organization name.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "ambiguous_values/id": {
+          "personal_data": "mixed",
+          "categories": [],
+          "association": "mixed",
+          "basis": "unestablished",
+          "meaning": "Both the build writer and contact-suppression writer create keys in this collection, so record population has mixed purposes.",
+          "refs": [
+            "src/schema.ts:39",
+            "src/writers.ts:38",
+            "src/writers.ts:45"
+          ],
+          "decision_summary": "Both the build writer and contact-suppression writer create keys in this collection, so record population has mixed purposes.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "category_fit",
+          "resolution_owner": "human",
+          "business_context_question": "Are these row keys exposed or joined as individual suppression identifiers, or used only for artifact bookkeeping?",
+          "resolution_needed": "Describe the omitted consumers and how they distinguish build versus suppression records.",
+          "decision_impact": "Determines the supported category and correlation use; established personal association is retained."
+        },
+        "ambiguous_values/owner_id": {
+          "personal_data": "unknown",
+          "categories": [],
+          "association": "unknown",
+          "basis": "unestablished",
+          "meaning": "The scalar owner field has no foreign key or writer in the supplied source.",
+          "refs": [
+            "src/schema.ts:43"
+          ],
+          "decision_summary": "The scalar owner field has no foreign key or writer in the supplied source.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "unavailable_identity_contract",
+          "resolution_owner": "human",
+          "business_context_question": "What does the externally populated owner identifier reference?",
+          "resolution_needed": "Supply the unavailable owner-source contract, distinguishing individuals, organizations and non-person objects.",
+          "decision_impact": "Determines person linkage and the identifier category."
+        },
+        "ambiguous_values/opaque": {
+          "personal_data": "unknown",
+          "categories": [],
+          "association": "unknown",
+          "basis": "unestablished",
+          "meaning": "The build writer accepts externalValue of unknown type and stores it after String conversion.",
+          "refs": [
+            "src/schema.ts:44",
+            "src/writers.ts:36",
+            "src/writers.ts:40"
+          ],
+          "decision_summary": "The build writer accepts externalValue of unknown type and stores it after String conversion.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "unavailable_content_contract",
+          "resolution_owner": "human",
+          "business_context_question": "What values can the external build input contain?",
+          "resolution_needed": "Provide the contract of the externalValue producer, which is not included in the source.",
+          "decision_impact": "Determines possible personal content and any member model; neither a text conversion nor a JSON type establishes absence of personal data."
+        },
+        "ambiguous_values/payload": {
+          "personal_data": "unknown",
+          "categories": [],
+          "association": "unknown",
+          "basis": "unestablished",
+          "meaning": "The build writer accepts externalValue of unknown type and stores it as unconstrained JSON.",
+          "refs": [
+            "src/schema.ts:45",
+            "src/writers.ts:36",
+            "src/writers.ts:40"
+          ],
+          "decision_summary": "The build writer accepts externalValue of unknown type and stores it as unconstrained JSON.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "unavailable_content_contract",
+          "resolution_owner": "human",
+          "business_context_question": "What values can the external build input contain?",
+          "resolution_needed": "Provide the contract of the externalValue producer, which is not included in the source.",
+          "decision_impact": "Determines possible personal content and any member model; neither a text conversion nor a JSON type establishes absence of personal data."
+        },
+        "people/contact.primary": {
+          "personal_data": "unknown",
+          "categories": [],
+          "association": "unknown",
+          "basis": "content",
+          "meaning": "createPerson stores the incoming contact object directly. Its declared email and name members are modeled, but the TypeScript interface does not exclude additional runtime keys.",
+          "refs": [
+            "src/contracts.ts:1",
+            "src/writers.ts:8",
+            "src/writers.ts:12"
+          ],
+          "decision_summary": "createPerson stores the incoming contact object directly. Its declared email and name members are modeled, but the TypeScript interface does not exclude additional runtime keys.",
+          "counterevidence": "The writer uses the input object without a member projection or runtime validator. No producer implementation is included, so declared keys alone cannot establish exhaustive stored content.",
+          "uncertainty": "unavailable_runtime_content_contract",
+          "resolution_owner": "human",
+          "business_context_question": "Can the contact input carry additional runtime properties beyond email, firstName and lastName?",
+          "resolution_needed": "Provide the upstream producer and runtime validation contract, or an exhaustive permitted-key contract for this contact input.",
+          "decision_impact": "Determines whether additional personal members must be modeled. Known email and name members retain their classifications; the whole object remains unresolved and blocks acceptance."
+        },
+        "people/open_contact.contact": {
+          "personal_data": "unknown",
+          "categories": [],
+          "association": "unknown",
+          "basis": "content",
+          "meaning": "createPerson stores the incoming contact object directly. Its declared email and name members are modeled, but the TypeScript interface does not exclude additional runtime keys.",
+          "refs": [
+            "src/contracts.ts:1",
+            "src/writers.ts:8",
+            "src/writers.ts:13"
+          ],
+          "decision_summary": "createPerson stores the incoming contact object directly. Its declared email and name members are modeled, but the TypeScript interface does not exclude additional runtime keys.",
+          "counterevidence": "The writer uses the input object without a member projection or runtime validator. No producer implementation is included, so declared keys alone cannot establish exhaustive stored content.",
+          "uncertainty": "unavailable_runtime_content_contract",
+          "resolution_owner": "human",
+          "business_context_question": "Can the contact input carry additional runtime properties beyond email, firstName and lastName?",
+          "resolution_needed": "Provide the upstream producer and runtime validation contract, or an exhaustive permitted-key contract for this contact input.",
+          "decision_impact": "Determines whether additional personal members must be modeled. Known email and name members retain their classifications; the whole object remains unresolved and blocks acceptance."
+        }
+      },
+      "gaps": [
+        {
+          "kind": "write_value",
+          "subject_suffix": "assignments.completedAt",
+          "outcome": "modeled",
+          "field_keys": [
+            "assignments/completed_at"
+          ],
+          "rationale": "The unsupported new-expression is new Date() in completeAssignment. Direct source inspection establishes the stored completion timestamp and the simultaneous individual-owner assignment.",
+          "refs": [
+            "src/writers.ts:21",
+            "src/writers.ts:24"
+          ]
+        },
+        {
+          "kind": "runtime_object_shape",
+          "subject_suffix": "people/contact.primary",
+          "outcome": "not_applicable",
+          "field_keys": [
+            "people/contact.primary"
+          ],
+          "rationale": "Source inspection cannot establish exhaustive runtime keys. The entire affected object is explicitly retained as unresolved with a concrete human question about its unavailable producer contract; any known members remain represented.",
+          "scope_rationale": "No separate unrepresented field remains: the canonical object itself retains the full unresolved runtime-content boundary. This does not certify a closed shape or classify missing members as non-personal. Acceptance remains blocked by the object until the missing contract is supplied.",
+          "refs": [
+            "src/writers.ts:8",
+            "src/writers.ts:12",
+            "src/contracts.ts:1"
+          ]
+        },
+        {
+          "kind": "runtime_object_shape",
+          "subject_suffix": "people/open_contact.contact",
+          "outcome": "not_applicable",
+          "field_keys": [
+            "people/open_contact.contact"
+          ],
+          "rationale": "Source inspection cannot establish exhaustive runtime keys. The entire affected object is explicitly retained as unresolved with a concrete human question about its unavailable producer contract; any known members remain represented.",
+          "scope_rationale": "No separate unrepresented field remains: the canonical object itself retains the full unresolved runtime-content boundary. This does not certify a closed shape or classify missing members as non-personal. Acceptance remains blocked by the object until the missing contract is supplied.",
+          "refs": [
+            "src/writers.ts:8",
+            "src/writers.ts:13",
+            "src/contracts.ts:1"
+          ]
+        },
+        {
+          "kind": "runtime_object_shape",
+          "subject_suffix": "ambiguous_values/payload",
+          "outcome": "not_applicable",
+          "field_keys": [
+            "ambiguous_values/payload"
+          ],
+          "rationale": "Source inspection cannot establish exhaustive runtime keys. The entire affected object is explicitly retained as unresolved with a concrete human question about its unavailable producer contract; any known members remain represented.",
+          "scope_rationale": "No separate unrepresented field remains: the canonical object itself retains the full unresolved runtime-content boundary. This does not certify a closed shape or classify missing members as non-personal. Acceptance remains blocked by the object until the missing contract is supplied.",
+          "refs": [
+            "src/writers.ts:36",
+            "src/writers.ts:40",
+            "src/schema.ts:45"
+          ]
+        }
+      ]
+    },
+    "sql-app": {
+      "fields": {
+        "subscriptions/created_at": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "The SQL declaration provides generic record-maintenance time; no corresponding business-event writer is present.",
+          "refs": [
+            "db/schema.sql:5"
+          ],
+          "decision_summary": "The SQL declaration provides generic record-maintenance time; no corresponding business-event writer is present.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "subscriptions/updated_at": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "The SQL declaration provides generic record-maintenance time; no corresponding business-event writer is present.",
+          "refs": [
+            "db/schema.sql:6"
+          ],
+          "decision_summary": "The SQL declaration provides generic record-maintenance time; no corresponding business-event writer is present.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "subscriptions/id": {
+          "personal_data": "unknown",
+          "categories": [],
+          "association": "unknown",
+          "basis": "unestablished",
+          "meaning": "The current SQL schema declares the field, but no subscription writer or consumer is included.",
+          "refs": [
+            "db/schema.sql:2"
+          ],
+          "decision_summary": "The current SQL schema declares the field, but no subscription writer or consumer is included.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "unavailable_producer_contract",
+          "resolution_owner": "human",
+          "business_context_question": "What values and entity types does the omitted subscription producer store?",
+          "resolution_needed": "Provide the subscription producer contract, including whether records represent natural people, organizations or services.",
+          "decision_impact": "Determines personal linkage, content meaning and category; schema names alone are insufficient."
+        },
+        "subscriptions/email": {
+          "personal_data": "unknown",
+          "categories": [],
+          "association": "unknown",
+          "basis": "unestablished",
+          "meaning": "The current SQL schema declares the field, but no subscription writer or consumer is included.",
+          "refs": [
+            "db/schema.sql:3"
+          ],
+          "decision_summary": "The current SQL schema declares the field, but no subscription writer or consumer is included.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "unavailable_producer_contract",
+          "resolution_owner": "human",
+          "business_context_question": "What values and entity types does the omitted subscription producer store?",
+          "resolution_needed": "Provide the subscription producer contract, including whether records represent natural people, organizations or services.",
+          "decision_impact": "Determines personal linkage, content meaning and category; schema names alone are insufficient."
+        },
+        "subscriptions/status": {
+          "personal_data": "unknown",
+          "categories": [],
+          "association": "unknown",
+          "basis": "unestablished",
+          "meaning": "The current SQL schema declares the field, but no subscription writer or consumer is included.",
+          "refs": [
+            "db/schema.sql:4"
+          ],
+          "decision_summary": "The current SQL schema declares the field, but no subscription writer or consumer is included.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "unavailable_producer_contract",
+          "resolution_owner": "human",
+          "business_context_question": "What values and entity types does the omitted subscription producer store?",
+          "resolution_needed": "Provide the subscription producer contract, including whether records represent natural people, organizations or services.",
+          "decision_impact": "Determines personal linkage, content meaning and category; schema names alone are insufficient."
+        },
+        "subscriptions/opaque": {
+          "personal_data": "unknown",
+          "categories": [],
+          "association": "unknown",
+          "basis": "unestablished",
+          "meaning": "The current SQL schema declares the field, but no subscription writer or consumer is included.",
+          "refs": [
+            "db/schema.sql:7"
+          ],
+          "decision_summary": "The current SQL schema declares the field, but no subscription writer or consumer is included.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "unavailable_producer_contract",
+          "resolution_owner": "human",
+          "business_context_question": "What values and entity types does the omitted subscription producer store?",
+          "resolution_needed": "Provide the subscription producer contract, including whether records represent natural people, organizations or services.",
+          "decision_impact": "Determines personal linkage, content meaning and category; schema names alone are insufficient."
+        },
+        "subscriptions/payload": {
+          "personal_data": "unknown",
+          "categories": [],
+          "association": "unknown",
+          "basis": "unestablished",
+          "meaning": "The current SQL schema declares the field, but no subscription writer or consumer is included.",
+          "refs": [
+            "db/schema.sql:8"
+          ],
+          "decision_summary": "The current SQL schema declares the field, but no subscription writer or consumer is included.",
+          "counterevidence": "The available declaration and all included writers were inspected; they do not establish the missing fact. No category is inferred from the name.",
+          "uncertainty": "unavailable_producer_contract",
+          "resolution_owner": "human",
+          "business_context_question": "What values and entity types does the omitted subscription producer store?",
+          "resolution_needed": "Provide the subscription producer contract, including whether records represent natural people, organizations or services.",
+          "decision_impact": "Determines personal linkage, content meaning and category; schema names alone are insufficient."
+        },
+        "build_artifacts/id": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "persistArtifact stores the constant release as the artifact record key.",
+          "refs": [
+            "db/schema.sql:11",
+            "src/writer.ts:2",
+            "src/writer.ts:3"
+          ],
+          "decision_summary": "persistArtifact stores the constant release as the artifact record key.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "build_artifacts/fingerprint": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "persistArtifact stores its artifact digest parameter in the fingerprint column; the writer has no person source.",
+          "refs": [
+            "db/schema.sql:12",
+            "src/writer.ts:2",
+            "src/writer.ts:3"
+          ],
+          "decision_summary": "persistArtifact stores its artifact digest parameter in the fingerprint column; the writer has no person source.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "build_artifacts/race": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "persistArtifact stores a numeric ordinal in the race column; it is not an ethnic attribute.",
+          "refs": [
+            "db/schema.sql:13",
+            "src/writer.ts:2",
+            "src/writer.ts:3"
+          ],
+          "decision_summary": "persistArtifact stores a numeric ordinal in the race column; it is not an ethnic attribute.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "build_artifacts/email": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "The SQL column is boolean and the parameterized artifact insert supplies false.",
+          "refs": [
+            "db/schema.sql:14",
+            "src/writer.ts:3"
+          ],
+          "decision_summary": "The SQL column is boolean and the parameterized artifact insert supplies false.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        },
+        "build_artifacts/created_at": {
+          "personal_data": "no",
+          "categories": [],
+          "association": "none",
+          "basis": "operational",
+          "meaning": "The SQL default records generic artifact-row creation time.",
+          "refs": [
+            "db/schema.sql:15"
+          ],
+          "decision_summary": "The SQL default records generic artifact-row creation time.",
+          "counterevidence": "Person linkage elsewhere in a row does not change the demonstrated value meaning."
+        }
+      },
+      "gaps": []
+    }
+  }
+}

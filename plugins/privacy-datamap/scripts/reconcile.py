@@ -26,6 +26,7 @@ import relationships
 import analysis_cache
 import copy
 import analysis_storage
+import field_review
 
 
 PIECE = "privacy-datamap"
@@ -251,7 +252,9 @@ def manifest_matches_observation(manifest, derived):
     _datasets, manifest_collections, manifest_fields, manifest_systems = manifest_indexes(manifest)
     observed_fields = {row["entity_id"] for row in field_rows(derived)}
     observed_collections = {row["entity_id"] for row in collection_rows(derived)}
-    if set(manifest_fields) != observed_fields or set(manifest_collections) != observed_collections:
+    represented_roots = {identity for identity in manifest_fields if identity in observed_fields}
+    unexpected = {identity for identity in manifest_fields if identity not in observed_fields and not any(identity.startswith(parent + ".") for parent in observed_fields)}
+    if represented_roots != observed_fields or unexpected or set(manifest_collections) != observed_collections:
         return False
     observed_systems = {
         system.get("fides_key"): sorted(system.get("dataset_references") or [])
@@ -1016,7 +1019,16 @@ def main(argv):
             if removal_errors:
                 sys.stderr.write("error: cannot seal unexplained removals: " + "; ".join(removal_errors) + "\n")
                 return 1
+        classification_document = analysis_storage.load(cache / "privacy-datamap.analysis.json") or {}
+        classification_errors = field_review.validate_repository(classification_document, derived, repo, require_complete=True, candidate=manifest)
+        if classification_errors:
+            sys.stderr.write("error: cannot seal incomplete or mismatched classification: " + "; ".join(classification_errors) + "\n")
+            return 1
         lock_document = build_lock(derived, scan, manifest_path)
+        if classification_document.get("classification_review"):
+            lock_document["classification_review"] = field_review.classification_certificate(classification_document, derived, repo, manifest)
+        else:
+            lock_document["classification_review"] = (lock or {}).get("classification_review")
         lock_path.write_text(
             json.dumps(lock_document, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -1043,6 +1055,8 @@ def main(argv):
         baseline_manifest = {} if result["mode"] == "bootstrap" else manifest
         candidate = apply_candidate_mapping(refresh_candidate_evidence(build_candidate(derived, scan, baseline_manifest, candidate_lock), result), mapping)
         if opts.get("render_candidate"):
+            classification_document = analysis_storage.load(cache / "privacy-datamap.analysis.json") or {}
+            candidate = field_review.project_candidate(classification_document, candidate, derived=derived, repo=repo)
             sys.stdout.write(to_yaml(candidate))
             return 0
         binding = analysis_binding(repo, manifest_path, result)
@@ -1098,6 +1112,7 @@ def main(argv):
                 proposal_document["relationship_proposal"] = mapping["proposal"]
             if mapping.get("structural_proposal"):
                 proposal_document["structural_proposal"] = mapping["structural_proposal"]
+        field_review.build_contract(proposal_document, repo, derived=derived)
         analysis_storage.save(proposals_path, proposal_document)
         result.update(
             {

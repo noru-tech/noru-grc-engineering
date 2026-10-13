@@ -12,10 +12,9 @@ Read the persistent structures a repository actually establishes, classify the p
 Fideslang taxonomy, and land the data map in Noru — with a citation for every field and a named
 owner for every judgement.
 
-This cannot happen server-side. A data map is built from the schema as it exists in the code: the
-current model on a branch or the protobuf nobody exported. An
-API key can read a production database and see the columns that survived; it cannot see the ones
-arriving next week, and it cannot see the line of code that put them there.
+Build the map from current declarative schemas, models and payload contracts, and trace the code
+that writes and uses their fields. Migration history never supplies classified fields. Repository
+evidence establishes intended structure and processing; it does not prove deployed database state.
 
 ## The three commands
 
@@ -34,9 +33,8 @@ This is the shape of the work, and getting it wrong is the failure mode.
 The collector reads **structure**: that a column named `email` exists at `db/schema.sql:12` is a
 parse, and it carries the `file:line` to prove it. A file is evidence, not automatically a dataset:
 the collector normalizes SQL, Drizzle, Prisma and Python ORM observations into logical datastore
-boundaries before it writes the review manifest. It also classifies the field names it can resolve
-by **exact lookup** against a bundled table — `email`, `password_hash`, `last_login_ip`. That is a
-lookup, not an inference, which is what lets the collector be deterministic.
+boundaries before it writes the review manifest. Names supply candidate categories only; they never establish meaning. All new fields enter
+the canonical evidence review, including apparent identifiers and operational metadata.
 
 The derived facts and accepted lock retain every observed field. New fields stay verbose while the
 collection is under review. After acceptance, categorized fields use full `fields` entries while
@@ -67,23 +65,27 @@ Finish the preview queue's enrichment and resolve discovered boundary errors bef
 ## Reconcile before you reason
 
 After every collector run, run `scripts/reconcile.py --repo=<repo> --output=json`. The reconciler,
-not the agent, decides what needs semantic analysis:
+not the agent, determines the structural comparison:
 
 - `carry_forward` — preserve the accepted classification. Never reinterpret it.
 - `refresh_evidence` — update the citation only. Never invoke a model for line movement.
 - `identity_migration` — preserve the accepted classification under a unique, evidence-supported
   logical identity. Do not reinterpret it.
-- an exact-table `add` or `material_change` — the classification is deterministic, although the
-  changed collection still needs a new sign-off.
-- `proposal_required` — and only these entries — are the agent's work queue.
+- `add` or `material_change` — investigate the current field evidence before proposing meaning;
+  the changed collection still needs a new sign-off.
+- `proposal_required` — the structural proposal queue. Canonical classification requests and
+  extraction gaps form an additional mandatory agent queue, even when structural meaning carries forward.
 
 On a first scan the mode is `bootstrap`. A valid manifest created before locks existed is
-`migration` and must seed its first lock without reclassification. Later scans are `maintenance`.
+`migration`. Preserve its accepted meaning while gathering current canonical evidence before
+sealing its first lock. Later scans are `maintenance`. These modes never bypass classification
+freshness: changed source bytes require re-extraction and investigation before new acceptance.
 Agent suggestions live in `.noru/.cache/privacy-datamap.analysis.json`; they are not decisions and
 cannot update the accepted manifest or lock by themselves. Analyse repository context before asking
 the user, mark each proposal as personal, non-personal, ambiguous or special-category, and present
 the results grouped by dataset and collection. The user can accept or amend a collection group;
-only accepted groups may be patched into the candidate.
+only accepted groups may be patched into the candidate. Field verdicts must use the canonical
+classification decision API; legacy proposals supply presentation and processing context only.
 
 Bootstrap has no accepted semantic baseline. An invalid manifest cannot seed descriptions, systems,
 declarations or references. Generate `.noru/.cache/privacy-datamap.review.md` for the privacy conclusions and human
@@ -168,6 +170,31 @@ A broader manual audit is opt-in: perform one only when the user explicitly requ
 change warrants wider investigation, explain the affected scope and expand only as far as needed to
 resolve that change. Report the scope actually checked; do not claim an exhaustive audit.
 
+Apply the guide's **Field-level classification policy**. Distinguish identifiers, person-linked
+attributes/events and operational metadata in the rationale. Investigate maintenance timestamps
+like every other field: neither a timestamp name nor absence of a collected writer establishes
+non-personal meaning, and person association alone does not establish behavior. Never fill unknown fields using collection-wide `user.account` or `user.behavior` fallbacks.
+Apply the guide’s **Evidence before category selection** investigation as well: establish shape,
+identification basis, category fit and independent security sensitivity. Known personal members
+awaiting nested modeling are unfinished work, not an absence of personal data.
+Reusable policy changes belong in the plugin, not private helper scripts. The deterministic gate
+checks completeness and taxonomy, not the semantic correctness of these judgments.
+
+Follow the scan command's **Canonical classification review** after collection and reconciliation.
+Run `field_review.py --repo=<repo>` to build the versioned contract in the existing analysis cache,
+then `investigate.py --repo=<repo> --limit=24` for bounded evidence requests and decision templates.
+Inspect source meaning, person association, writers, consumers and counterevidence, then apply
+supported decisions with `investigate.py --repo=<repo> --decisions=<file>`. Repeat until agent work
+is resolved. A batch limit never makes remaining code questions a human responsibility.
+Use `field_review.py --repo=<repo> --fresh` only for a requested fresh reassessment, preserving the
+prior draft if comparison is needed. Both modes use the same mandatory recursive gate and artifacts.
+The existing lock holds a compact certificate for unchanged accepted meaning, so deleting ignored
+cache state does not break a clean checkout. It cannot override a present fresh or unfinished review.
+Current classification invalidation conservatively watches the full source inventory; do not claim
+proven selective semantic closure or silently carry a decision across changed code.
+Do not read prior categories as evidence in fresh mode. Never introduce repository classification
+helpers or local instruction overrides; reusable inference and review policy belong in the plugin.
+
 ## Compare observations, not new interpretations
 
 The same repository state and accepted baseline must yield the same structural comparison and
@@ -186,8 +213,10 @@ explicitly. Unregistered code and unsupported semantic normalization remain moni
 that must be reported; never describe a structural-only baseline as complete processing coverage.
 
 Separate structural changes, evidence investigations, coverage gaps and baseline/tooling maintenance.
-Formatting of supported Python/JSON evidence and citation-only moves must not reopen decisions.
-For other languages, text differences are conservative investigation signals. Repeated scans preserve
+Structural reconciliation can normalize formatting and citation-only movement. The canonical
+classification gate still binds exact source bytes and spans: re-extract and investigate changed
+source before validating again, retaining accepted meaning where the new evidence supports it.
+No automatic span-only refresh or selective semantic closure is claimed. Repeated scans preserve
 completed proposal work only while its source snapshot, baseline and taxonomy binding match.
 
 ## Keep the review focused on meaningful decisions
@@ -373,3 +402,25 @@ system proposal. For each covered store finding, record `structure_rationale` ex
 boundary and the nested paths checked against evidence. Missing records block readiness. These checks
 establish recorded investigation, not the truth of prose or exhaustive discovery. Resolve material
 questions before adoption; never clear flags just to make an export validate.
+
+### Evidence dimensions required for field decisions
+
+The investigation API supplies a `semantic_review` template. Complete each dimension with a
+`finding` and current `evidence_ids`: producers/consumers, association/identifier uses,
+taxonomy/uncertainty, security/transformations, behavior/scope, and counterevidence/gaps.
+These records are required for submitted decisions, including requests for business context.
+Record absent code and its impact explicitly; an empty checklist or a name match is insufficient.
+The gate checks recorded completeness and consistency, not whether the reasoning is correct.
+
+Assess modeled semantics consistently across mocks, fixtures and production code. Separately state
+which storage, transmission and runtime operations are implemented, simulated or absent. A constant,
+no-op writer or discarded record does not selectively remove the personal meaning of one field.
+Record IDs require investigation of lookup, correlation and attribution, not automatic user-ID or
+metadata treatment. Preserve known personal association when only taxonomy fit is unresolved.
+
+For each purpose, trace its own categories, datastore access and recipients. Keep logical modules,
+logical stores, deployed systems and external recipients distinct; establish bindings from client
+construction/configuration and actual transfers. A directory or neighboring user ID proves neither
+boundary nor meaning. Maintenance retains supported accepted decisions and investigates relevant
+changes. Fresh assessment excludes earlier classifications as evidence; compare only afterward.
+Human acceptance records a decision; it cannot supply missing facts or close an extraction gap.

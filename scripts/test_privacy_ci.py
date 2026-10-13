@@ -13,7 +13,7 @@ class PrivacyGateTests(unittest.TestCase):
     def validate(self, fixture, date='2026-08-21'):
         return run_json([sys.executable, str(PACKAGE / 'scripts/validate_manifest.py'),
                         str(PACKAGE / 'fixtures' / fixture),
-                        '--output=json', '--as-of=' + date], Path.cwd(), (0, 1))
+                        '--output=json', '--schema-only', '--as-of=' + date], Path.cwd(), (0, 1))
 
     def test_pinned_validator_accepts_reviewed_fixture(self):
         status, report = self.validate('valid.privacy-datamap.yml')
@@ -114,6 +114,8 @@ class EndToEndGateTests(unittest.TestCase):
             manifest['evidence_dependencies'] = [dep]
             path.write_text(yaml.safe_dump(manifest, sort_keys=False))
             git('add', '.noru/privacy-datamap.yml')
+            from test_collectors import seed_fixture_classification
+            seed_fixture_classification(repo, manifest=manifest)
             run_json([sys.executable, str(scripts/'reconcile.py'), f'--repo={repo}', '--seal', '--output=json'], repo)
             parsed = repo/'.noru/.cache/privacy-datamap.parsed.json'
             run_json([sys.executable, str(scripts/'validate_manifest.py'), str(path), '--output=json', f'--emit-parsed={parsed}'], repo)
@@ -136,11 +138,15 @@ class EndToEndGateTests(unittest.TestCase):
             (repo/'schema.sql').write_text('CREATE TABLE users (\n    email TEXT NOT NULL,\n    phone_number TEXT\n);\n')
             self.assertTrue(any('SCHEMA_' in f for f in check(repo)))
             (repo/'schema.sql').write_text('CREATE TABLE users (\n    email TEXT NOT NULL\n);\n')
+            run_json(['node', str(scripts/'collect.mjs'), f'--repo={repo}', '--output=json'], repo)
+            run_json([sys.executable, str(scripts/'reconcile.py'), f'--repo={repo}', '--output=json'], repo)
+            seed_fixture_classification(repo, manifest=yaml.safe_load(original_manifest))
             export = repo/'.fides/datamap.yml'
             value = yaml.safe_load(export.read_text())
             value['dataset'][0]['name'] = 'Unreviewed export edit'
             export.write_text(yaml.safe_dump(value))
-            self.assertTrue(any('EXPORT_MISMATCH' in f for f in check(repo)))
+            failures = check(repo)
+            self.assertTrue(any('EXPORT_MISMATCH' in f for f in failures), failures)
 
 import io
 import json

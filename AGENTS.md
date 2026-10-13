@@ -5,8 +5,10 @@ a script. The three that bite most often:
 
 - **Everything here is public.** No private Noru paths, behaviour, analysis or plans — only what a
   customer can already read in the published API and MCP documentation.
-- **Stdlib and built-ins only.** No `npm install`, no `pip install`, no network in `:scan` or
-  validation. If a change needs a dependency, the change is wrong.
+- **Offline and install-free.** Runtime uses standard libraries and built-ins, with one explicit
+  exception: the privacy plugin bundles a pinned TypeScript compiler for static analysis. Verify
+  its integrity and license; never load a target repository compiler or execute its configuration.
+  No `npm install`, no `pip install`, no network in `:scan` or validation.
 - **Every claim gets a test.** An invariant in a comment, README or PR description ships with the
   check that asserts it.
 

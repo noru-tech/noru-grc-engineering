@@ -312,7 +312,8 @@ def test_json_output(results):
         name = piece.name
 
         valid = piece / decl["validator"]["fixtures"]["valid"][0]
-        result = run(["python3", str(validator), str(valid), "--output=json", "--quiet"])
+        fixture_flags = ["--schema-only"] if name == "privacy-datamap" else []
+        result = run(["python3", str(validator), str(valid), "--output=json", "--quiet", *fixture_flags])
         try:
             payload = json.loads(result.stdout)
             ok = payload.get("ok") is True and result.returncode == 0
@@ -350,18 +351,23 @@ def test_fixtures_match_schema(results):
             fixture = piece / rel
             with tempfile.TemporaryDirectory() as tmp:
                 parsed_path = pathlib.Path(tmp) / "parsed.json"
-                result = run(
-                    ["python3", str(validator), str(fixture), f"--emit-parsed={parsed_path}",
-                     "--quiet"]
-                )
-                if result.returncode != 0 or not parsed_path.is_file():
+                # Static privacy fixtures prove schema/vocabulary validity only. Real export
+                # requires current repository evidence, exercised in the classification suites.
+                schema_only = piece.name == "privacy-datamap"
+                output_flags = ["--schema-only"] if schema_only else [f"--emit-parsed={parsed_path}"]
+                result = run(["python3", str(validator), str(fixture), *output_flags, "--quiet"])
+                if result.returncode != 0 or (not schema_only and not parsed_path.is_file()):
                     results.check(
                         f"[{piece.name}] {rel} parses and validates",
                         False,
                         result.stdout.strip()[:300],
                     )
                     continue
-                doc = json.loads(parsed_path.read_text(encoding="utf-8"))
+                if schema_only:
+                    loader = load_module(ROOT / "contract/lib/yaml_mini.py", "schema_fixture_loader")
+                    doc, _ = loader.load_yaml(fixture.read_text(encoding="utf-8"))
+                else:
+                    doc = json.loads(parsed_path.read_text(encoding="utf-8"))
             errors = validate(doc, schema, schema)
             results.check(
                 f"[{piece.name}] {rel} satisfies {schema_rel}",

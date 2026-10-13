@@ -1,0 +1,16 @@
+CREATE TABLE subscriptions (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  opaque TEXT,
+  payload JSONB
+);
+CREATE TABLE build_artifacts (
+  id TEXT PRIMARY KEY,
+  fingerprint TEXT NOT NULL,
+  race INTEGER,
+  email BOOLEAN,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

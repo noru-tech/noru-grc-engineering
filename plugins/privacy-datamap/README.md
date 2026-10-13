@@ -12,12 +12,11 @@
 | `/privacy-datamap:diff` | no | Reads current state, prints the exact plan |
 | `/privacy-datamap:push` | **yes** | Executes the confirmed plan |
 
-`scan` now has two deterministic local phases. `collect.mjs` observes the repository; then
-`reconcile.py` compares those observations with the last accepted lock. The reconciler emits the
-small set of new or materially changed ambiguous fields that need agent analysis. It never calls a
-model itself, and unchanged fields are never reclassified. The agent inspects repository context,
-groups proposals by collection, and asks the user only about genuine ambiguities, amendments and
-the accountable owner rather than handing over the raw structural inventory.
+`scan` collects current structure, reconciles it with the accepted baseline, builds compiler-backed
+evidence, and directs the agent through contextual classification. One canonical review contract
+inside the existing analysis cache records the evidence and decisions. Names supply investigation
+hints; they never classify a field automatically. The agent resolves code questions before asking
+for business context or accountable acceptance.
 
 ## What it reads
 
@@ -177,17 +176,18 @@ is `git` or `walk`, and the scan summary says so in words. Same files either way
 This split is the whole design, and it is what lets a collector be deterministic (contract
 requirement 2) while the interesting part of the work is a judgement.
 
-**The collector stands behind** the structure: that a column named `email` exists at
-`db/schema.sql:12` is a parse, not an opinion, and it carries the `file:line` to prove it. It also
-classifies the field names it can resolve by **exact lookup** against
-[`references/classification.json`](./references/classification.json) — a table, not an inference. A
-name only belongs in that table when it means the same thing in every schema it appears in.
+**The collector stands behind** structural observations. A declaration receives a source citation;
+[`references/classification.json`](./references/classification.json) supplies optional category hints.
+Every new or materially changed field remains `needs_review` until contextual investigation supports
+a decision and a person accepts it.
 
-**A person stands behind** everything else, and the collector marks it rather than guessing:
+**The plugin investigates** value meaning, natural-person association, security sensitivity and the
+most specific supported taxonomy category. It retains typed facts, source spans, fingerprints,
+counterevidence and unresolved work in the existing analysis cache. Nested members are reviewed
+recursively. A parent cannot hide an unresolved child or dynamic branch.
 
-- a field name the table does not know → `needs_review: true`
-- what each system uses the data *for* — `data_use`, `data_subjects`, the purpose → `needs_review: true`
-- the `interpretation` block on each collection and each declaration: who decided, when, until when, why
+**A person accepts** the grouped privacy conclusions, processing purposes, subjects and interpretation
+blocks. Machine work left by an analysis budget remains agent work, not a request to classify code.
 
 A manifest carrying any `needs_review: true` **cannot be pushed**. That is the mechanism, not a
 lint: a confidently wrong data category is worse than a gap, because the gap gets reviewed and the
@@ -205,10 +205,12 @@ fallback. TypeScript fingerprints use a bundled supported-grammar parser; unsupp
 explicit evidence gap. They preserve types, literal values, calls and conditions while ignoring
 comments, layout and optional trailing commas. Imports/helpers/configuration remain explicit dependencies.
 
-Proposal caches now carry per-target `evidence_state` and an `evidence_dependencies` registry. An
-unrelated README edit preserves analysis; changed serializer or connection evidence flags only its
-dependent fields, activities and relationships. Unique source moves refresh citations; missing or
-ambiguous dependencies remain unresolved. Superseded structural analysis is retained separately.
+Proposal caches carry per-target `evidence_state` and an `evidence_dependencies` registry for structural
+and processing reconciliation. The canonical classification contract currently binds the complete
+current source inventory conservatively: a code/configuration change requires re-extraction and
+investigation, even if the structural delta is small. Unrelated Markdown changes do not invalidate
+it. Do not claim selective semantic dependency closure beyond what the extracted facts establish.
+Superseded structural analysis is retained separately.
 
 Broad code/configuration discovery continues outside those dependencies. New files and unregistered
 declarations enter `discovery_required`; existing analysis stays intact. Evidence-backed discovery
@@ -216,8 +218,8 @@ answers are required before sealing a new baseline, and unreviewed new scope blo
 scan command's “Scoped analysis and broad discovery” for cache targets, supported syntax and answers.
 
 The first completed review is sealed in `.noru/privacy-datamap.lock.json`. The lock contains stable
-field identities, normalized structural fingerprints and citations. It contains no classifications
-or model output: accepted meaning stays in `.noru/privacy-datamap.yml`.
+field identities, normalized structural fingerprints and citations. It includes a compact accepted-meaning snapshot for semantic comparison; the authoritative
+accepted map stays in `.noru/privacy-datamap.yml`.
 
 On later scans `scripts/reconcile.py` compares every current field with that observation:
 
@@ -225,8 +227,7 @@ On later scans `scripts/reconcile.py` compares every current field with that obs
 |---|---|
 | same semantic fingerprint and citation | carry the accepted decision forward |
 | same fingerprint, different line | refresh evidence; no agent |
-| new or structurally changed exact-table field | classify deterministically; re-sign the collection |
-| new or structurally changed ambiguous field | add only that field to the agent proposal queue |
+| new or structurally changed field | investigate source meaning, linkage and category fit; re-sign the collection |
 | removed field | remove it from the candidate; re-sign the collection |
 | unique logical-identity migration | carry the decision forward under the new datastore key |
 
@@ -306,11 +307,12 @@ deterministic and the staleness check happens where it belongs, in CI or before 
 
 ## Accuracy
 
-The validator guarantees every key it emits is a **real** Fideslang key. It cannot guarantee the
-judgement is **right**. Exact-name classifications are deterministic table lookups; classifications
-proposed for ambiguous names may use agent inference over the repository context. Review those
-proposals and spot-check the deterministic matches before treating the output as authoritative.
-This accelerates a data map. It does not replace accountable privacy sign-off.
+The validator checks taxonomy membership, recursive evidence completeness and freshness. It cannot
+prove arbitrary business meaning from prose. Compiler facts and constrained decisions make the
+review reproducible, while unresolved identities, transformations, dynamic content and unsupported
+languages stay visible. Static extraction, agent-assisted classification and human acceptance are
+separate steps. Synthetic application fixtures report classification accuracy, false exclusions,
+coverage and unresolved work separately; a small resolved subset is not overall accuracy.
 
 ## Scopes
 
@@ -501,6 +503,64 @@ boundary reasoning for covered stores. The core workflow also requires checking 
 transient flows, identity continuity and separation of approval provenance from descriptions.
 These are agent review obligations; the validator checks missing records, not whether an explanation
 proves deployed behavior. Missing deployed evidence must remain visible.
+
+
+### Canonical classification and fresh reassessment
+
+After collection and reconciliation, run:
+
+```bash
+python3 scripts/field_review.py --repo=<repo>
+python3 scripts/investigate.py --repo=<repo> --limit=24
+```
+
+The first command builds `classification_review` inside
+`.noru/.cache/privacy-datamap.analysis.json`. The second prints bounded agent work and decision
+templates on stdout. Investigate the cited facts and alternative writers, then submit a JSON list
+with `investigate.py --repo=<repo> --decisions=<file>` (a temporary file outside the scanned repo,
+or `--decisions=-` for stdin). Continue until the agent queue is complete.
+These decisions remain proposals; they do not accept a manifest. Extraction gaps remain in the same
+contract; evidence-backed resolutions use `investigate.py --repo=<repo> --gaps=<file>`. Each records
+the gap identity, investigation, source evidence and rationale. A resolved coverage gap records the
+supported scope or exclusion; it never claims that unsupported syntax was parsed.
+
+Use `field_review.py --repo=<repo> --fresh` to ignore prior field classifications during inference.
+Structural topology and evidenced supplemental definitions remain in scope. It uses the same
+canonical model and gate, with no second report that can be deleted to bypass review. Preserve any
+prior draft needed for comparison before explicitly requesting fresh mode.
+
+The existing artifact layout is unchanged: manifest and lock in `.noru/`, analysis and review in
+`.noru/.cache/`, accepted Fides export in `.fides/`. The analysis cache gains versioned evidence,
+facts, recursive field decisions and engine/taxonomy/source bindings. No repository instruction,
+classification script or special correction file is required. Existing accepted artifacts are not
+rewritten by evidence extraction. Readiness, validation, sealing and export use the same mandatory
+gate. The accepted lock gains a compact classification certificate. A clean checkout without the
+ignored cache can validate its accepted map only when source, policy, structure and manifest bindings
+all match that sealed certificate. A stale certificate requires investigation; a present fresh or
+unfinished contract cannot be bypassed by the old certificate.
+
+The TypeScript adapter uses a pinned bundled compiler with an offline, constrained host. It reads
+configuration as data, resolves supported in-repository imports/types and bounded source lineage,
+and never runs target code, configuration, builds or compiler plugins. Unsupported constructs,
+open content and exhausted traversal budgets are coverage gaps. Other schema formats retain their
+structural parsers and require agent investigation of unsupported semantic flows.
+
+When compiler extraction leaves an opaque container, agent investigation can supply source-bound
+shape evidence with `investigate.py --repo=<repo> --shapes=<file>`. Each entry identifies the current
+field and observation digest, explains the inspected contract, cites current source lines, and
+describes its type and nested members. This adds structural facts, never personal-data verdicts.
+Existing observed members are retained; changed shapes require new field decisions. The normal
+cache and accepted lock retain this evidence. Fresh reassessment discards prior shape judgments.
+
+### Separate semantic evidence from acceptance
+
+Field decisions submitted through the investigation API require six cited `semantic_review`
+findings covering producers/consumers, identity and correlation, taxonomy uncertainty, security
+and transformations, behavior and execution scope, and counterevidence or missing facts.
+Maintenance timestamps enter investigation without an automatic non-personal classification.
+A known natural-person association cannot be submitted as non-personal or unknown simply because
+its category is unresolved. The review still preserves separately assessed nested members.
+These gates check evidence-record completeness and consistency; they do not prove semantic truth.
 
 ## Portable CI checks and publication
 

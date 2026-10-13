@@ -60,10 +60,13 @@ Ask instead of guessing — an unanswered question is cheaper than a public leak
 
 ## Ground rules
 
-- **Atomic.** Runtime code uses Node built-ins for `.mjs` and the Python 3 standard library for
-  `.py`. No `npm install`, no `pip install`, no vendored third-party package, no network during
-  `:scan` or validation. PyYAML may be used opportunistically, but the bundled fallback loader must
-  keep working without it. If CI ever needs an install step, something has broken this promise.
+- **Atomic and offline.** Runtime uses Node built-ins and the Python 3 standard library, with
+  one explicit exception: the privacy plugin bundles a pinned TypeScript compiler for static
+  source analysis. Keep its upstream license, source provenance and integrity checks with the
+  bundle. Do not load a target repository compiler, compiler plugin, executable configuration or
+  application code. No `npm install`, no `pip install`, no network during `:scan` or validation.
+  Other third-party runtime dependencies remain excluded. PyYAML may be used opportunistically,
+  but the bundled fallback loader must keep working without it. CI needs no install step.
 - **No framework catalogue.** No control text, no guidance, no evidence-item list, ever. Licensing
   and drift, and the contract test enforces it.
 - **No credentials.** Never commit an API key, a bearer token, a customer identifier, a generated
@@ -111,7 +114,7 @@ Before opening a pull request:
 python3 scripts/check_repo.py          # marketplaces, schema/vocabulary sync, secret hygiene
 python3 scripts/check_vendored_lib.py  # vendored blocks are byte-identical
 python3 scripts/test_validators.py     # schema fixtures + validator unit tests
-python3 scripts/test_collectors.py     # collectors detect what the pieces claim they detect
+python3 scripts/test_collectors.py     # collectors, compiler evidence and privacy classification suites
 python3 scripts/test_idempotency.py    # a second push is a no-op
 python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
 python3 scripts/test_privacy_ci.py     # provider-neutral privacy gate and REST publisher
