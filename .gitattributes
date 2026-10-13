@@ -1,0 +1,2 @@
+# Preserve upstream compiler bytes verified by test_typescript_evidence.py.
+plugins/privacy-datamap/scripts/vendor/typescript/** -text -whitespace

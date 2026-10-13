@@ -160,7 +160,7 @@ def candidate_mapping(repo):
     import analysis_cache
     repo = pathlib.Path(repo).resolve()
     path = repo / ".noru" / ".cache" / "privacy-datamap.analysis.json"
-    document = analysis_storage.load(path)
+    document = analysis_storage.load(path) or {}
     proposal = document.get("relationship_proposal") if isinstance(document, dict) else None
     structural = document.get("structural_proposal")
     errors = validate_proposal(proposal, repo) if proposal is not None or not structural else []

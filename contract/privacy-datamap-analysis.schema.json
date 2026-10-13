@@ -494,6 +494,9 @@
           }
         }
       }
+    },
+    "classification_review": {
+      "$ref": "#/$defs/classification_review"
     }
   },
   "$defs": {
@@ -962,6 +965,333 @@
         },
         "decision_impact": {
           "type": "string"
+        }
+      }
+    },
+    "classification_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "policy",
+        "mode",
+        "binding",
+        "fields",
+        "facts",
+        "evidence",
+        "gaps",
+        "inventory_digest"
+      ],
+      "properties": {
+        "version": {
+          "const": 2
+        },
+        "policy": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "fresh",
+            "incremental"
+          ]
+        },
+        "prior_field_decisions_used": {
+          "type": "boolean"
+        },
+        "adapter": {
+          "type": "object"
+        },
+        "binding": {
+          "type": "object"
+        },
+        "inventory_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "facts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/classification_field"
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "counts": {
+          "type": "object"
+        },
+        "migration_exclusions": {
+          "type": "object",
+          "properties": {
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "roots": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "support_paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "shape_observations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "entity_id",
+              "base_observation_digest",
+              "rationale",
+              "structure",
+              "binding"
+            ],
+            "properties": {
+              "entity_id": {
+                "type": "string"
+              },
+              "base_observation_digest": {
+                "type": "string"
+              },
+              "rationale": {
+                "type": "string"
+              },
+              "structure": {
+                "type": "object"
+              },
+              "binding": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "accepted_certificate": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "classification_field": {
+      "type": "object",
+      "required": [
+        "entity_id",
+        "observation_digest",
+        "name",
+        "personal_data",
+        "categories",
+        "person_association",
+        "meaning",
+        "evidence_ids",
+        "supporting_fact_ids",
+        "nested_members",
+        "status",
+        "uncertainty",
+        "resolution_owner"
+      ],
+      "properties": {
+        "entity_id": {
+          "type": "string"
+        },
+        "observation_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "name": {
+          "type": "string"
+        },
+        "personal_data": {
+          "enum": [
+            "yes",
+            "no",
+            "mixed",
+            "unknown"
+          ]
+        },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "person_association": {
+          "type": "object"
+        },
+        "meaning": {
+          "type": "string"
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supporting_fact_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "nested_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/classification_field"
+          }
+        },
+        "status": {
+          "enum": [
+            "proposed",
+            "needs_investigation"
+          ]
+        },
+        "uncertainty": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolution_owner": {
+          "enum": [
+            "agent",
+            "human",
+            null
+          ]
+        },
+        "semantic_review": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "producers_and_consumers": {
+              "type": "object",
+              "required": [
+                "finding",
+                "evidence_ids"
+              ],
+              "properties": {
+                "finding": {
+                  "type": "string"
+                },
+                "evidence_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "association_and_identifiers": {
+              "type": "object",
+              "required": [
+                "finding",
+                "evidence_ids"
+              ],
+              "properties": {
+                "finding": {
+                  "type": "string"
+                },
+                "evidence_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "taxonomy_and_uncertainty": {
+              "type": "object",
+              "required": [
+                "finding",
+                "evidence_ids"
+              ],
+              "properties": {
+                "finding": {
+                  "type": "string"
+                },
+                "evidence_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "security_and_transformations": {
+              "type": "object",
+              "required": [
+                "finding",
+                "evidence_ids"
+              ],
+              "properties": {
+                "finding": {
+                  "type": "string"
+                },
+                "evidence_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "behavior_and_scope": {
+              "type": "object",
+              "required": [
+                "finding",
+                "evidence_ids"
+              ],
+              "properties": {
+                "finding": {
+                  "type": "string"
+                },
+                "evidence_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "counterevidence_and_gaps": {
+              "type": "object",
+              "required": [
+                "finding",
+                "evidence_ids"
+              ],
+              "properties": {
+                "finding": {
+                  "type": "string"
+                },
+                "evidence_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }

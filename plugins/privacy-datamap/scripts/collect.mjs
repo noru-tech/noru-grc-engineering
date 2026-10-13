@@ -17,6 +17,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from "node:p
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { toFideslang } from "./lib/fides.mjs";
+import { extractRepository } from "./typescript_evidence.mjs";
 
 export const PIECE = "privacy-datamap";
 export const VERSION = "0.11.0";
@@ -610,7 +611,7 @@ const UNPARSED_MARKERS = [
 // earns its place when it means "a stored record is defined here", not merely "a shape is
 // described here".
 
-function findUnparsedCandidates(repo, files, parsedFiles) {
+function findUnparsedCandidates(repo, files, parsedFiles, compilerFiles = new Set()) {
   const out = [];
   for (const rel of files) {
     const applicable = UNPARSED_MARKERS.filter((marker) =>
@@ -628,6 +629,7 @@ function findUnparsedCandidates(repo, files, parsedFiles) {
     }
     for (const { format, marker } of applicable) {
       if (format === "drizzle") {
+        if (compilerFiles.has(rel)) continue;
         const calls = findDrizzleCalls(text);
         if (calls.length === 0) continue;
         const report = parseDrizzleWithCoverage(text);
@@ -650,8 +652,7 @@ function findUnparsedCandidates(repo, files, parsedFiles) {
 }
 
 // --------------------------------------------------------------------------------------------- //
-// Classification. The only judgement the collector makes is "this name means the same thing in
-// every schema it appears in", and it makes it by lookup, not inference. Everything else is raised.
+// Names suggest investigation candidates; only evidence-backed decisions classify fields.
 
 export function normalizeFieldName(name) {
   return String(name)
@@ -661,23 +662,26 @@ export function normalizeFieldName(name) {
     .replace(/^_+|_+$/g, "");
 }
 
-export function classifyField(name, table) {
+export function classifyField(name, table, shape = "") {
+  // Container names cannot establish the meaning of their members. This is a conservative
+  // syntax guard, not a complete type resolver or a claim that the container is non-personal.
+  if (/\b(?:jsonb?|object|record|array|list|dict|map)\b|^\s*\{|\$type\s*<\s*\{|\[\]/i.test(shape)) {
+    return { data_categories: [], needs_review: true,
+      reason: "composite or array shape requires member-level evidence before classification" };
+  }
   const key = normalizeFieldName(name);
   const hit = table.exact[key];
-  if (hit) {
-    return {
-      data_categories: [hit],
-      needs_review: false,
-      matched_on: key,
-      special_category: table.special_categories.includes(hit),
-    };
-  }
-  if (table.operational.includes(key)) {
-    return { data_categories: [], needs_review: false, operational: true };
-  }
-  return { data_categories: [], needs_review: true, reason: table.maybe_pii.includes(key)
-    ? "the name looks personal but its category depends on what this table is for"
-    : "no exact match in the bundled classification table" };
+  return {
+    data_categories: [],
+    needs_review: true,
+    ...(hit ? { suggested_categories: [hit], matched_on: key,
+      special_category: table.special_categories.includes(hit) } : {}),
+    ...(table.operational.includes(key) ? { operational_hint: true } : {}),
+    reason: hit ? "name suggests a category; establish value meaning and person linkage from source"
+      : table.operational.includes(key) ? "possible operational metadata; verify shape and contrary event use"
+      : table.maybe_pii.includes(key) ? "context-dependent name; investigate actual values and use"
+      : "value meaning requires evidence-backed investigation",
+  };
 }
 
 export function fidesKeyFor(path) {
@@ -1008,13 +1012,20 @@ function refsFor(rel, item) {
   return [`${rel}:${item.line}`];
 }
 
+function safeSchemaShape(name, shape) {
+  if (!/(?:password|token|secret|credential|private_?key|api_?key|verifier)/i.test(name)) return shape;
+  // Values in credential defaults are unnecessary for structural review. Keep only their type
+  // and a citation to source; redaction is independent of personal-data classification.
+  return shape.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g, '"<redacted>"');
+}
+
 function cloneCollections(collections, rel) {
   return collections.map((collection) => ({
     name: collection.name,
     refs: refsFor(rel, collection),
     fields: collection.fields.map((field) => ({
       name: field.name,
-      shape: field.shape ?? "",
+      shape: safeSchemaShape(field.name, field.shape ?? ""),
       refs: refsFor(rel, field),
     })),
   }));
@@ -1049,7 +1060,7 @@ function normalizedDataset(boundary, collections, sourceKinds, explicitKey = nul
     .sort((a, b) => BY_PATH(a.name, b.name))
     .map((collection) => {
       const fields = collection.fields.sort((a, b) => BY_PATH(a.name, b.name)).map((field) => {
-        const verdict = classifyField(field.name, TABLE);
+        const verdict = classifyField(field.name, TABLE, field.shape ?? "");
         fieldCount += 1;
         if (verdict.needs_review) needsReview += 1;
         else if (verdict.data_categories.length > 0) classified += 1;
@@ -1220,9 +1231,16 @@ export function collectFacts(repo, { candidate = false } = {}) {
   const listing = listFiles(repo);
   const inputs = JSON.parse(execFileSync("python3", [join(HERE, "dataset_inputs.py"), `--repo=${repo}`, ...(candidate ? ["--candidate"] : [])], {encoding: "utf8"}));
   const supplementalDatasets = inputs.datasets;
-  const excludedNonRuntime = listing.files.filter(isNonRuntimePath);
-  const productionFiles = listing.files.filter((path) => !isNonRuntimePath(path));
-  const drizzleTopology = discoverDrizzleTopology(repo, productionFiles);
+  const manifestPath = join(repo, ".noru", "privacy-datamap.yml");
+  const relationships = candidate
+    ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), "--candidate", repo], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }))
+    : existsSync(manifestPath)
+    ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), manifestPath], { encoding: "utf8" }))
+    : { bindings: {}, flows: {}, questions: [], errors: [] };
+  const drizzleTopology = discoverDrizzleTopology(repo, listing.files);
+  const productionFiles = listing.files.filter((path) => !isNonRuntimePath(path)
+    || relationships.bindings[path] || drizzleTopology.byPath.get(path)?.role === "canonical");
+  const excludedNonRuntime = listing.files.filter((path) => !productionFiles.includes(path));
   const migrationSupport = readMigrationSupport(repo, productionFiles);
   const excludedMigrations = migrationPaths(repo, productionFiles, drizzleTopology, migrationSupport);
   const excludedPaths = new Set(excludedMigrations);
@@ -1230,12 +1248,27 @@ export function collectFacts(repo, { candidate = false } = {}) {
   const enumeratedBy = listing.enumeratedBy;
   const discovery = JSON.parse(execFileSync("python3", [join(HERE, "dependencies.py"), "--discover", `--repo=${repo}`],
     { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
-  const manifestPath = join(repo, ".noru", "privacy-datamap.yml");
-  const relationships = candidate
-    ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), "--candidate", repo], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }))
-    : existsSync(manifestPath)
-    ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), manifestPath], { encoding: "utf8" }))
-    : { bindings: {}, flows: {}, questions: [], errors: [] };
+  // The compiler resolves imported constructors, aliases and static object composition. The
+  // legacy parser remains a structural fallback for declarations without an import binding.
+  const compilerTables = new Map();
+  const compilerReport = files.some((path) => /\.[cm]?[jt]sx?$/.test(path)) ? extractRepository(repo, {
+    files,
+    includeTests: files.filter((path) => relationships.bindings[path] || drizzleTopology.byPath.get(path)?.role === "canonical"),
+    excludedPaths: excludedMigrations,
+    structureOnly: true,
+  }) : { tables: [], gaps: [] };
+  for (const table of compilerReport.tables) {
+    const path = table.source.path;
+    if (!compilerTables.has(path)) compilerTables.set(path, []);
+    compilerTables.get(path).push({ name: table.name, line: table.source.start_line,
+      fields: table.fields.map((field) => ({ name: field.name, line: field.source.start_line,
+        shape: normalizeShape(field.shape) })) });
+  }
+  const compilerUnboundFiles = new Set(compilerReport.gaps.filter((gap) => gap.kind === "unresolved_schema_constructor").flatMap((gap) => gap.evidence.map((span) => span.path)));
+  const compilerStructuralKinds = new Set(["dynamic_table", "dynamic_spread", "dynamic_key", "object_member", "column_builder", "empty_table", "migration_configuration", "syntax", "source_boundary", "source_size", "schema_wrapper"]);
+  const compilerGaps = compilerReport.gaps.filter((gap) => compilerStructuralKinds.has(gap.kind)).map((gap) => ({
+    format: "drizzle", ref: `${gap.evidence[0]?.path ?? "."}:${gap.evidence[0]?.start_line ?? 1}`, reason: gap.message,
+  }));
   const observations = [];
   const parsedFiles = new Set();
   const parsedByKind = {};
@@ -1245,6 +1278,8 @@ export function collectFacts(repo, { candidate = false } = {}) {
     parsedByKind.drizzle_config = drizzleTopology.parsedConfigs.length;
   }
   for (const rel of files) {
+    // Test-module schema declarations are fixtures unless explicitly bound as a datastore schema.
+    if (NON_RUNTIME_FILE.test(rel) && !relationships.bindings[rel] && !drizzleTopology.byPath.has(rel)) continue;
     const parser = PARSERS.find((candidate) => candidate.match(rel));
     if (!parser) continue;
     const text = safeText(repo, rel);
@@ -1252,8 +1287,8 @@ export function collectFacts(repo, { candidate = false } = {}) {
       sourceReadGaps.push({ format: parser.kind, ref: `${rel}:1`, reason: "Source is unreadable or exceeds the collector size limit." });
       continue;
     }
-    const parsed = parser.parse(text);
     const topology = drizzleTopology.byPath.get(rel);
+    const parsed = compilerTables.get(rel) ?? (parser.kind !== "drizzle" || compilerUnboundFiles.has(rel) ? parser.parse(text) : []);
     if (parsed.length === 0) continue;
     parsedFiles.add(rel);
     parsedByKind[parser.kind] = (parsedByKind[parser.kind] ?? 0) + 1;
@@ -1435,7 +1470,8 @@ export function collectFacts(repo, { candidate = false } = {}) {
       files_parsed: parsedFiles.size,
       parsed_by_kind: Object.fromEntries(Object.entries(parsedByKind).sort()),
       unparsed_candidates: [...new Map([
-        ...findUnparsedCandidates(repo, files, parsedFiles),
+        ...findUnparsedCandidates(repo, files, parsedFiles, new Set((compilerReport.sources ?? []).map((source) => source.path).filter((path) => !compilerUnboundFiles.has(path)))),
+        ...compilerGaps,
         ...drizzleTopology.gaps,
         ...sourceReadGaps,
         ...relationships.errors.map((reason) => ({ format: "relationship_graph", ref: ".noru/privacy-datamap.yml:1", reason })),
@@ -1642,9 +1678,9 @@ export function buildSkeleton(derived, provenance) {
 
 const HEADER = `# .noru/privacy-datamap.yml — generated by ${GENERATED_BY}
 #
-# This is a STARTING POINT, not a data map. The collector found the structure and classified the
-# field names it recognises with certainty; everything it could not resolve is marked
-# needs_review: true, and a manifest carrying one cannot be pushed.
+# This is a STARTING POINT, not an accepted data map. The collector found structure; field
+# names supply investigation hints, not classifications. New fields remain needs_review: true
+# until evidence-backed investigation and accountable acceptance. Unresolved maps cannot be pushed.
 #
 # What a person has to do, and sign for:
 #   * resolve every needs_review field to a data category, or move its name to

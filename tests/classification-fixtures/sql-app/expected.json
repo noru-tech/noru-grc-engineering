@@ -1,0 +1,19 @@
+{
+  "description": "Current SQL declarations with lexical collisions and explicit migration-only historical data.",
+  "fields": {
+    "subscriptions/id": {"personal_data":"unknown","categories":[]},
+    "subscriptions/email": {"personal_data":"unknown","categories":[]},
+    "subscriptions/status": {"personal_data":"unknown","categories":[]},
+    "subscriptions/created_at": {"personal_data":"no","categories":[]},
+    "subscriptions/updated_at": {"personal_data":"no","categories":[]},
+    "subscriptions/opaque": {"personal_data":"unknown","categories":[]},
+    "subscriptions/payload": {"personal_data":"unknown","categories":[]},
+    "build_artifacts/id": {"personal_data":"no","categories":[]},
+    "build_artifacts/fingerprint": {"personal_data":"no","categories":[],"forbidden_categories":["user.biometric.fingerprint"]},
+    "build_artifacts/race": {"personal_data":"no","categories":[],"forbidden_categories":["user.demographic.race_ethnicity"]},
+    "build_artifacts/email": {"personal_data":"no","categories":[],"forbidden_categories":["user.contact.email","user.unique_id"]},
+    "build_artifacts/created_at": {"personal_data":"no","categories":[]}
+  },
+  "nested_members": {},
+  "excluded_collections": ["obsolete_people"]
+}

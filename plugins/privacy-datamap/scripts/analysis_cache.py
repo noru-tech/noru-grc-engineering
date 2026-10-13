@@ -123,7 +123,7 @@ def merge(prior, fresh):
         return fresh
     document = copy.deepcopy(fresh)
     for key in ("decisions", "reasoning_groups", "evidence_dependencies", "evidence_state", "relationship_proposal",
-                "discovery_state", "discovery_proposals", "retired_analysis", "structural_errors", "structural_proposal", "preview"):
+                "discovery_state", "discovery_proposals", "retired_analysis", "structural_errors", "structural_proposal", "preview", "classification_review"):
         if key in prior:
             document[key] = copy.deepcopy(prior[key])
     retired = document.setdefault("retired_analysis", {})
@@ -304,9 +304,18 @@ def semantic_snapshot(manifest, proposals=None):
         for declaration in system.get("privacy_declarations", []):
             own_recipients = list(declaration.get("egress", []))
             snapshot["activities"][key + "/" + str(declaration.get("name", ""))] = activity(declaration, recipients=recipients + own_recipients)
-    for row in (proposals or {}).get("proposals", []):
-        if row.get("proposal_kind") in ("personal", "special_category", "non_personal"):
-            snapshot["fields"][row["entity_id"]] = sorted(set(row.get("proposed_categories", [])))
+    canonical = (proposals or {}).get("classification_review")
+    if canonical:
+        def meanings(rows):
+            for row in rows:
+                if row.get("status") == "proposed":
+                    snapshot["fields"][row["entity_id"]] = sorted(set(row.get("categories", [])))
+                meanings(row.get("nested_members", []))
+        meanings(canonical.get("fields", []))
+    else:
+        for row in (proposals or {}).get("proposals", []):
+            if row.get("proposal_kind") in ("personal", "special_category", "non_personal"):
+                snapshot["fields"][row["entity_id"]] = sorted(set(row.get("proposed_categories", [])))
     for system in (proposals or {}).get("system_proposals", []):
         activities = system.get("processing_activities")
         if not activities:

@@ -911,7 +911,7 @@ def check_observed_structure(rep, doc, derived):
             rep.err("dataset", f"manifest collection '{identity}' is not in the current observation")
             continue
         missing = sorted(observed[identity] - represented[identity])
-        extra = sorted(represented[identity] - observed[identity])
+        extra = sorted(name for name in represented[identity] - observed[identity] if not any(name.startswith(parent + ".") for parent in observed[identity]))
         if missing:
             rep.err(identity, f"observed field(s) missing from fields/non_personal_fields: {', '.join(missing)}")
         if extra:
@@ -992,13 +992,26 @@ def validate(doc, vocab, as_of=None, observed=None, repo=None, allow_discovery_r
                 rep.err("semantic_review", "privacy meaning narrowed: investigate, review and seal the changed baseline before export")
         except (OSError, ValueError, TypeError, KeyError) as error:
             rep.err("semantic_review", f"cannot verify accepted meaning: {error}")
+    if repo is not None:
+        try:
+            import field_review
+            import analysis_storage
+            classification_document = analysis_storage.load(pathlib.Path(repo) / ".noru/.cache/privacy-datamap.analysis.json") or {}
+            classification_observed = observed or field_review.derived_for(classification_document, repo)
+            if classification_observed is None:
+                rep.err("classification_review", "Current classification observations are missing; recollect and investigate before acceptance or export")
+            else:
+                for error in field_review.validate_repository(classification_document, classification_observed, pathlib.Path(repo), require_complete=True, candidate=doc):
+                    rep.err("classification_review", error)
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            rep.err("classification_review", "Cannot verify canonical classification: " + str(error))
     counts["datasets"] = len(doc.get("dataset") or [])
     return rep, counts
 
 
 USAGE = (
     "usage: validate_manifest.py <manifest.yml> [--as-of=YYYY-MM-DD] [--output=json] [--quiet] "
-    "[--emit-parsed=<path.json>]\n"
+    "[--emit-parsed=<path.json> | --schema-only]\n"
 )
 
 
@@ -1006,6 +1019,7 @@ def main(argv):
     output_json = False
     quiet = False
     emit_parsed = None
+    schema_only = False
     as_of = None
     positional = []
     for arg in argv:
@@ -1017,6 +1031,8 @@ def main(argv):
             quiet = True
         elif arg.startswith("--emit-parsed="):
             emit_parsed = arg.split("=", 1)[1]
+        elif arg == "--schema-only":
+            schema_only = True
         elif arg.startswith("--as-of="):
             as_of = parse_date(arg.split("=", 1)[1])
             if as_of is None:
@@ -1034,6 +1050,9 @@ def main(argv):
         else:
             positional.append(arg)
 
+    if schema_only and emit_parsed is not None:
+        sys.stderr.write("error: --schema-only cannot emit exportable parsed output; use repository validation for acceptance/export\n")
+        return 2
     if len(positional) != 1:
         sys.stderr.write(USAGE)
         return 2
@@ -1054,14 +1073,14 @@ def main(argv):
 
     observed = None
     derived_path = path.parent / ".cache" / "privacy-datamap.derived.json"
-    if derived_path.is_file():
+    if not schema_only and derived_path.is_file():
         try:
             observed = json.loads(derived_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             sys.stderr.write(f"error: could not load current derived facts ({exc})\n")
             return 2
 
-    rep, counts = validate(doc, vocab, as_of, observed, path.resolve().parent.parent)
+    rep, counts = validate(doc, vocab, as_of, observed, None if schema_only else path.resolve().parent.parent)
     ok = not rep.errors
 
     if ok and emit_parsed:
@@ -1081,6 +1100,7 @@ def main(argv):
                 {
                     "piece": PIECE,
                     "manifest": str(path),
+                    "scope": "schema_only" if schema_only else "repository_classification",
                     "ok": ok,
                     "loader": loader,
                     "counts": counts,
@@ -1096,6 +1116,8 @@ def main(argv):
 
     if not quiet:
         print(f"(parsed with {loader})")
+        if schema_only:
+            print("Schema-only validation: this does not validate classification or permit acceptance/export.")
         for p, m in rep.warnings:
             print(f"  WARN  {p}: {m}")
     for p, m in rep.errors:

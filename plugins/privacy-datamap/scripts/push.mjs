@@ -18,10 +18,11 @@
 //   1 = no plan, or the plan is stale
 //   2 = usage error, including a missing --confirm
 
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { validateCurrentManifest, planMatchesManifest } from "./diff.mjs";
 import { assertPlanFresh, parseCommonArgs, planPathFor, readPlan, redact } from "./lib/plan.mjs";
 
 const PIECE = "privacy-datamap";
@@ -59,6 +60,13 @@ function main(argv) {
         "  Review the plan first (the piece's :diff command prints it), then re-run with --confirm.\n"
     );
     return 2;
+  }
+
+  const validated = validateCurrentManifest(opts.repo);
+  if (!validated.ok || !planMatchesManifest(plan, validated.manifest)) {
+    rmSync(join(opts.repo, ".noru", ".cache", `${PIECE}.calls.json`), { force: true });
+    process.stderr.write(`error: ${validated.error ?? "planned payload differs from the currently validated manifest; rerun :diff"}\n`);
+    return 1;
   }
 
   const calls = plan.operations

@@ -70,6 +70,18 @@ def run(cmd, env=None):
 def prepare(tmp, piece_name):
     """A throwaway repo with the piece's valid fixture installed as the manifest."""
     repo = pathlib.Path(tmp) / f"{piece_name}-repo"
+    if piece_name == "privacy-datamap":
+        # Idempotency starts after genuine current-source classification, not a historical SQL
+        # fixture copied into a signed manifest without evidence.
+        from test_collectors import SQL_FIXTURE, accepted_datamap_text, datamap_scan, seed_fixture_classification, write_files
+        write_files(repo, {"db/schema.sql": SQL_FIXTURE})
+        summary, _derived = datamap_scan(repo)
+        manifest = repo / ".noru/privacy-datamap.yml"
+        manifest.write_text(accepted_datamap_text(summary["derived_digest"]))
+        seed_fixture_classification(repo)
+        piece = PLUGINS / piece_name
+        decl = json.loads((piece / "piece.json").read_text(encoding="utf-8"))
+        return repo, piece, decl, manifest
     shutil.copytree(FIXTURE_REPO, repo)
     (repo / ".noru" / ".cache").mkdir(parents=True, exist_ok=True)
     piece = PLUGINS / piece_name
@@ -1127,14 +1139,7 @@ def test_loader_independence(results, tmp):
 
     fallback_env = _fallback_only_env(tmp)
     for name in declared_pieces():
-        repo = pathlib.Path(tmp) / f"{name}-loader-repo"
-        shutil.copytree(FIXTURE_REPO, repo)
-        (repo / ".noru" / ".cache").mkdir(parents=True, exist_ok=True)
-        piece = PLUGINS / name
-        decl = json.loads((piece / "piece.json").read_text(encoding="utf-8"))
-        manifest = repo / decl["artifact"]
-        manifest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(piece / decl["validator"]["fixtures"]["valid"][0], manifest)
+        repo, piece, _decl, manifest = prepare(pathlib.Path(tmp) / "loader-parity", name)
         empty_org = {"fetched_at": "2026-08-27T09:14:00Z", "evidence": [], "security_findings": []}
         write_state(repo, empty_org)
 

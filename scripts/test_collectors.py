@@ -37,6 +37,7 @@ import re
 import shutil
 import subprocess
 import sys
+from privacy_semantic_test_support import semantic_review
 import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -975,10 +976,8 @@ def test_audit_pack_every_conclusion_has_an_assurance_horizon(results):
 
 # --------------------------------------------------------------------------------------------- #
 # privacy-datamap. The weight here is on the split the piece rests on: structure is *derived* and
-# meaning is *judged*. A parser that reports a column exists is standing behind a fact; a table that
-# says `email` means user.contact.email is standing behind a lookup. Anything outside both is raised
-# for a human rather than guessed, because a confidently wrong data category is worse than a gap —
-# the gap gets reviewed and the wrong answer gets signed.
+# meaning is *judged*. Name matches are only hints. Every field requires the canonical contextual
+# review before acceptance, including names that look operational or personal.
 
 
 def datamap_scan(repo, export=False):
@@ -1282,8 +1281,10 @@ def test_datamap_classifies_only_what_it_knows(results, tmp):
     fields = fields_of(derived, "accounts")
 
     results.check(
-        "[privacy-datamap] an exact match is classified",
-        fields.get("email", {}).get("data_categories") == ["user.contact.email"],
+        "[privacy-datamap] a name match suggests a category without classifying",
+        fields.get("email", {}).get("suggested_categories") == ["user.contact.email"]
+        and fields.get("email", {}).get("data_categories") == []
+        and fields.get("email", {}).get("needs_review") is True,
         fields.get("email"),
     )
     # The whole determinism argument rests on this: a name the table does not know is RAISED, never
@@ -1294,11 +1295,11 @@ def test_datamap_classifies_only_what_it_knows(results, tmp):
         and fields.get("weird_column", {}).get("data_categories") == [],
         fields.get("weird_column"),
     )
-    # A creation timestamp is context-free bookkeeping. A generic identifier is not: it can name a
-    # person, an account or a non-person row, so the proposal stage must inspect its context.
+    # Operational-looking names require investigation; timestamp shape does not settle meaning.
     results.check(
-        "[privacy-datamap] only context-free operational columns bypass proposal review",
-        fields.get("created_at", {}).get("needs_review") is not True
+        "[privacy-datamap] operational-looking columns also require contextual review",
+        fields.get("created_at", {}).get("needs_review") is True
+        and fields.get("created_at", {}).get("operational_hint") is True
         and fields.get("id", {}).get("needs_review") is True,
         [fields.get("id"), fields.get("created_at")],
     )
@@ -1327,6 +1328,80 @@ def test_datamap_classifies_only_what_it_knows(results, tmp):
     )
 
 
+    # These synthetic tables differ only in their names. Neither table membership nor an
+    # event-shaped name is enough for the deterministic collector to assign personal meaning.
+    maintenance = ("created_at", "updated_at")
+    contextual_names = ("user_id", "role", "permissions", "mfa_enabled", "completed_at",
+                        "acknowledged_at", "last_active_at", "session_id", "expires_at", "due_at")
+    columns = ",\n".join("  " + name + " TEXT" for name in maintenance + contextual_names)
+    observed, _ = datamap_repo(tmp, "field-policy", {"db/schema.sql":
+        "CREATE TABLE people (\n" + columns + "\n);\n"
+        "CREATE TABLE tasks (\n" + columns + "\n);\n"})
+    for collection in ("people", "tasks"):
+        observed_fields = fields_of(observed, collection)
+        results.check(
+            f"[privacy-datamap] {collection} maintenance names remain hints until shape and use are reviewed",
+            all(observed_fields.get(name, {}).get("data_categories") == []
+                and observed_fields.get(name, {}).get("needs_review") is True
+                for name in maintenance), observed_fields)
+        results.check(
+            f"[privacy-datamap] {collection} identifiers, access and events require field context",
+            all(observed_fields.get(name, {}).get("data_categories") == []
+                and observed_fields.get(name, {}).get("needs_review") is True
+                for name in contextual_names), observed_fields)
+
+
+def test_datamap_context_and_test_schema_policy(results, tmp):
+    # Synthetic containers deliberately collide with exact scalar and operational names.
+    observed, _ = datamap_repo(tmp, "container-classification", {"db/schema.sql":
+        "CREATE TABLE envelopes (\n  email JSONB,\n  first_name JSON,\n  created_at JSONB,\n  last_name TEXT[]\n);\n"
+        "CREATE TABLE profiles (\n  email TEXT,\n  first_name TEXT\n);\n"
+        "CREATE TABLE connectors (\n  access_token TEXT,\n  refresh_token TEXT,\n  secret_key TEXT,\n"
+        "  session_token TEXT,\n  mfa_secret TEXT,\n  totp_secret TEXT\n);\n"})
+    containers = fields_of(observed, "envelopes")
+    results.check("[privacy-datamap] containers cannot inherit scalar or maintenance classifications",
+                  len(containers) == 4 and all(f.get("needs_review") is True
+                  and f.get("data_categories") == [] for f in containers.values()), containers)
+    scalars = fields_of(observed, "profiles")
+    results.check("[privacy-datamap] scalar name hints still require evidence",
+                  scalars.get("email", {}).get("suggested_categories") == ["user.contact.email"]
+                  and scalars.get("first_name", {}).get("suggested_categories") == ["user.name.first"]
+                  and all(f.get("needs_review") and not f["data_categories"] for f in scalars.values()), scalars)
+    credentials = fields_of(observed, "connectors")
+    results.check("[privacy-datamap] credential names require person or machine context",
+                  len(credentials) == 6 and all(f.get("needs_review") is True
+                  and f.get("data_categories") == [] for f in credentials.values()), credentials)
+
+    options, _ = datamap_repo(tmp, "scalar-builder-options", {"src/schema.ts":
+        'export const records = pgTable("records", {\n'
+        ' createdAt: timestamp("created_at", {withTimezone: true}).defaultNow(),\n'
+        ' email: text("email", {mode: "text"}),\n'
+        '})\n'})
+    option_fields = fields_of(options, "records")
+    results.check("[privacy-datamap] scalar builder options are not stored objects",
+                  option_fields.get("created_at", {}).get("operational_hint") is True
+                  and option_fields.get("email", {}).get("suggested_categories") == ["user.contact.email"], option_fields)
+
+    names = ("city", "country", "country_code", "state", "display_name", "national_id", "website", "homepage")
+    columns = ",\n".join("  " + name + " TEXT" for name in names)
+    observed, _ = datamap_repo(tmp, "corporate-context", {
+        "db/schema.sql": "CREATE TABLE businesses (\n" + columns + "\n);\n",
+        "src/schema.test.ts": 'export const synthetic = pgTable("synthetic", {email: text("email")})',
+        "src/schema.spec.ts": 'export const sample = pgTable("sample", {email: text("email")})',
+    })
+    fields = fields_of(observed, "businesses")
+    results.check("[privacy-datamap] corporate/person names require context",
+                  all(fields.get(name, {}).get("needs_review") is True and fields[name]["data_categories"] == [] for name in names), fields)
+    results.check("[privacy-datamap] unbound test-module schema fixtures are not datastores",
+                  not fields_of(observed, "synthetic") and not fields_of(observed, "sample"), observed)
+    bound, _ = datamap_repo(tmp, "explicit-test-schema", {
+        "drizzle.config.ts": 'export default defineConfig({schema: "./src/schema.test.ts", out: "./migrations"})',
+        "src/schema.test.ts": 'export const actual = pgTable("actual", {email: text("email")})',
+    })
+    results.check("[privacy-datamap] explicit Drizzle schema binding overrides test filename exclusion",
+                  fields_of(bound, "actual").get("email", {}).get("suggested_categories") == ["user.contact.email"], bound)
+
+
 def test_datamap_normalises_naming_styles(results, tmp):
     """The same column in camelCase, snake_case and PascalCase is the same column."""
     derived, _ = datamap_repo(
@@ -1346,7 +1421,8 @@ def test_datamap_normalises_naming_styles(results, tmp):
     ):
         results.check(
             f"[privacy-datamap] {name} normalises to {expected}",
-            fields.get(name, {}).get("data_categories") == [expected],
+            fields.get(name, {}).get("suggested_categories") == [expected]
+            and fields.get(name, {}).get("needs_review") is True,
             fields.get(name),
         )
 
@@ -1549,6 +1625,78 @@ def load_datamap_yaml(path):
     return module.load_yaml(path.read_text(encoding="utf-8"))[0]
 
 
+def seed_fixture_classification(repo, document=None, manifest=None):
+    """Bind explicitly authored synthetic expectations through the real investigation API.
+
+    This helper belongs only to acceptance-workflow tests. The independent classifier evaluation
+    does not call it and never reads expected labels into the inference pipeline.
+    """
+    scripts = PRIVACY_DATAMAP / "scripts"
+    sys.path.insert(0, str(scripts))
+    import analysis_storage
+    import field_review
+    path = repo / ".noru/.cache/privacy-datamap.analysis.json"
+    if document is None:
+        if not path.is_file():
+            result = run([sys.executable, str(scripts / "reconcile.py"), f"--repo={repo}", "--output=json", "--quiet"])
+            assert result.returncode == 0, result.stderr or result.stdout
+        document = analysis_storage.load(path)
+    derived = field_review.derived_for(document, repo)
+    if manifest is None:
+        manifest = load_datamap_yaml(repo / ".noru/privacy-datamap.yml")
+    expected = {}
+    def visit(fields, prefix):
+        for field in fields:
+            identity = prefix + field["name"]
+            expected[identity] = {"categories": field.get("data_categories", []), "unresolved": field.get("needs_review", False)}
+            visit(field.get("fields", []), identity + ".")
+    for dataset in manifest.get("dataset", []):
+        for collection in dataset.get("collections", []):
+            prefix = dataset["fides_key"] + "/" + collection["name"] + "/"
+            visit(collection.get("fields", []), prefix)
+            for name in collection.get("non_personal_fields", []):
+                expected[prefix + name] = {"categories": [], "unresolved": False}
+    for proposal in document.get("proposals", []):
+        kind = proposal.get("proposal_kind")
+        if kind in {"personal", "special-category", "special_category", "non-personal", "non_personal", "ambiguous"}:
+            expected[proposal["entity_id"]] = {"categories": proposal.get("proposed_categories", []),
+                                                "unresolved": kind == "ambiguous", "proposal": proposal}
+    field_review.build_contract(document, repo, fresh=True, derived=derived)
+    decisions = []
+    for row in field_review.all_rows(document["classification_review"]["fields"]):
+        if row.get("nested_members"):
+            continue
+        interpretation = expected.get(row["entity_id"], {"categories": [], "unresolved": True})
+        categories = interpretation["categories"]
+        pending = interpretation["unresolved"]
+        proposal = interpretation.get("proposal", {})
+        group = document.get("reasoning_groups", {}).get(proposal.get("reasoning_group"), {})
+        reason = proposal.get("rationale") or group.get("rationale") or "Explicit expected meaning of this synthetic acceptance fixture, checked against the cited current declaration."
+        evidence = row["evidence_ids"]
+        decision = field_review.decision_template(row)
+        decision.update(personal_data="unknown" if pending else "yes" if categories else "no",
+                        categories=[] if pending else categories, meaning=reason, rationale=reason,
+                        person_association={"kind": "unknown" if pending else "natural_person" if categories else "none",
+                                            "target": row["entity_id"] if categories else None,
+                                            "rationale": reason, "evidence_ids": evidence},
+                        identification_basis="unestablished" if pending else "direct" if categories else "operational",
+                        category_fit=[] if pending else [{"category": c, "rationale": reason, "evidence_ids": evidence} for c in categories],
+                        investigation=[{"question": "What meaning does this synthetic acceptance fixture specify?",
+                                        "checked_fact_ids": row["supporting_fact_ids"], "outcome": reason}],
+                        uncertainty="business_context" if pending else None,
+                        resolution_owner="human" if pending else None, confidence="high")
+        if pending:
+            decision.update(business_context_question=proposal.get("unresolved_question") or "Which business meaning applies to this synthetic field?",
+                            resolution_needed=proposal.get("resolution_needed") or "Supply the fixture business interpretation.",
+                            decision_impact=proposal.get("decision_impact") or "Determines the privacy classification.")
+        decision["semantic_review"] = semantic_review(field_review, evidence, reason)
+        decisions.append(decision)
+    errors = field_review.apply_decisions(document, decisions, repo)
+    assert not errors, errors
+    analysis_storage.save(path, document)
+    return document
+
+
 def test_datamap_compacts_non_personal_review_state(results, tmp):
     """Review files stay small while derived facts and the lock retain every observed field."""
     workflow = (PRIVACY_DATAMAP / "commands" / "scan.md").read_text(encoding="utf-8")
@@ -1597,6 +1745,7 @@ def test_datamap_compacts_non_personal_review_state(results, tmp):
     )
 
     manifest.write_text(accepted_compact_datamap_text(summary["derived_digest"]), encoding="utf-8")
+    seed_fixture_classification(repo)
     validator = PRIVACY_DATAMAP / "scripts" / "validate_manifest.py"
     parsed = repo / ".noru" / ".cache" / "privacy-datamap.parsed.json"
     validated = run(["python3", str(validator), str(manifest), f"--emit-parsed={parsed}", "--quiet"])
@@ -1621,6 +1770,7 @@ def test_datamap_compacts_non_personal_review_state(results, tmp):
     run(["python3", str(validator), str(manifest), f"--emit-parsed={parsed}", "--quiet"])
 
     reconcile = PRIVACY_DATAMAP / "scripts" / "reconcile.py"
+    seed_fixture_classification(repo)
     sealed = run(["python3", str(reconcile), f"--repo={repo}", "--seal", "--output=json", "--quiet"])
     lock = json.loads((repo / ".noru" / "privacy-datamap.lock.json").read_text(encoding="utf-8"))
     results.check(
@@ -1670,7 +1820,7 @@ def test_datamap_compacts_non_personal_review_state(results, tmp):
     results.check(
         "[privacy-datamap] a changed accepted non-personal field returns to review",
         [row["field"] for row in changed_payload["proposal_required"]] == ["weird_column"]
-        and "weird_column" not in changed_candidate["non_personal_fields"]
+        and "weird_column" not in changed_candidate.get("non_personal_fields", [])
         and any(
             field["name"] == "weird_column" and field.get("needs_review") is True
             for field in changed_candidate["fields"]
@@ -1805,6 +1955,7 @@ def test_datamap_semantic_regressions(results, tmp):
     manifest = repo / ".noru/privacy-datamap.yml"
     manifest.write_text(accepted_datamap_text(summary["derived_digest"]))
     command = ["python3", str(PRIVACY_DATAMAP / "scripts/reconcile.py"), f"--repo={repo}", "--output=json"]
+    seed_fixture_classification(repo)
     assert run(command + ["--seal"]).returncode == 0
     export = ["node", str(PRIVACY_DATAMAP / "scripts/collect.mjs"), f"--repo={repo}", "--export", "--output=json"]
     assert run(export).returncode == 0
@@ -1813,6 +1964,7 @@ def test_datamap_semantic_regressions(results, tmp):
     rejected = run(export)
     results.check("[privacy-datamap] export blocks unsealed semantic narrowing and preserves the prior artifact",
                   rejected.returncode != 0 and (repo / ".fides/datamap.yml").read_bytes() == original_export)
+    seed_fixture_classification(repo)
     assert run(command).returncode == 0
     cache = repo / ".noru/.cache/privacy-datamap.analysis.json"
     document = workflow.analysis_storage.load(cache)
@@ -1823,6 +1975,7 @@ def test_datamap_semantic_regressions(results, tmp):
         row.update(outcome="amended", refs=["db/schema.sql:3"], rationale="Synthetic reviewed decision: this field holds a service test address.",
                    confidence="high", decision_summary="Classify the service test address as non-personal.")
     workflow.analysis_storage.save(cache, document)
+    seed_fixture_classification(repo)
     sealed = run(command + ["--seal"])
     results.check("[privacy-datamap] explained semantic changes establish a new baseline and permit export",
                   sealed.returncode == 0 and run(export).returncode == 0, sealed.stderr)
@@ -1889,6 +2042,7 @@ def test_datamap_enrichment_gate(results, tmp):
         refs=["db/schema.sql:1"], confidence="high")
     protected = [repo / ".noru" / "privacy-datamap.yml", repo / ".noru" / "privacy-datamap.lock.json", repo / ".fides" / "datamap.yml"]
     before = {str(p): p.read_bytes() if p.exists() else None for p in protected}
+    document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     ready = run(command)
     results.check("[privacy-datamap] supported unresolved questions are ready for human review",
@@ -1929,6 +2083,25 @@ def test_datamap_enrichment_gate(results, tmp):
     for name, mutate in mutations.items():
         changed = json.loads(json.dumps(document))
         mutate(changed)
+        canonical_rows = changed["classification_review"]["fields"]
+        canonical = canonical_rows[0]
+        if name == "missing queue item":
+            canonical_rows.pop()
+        elif name in {"invalid category", "hidden special category"}:
+            canonical["categories"] = ["invented.category"] if name == "invalid category" else ["user.health_and_medical"]
+        elif name == "missing analysis":
+            canonical["investigation"] = []
+        elif name == "missing resolution":
+            canonical["resolution_needed"] = ""
+        elif name == "missing ambiguity question":
+            canonical["business_context_question"] = ""
+        elif name in {"invalid citation", "escaping citation"}:
+            span = next(iter(changed["classification_review"]["evidence"].values()))
+            span.update(start_line=999999) if name == "invalid citation" else span.update(path="../outside.sql")
+        elif name == "unknown decision":
+            canonical["supporting_fact_ids"] = ["fact:absent"]
+        elif name == "conflicting grouped questions":
+            canonical.update(status="needs_investigation", resolution_owner="human", uncertainty="meaning", business_context_question="", resolution_needed="", decision_impact="")
         proposals.write_text(json.dumps(changed))
         rejected = run(command)
         results.check(f"[privacy-datamap] enrichment rejects {name}", rejected.returncode == 1,
@@ -1949,15 +2122,17 @@ def test_datamap_enrichment_gate(results, tmp):
         "rationale": "Payload contract is absent.", "refs": ["db/schema.sql:1"], "confidence": "low",
         "unresolved_question": "Provide the archive payload contract.", "resolution_needed": "Supply the typed upload payload.",
         "decision_summary": "Establish archive coverage.", "decision_impact": "Determines which stored fields need classification."}]
+    document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     gap = run(command)
     results.check("[privacy-datamap] explicit store gaps remain visible at review readiness",
                   gap.returncode == 0 and "Provide the archive payload contract" in (cache / "privacy-datamap.review.md").read_text())
-    document["proposals"][0]["proposed_categories"] = ["user.health_and_medical"]
+    document["proposals"][0].update(proposal_kind="special_category", proposed_categories=["user.health_and_medical"])
+    document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     special = run(command)
     special_section = (cache / "privacy-datamap.review.md").read_text().split("## Possible Article 9 or Article 10 data")[1]
-    results.check("[privacy-datamap] ambiguous special categories appear in the dedicated review section",
+    results.check("[privacy-datamap] evidenced special categories appear in the dedicated review section",
                   special.returncode == 0 and document["proposals"][0]["entity_id"].rsplit("/", 1)[0] in special_section
                   and "user.health_and_medical" in special_section)
 
@@ -1977,6 +2152,7 @@ def test_datamap_enrichment_gate(results, tmp):
     document["reasoning_groups"] = {"identifiers": {"summary": "Account identifiers", "rationale": "Shared account linkage rationale.",
         "confidence": "medium", "refs": ["db/schema.sql:1"], "analysis": {"schema": "Identifier columns.",
         "relationships": "Linkage remains a proposal.", "service_or_serialization": "No service code is present."}}}
+    document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     grouped = run(command)
     review = (cache / "privacy-datamap.review.md").read_text()
@@ -1990,6 +2166,7 @@ def test_datamap_enrichment_gate(results, tmp):
     activity = document["system_proposals"][0]["processing_activities"][0]
     document["system_proposals"][0]["processing_activities"] = [dict(activity, activity_id=name, purpose=name)
         for name in ("Authentication", "Training", "Billing", "Provider sharing")]
+    document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     technical = run(command)
     review = (cache / "privacy-datamap.review.md").read_text()
@@ -2000,6 +2177,7 @@ def test_datamap_enrichment_gate(results, tmp):
                   ("Authentication", "Training", "Billing", "Provider sharing")))
     document["structural_errors"] = [{"kind": "datastore boundary", "detail": "Two distinct catalog databases were combined.",
                                      "resolution_needed": "Correct the supplemental dataset identities and rescan."}]
+    document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     blocked = run(command)
     review = (cache / "privacy-datamap.review.md").read_text()
@@ -2009,6 +2187,7 @@ def test_datamap_enrichment_gate(results, tmp):
                   and len(datamap_evidence(repo)["evidence_record"]["fields"]) == observed_count)
 
     document["structural_errors"] = []
+    document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     for gap_kind in ("schema_conflicts", "migration_gaps"):
         changed_derived = json.loads(json.dumps(derived))
@@ -2033,6 +2212,7 @@ def test_datamap_enrichment_gate(results, tmp):
                         dataset_references=[derived["datasets"][0]["fides_key"]],
                         unresolved_question="", business_context_question="", resolution_needed="", decision_impact="",
                         rationale="Detailed processing explanation. " * 30)
+    document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     precise = run(command)
     review = (cache / "privacy-datamap.review.md").read_text()
@@ -2054,7 +2234,8 @@ def test_datamap_enrichment_gate(results, tmp):
                   and "## Coverage and identity questions" not in review)
     proposal_contract = json.loads((ROOT / "contract" / "privacy-datamap-analysis.schema.json").read_text())
     results.check("[privacy-datamap] question-free proposals satisfy both output contracts",
-                  not validate_json_schema(document, proposal_contract) and not validate_json_schema(evidence, schema))
+                  not validate_json_schema(document, proposal_contract) and not validate_json_schema(evidence, schema),
+                  validate_json_schema(document, proposal_contract) + validate_json_schema(evidence, schema))
     # Removed scope cannot be interpreted as retirement merely because extraction omitted it.
     removal_result = json.loads(json.dumps(evidence["evidence_record"]["reconciliation"]))
     removal_result["removal_required"] = [{"entity_id": "system:former_provider", "observation_digest": "a" * 64}]
@@ -2118,6 +2299,25 @@ def test_datamap_enrichment_gate(results, tmp):
     }.items():
         changed = json.loads(json.dumps(document))
         mutate(changed)
+        canonical_rows = changed["classification_review"]["fields"]
+        canonical = canonical_rows[0]
+        if name == "missing queue item":
+            canonical_rows.pop()
+        elif name in {"invalid category", "hidden special category"}:
+            canonical["categories"] = ["invented.category"] if name == "invalid category" else ["user.health_and_medical"]
+        elif name == "missing analysis":
+            canonical["investigation"] = []
+        elif name == "missing resolution":
+            canonical["resolution_needed"] = ""
+        elif name == "missing ambiguity question":
+            canonical["business_context_question"] = ""
+        elif name in {"invalid citation", "escaping citation"}:
+            span = next(iter(changed["classification_review"]["evidence"].values()))
+            span.update(start_line=999999) if name == "invalid citation" else span.update(path="../outside.sql")
+        elif name == "unknown decision":
+            canonical["supporting_fact_ids"] = ["fact:absent"]
+        elif name == "conflicting grouped questions":
+            canonical.update(status="needs_investigation", resolution_owner="human", uncertainty="meaning", business_context_question="", resolution_needed="", decision_impact="")
         proposals.write_text(json.dumps(changed))
         failed = run(command)
         results.check(f"[privacy-datamap] precise review rejects {name}", failed.returncode == 1,
@@ -2126,6 +2326,7 @@ def test_datamap_enrichment_gate(results, tmp):
     activity.update(unresolved_question="Does the provider retain account payloads?",
                     resolution_needed="Provide the provider retention configuration.",
                     decision_impact="Determines whether the flow includes persistent provider storage.")
+    document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     unresolved = run(command)
     review = (cache / "privacy-datamap.review.md").read_text()
@@ -2155,6 +2356,7 @@ def test_datamap_enrichment_gate(results, tmp):
                                "rationale": "Synthetic relationship evidence for the validator fixture.", "confidence": "low"})
     document["relationship_proposal"] = {"graph": graph, "evidence_dependencies": mapping_specs,
                                           "decision_summary": "Keep the connection separate until its destination is known."}
+    document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     mapped = run(command)
     rendered = (cache / "privacy-datamap.review.md").read_text()
@@ -2162,6 +2364,7 @@ def test_datamap_enrichment_gate(results, tmp):
                   mapped.returncode == 1 and "--candidate" in mapped.stdout and "Keep the connection separate" in rendered
                   and "Provide the deployed connection configuration" in rendered, mapped.stderr or mapped.stdout)
     mapping_specs[0]["fingerprint"] = "0" * 64
+    document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     stale = run(command)
     results.check("[privacy-datamap] review rejects stale relationship proposal evidence", stale.returncode == 1, stale.stderr or stale.stdout)
@@ -2177,6 +2380,7 @@ def test_discovery_acceptance_gate(results, tmp):
     manifest = repo / ".noru/privacy-datamap.yml"
     manifest.write_text(accepted_datamap_text(summary["derived_digest"]))
     command = ["python3", str(scripts / "reconcile.py"), f"--repo={repo}", "--output=json"]
+    seed_fixture_classification(repo)
     assert run(command + ["--seal"]).returncode == 0
     assert run(command).returncode == 0
     lock = repo / ".noru/privacy-datamap.lock.json"
@@ -2216,6 +2420,7 @@ def test_discovery_acceptance_gate(results, tmp):
     for key in ("unresolved_question", "resolution_needed", "decision_impact"):
         del answer[key]
     path.write_text(json.dumps(document))
+    seed_fixture_classification(repo)
     sealed = run(command + ["--seal"])
     current = json.loads(run(command).stdout)
     results.check("[privacy-datamap] explicit reviewed discovery establishes a clean future baseline",
@@ -2477,6 +2682,7 @@ def test_datamap_candidate_collection(results, tmp):
     manifest.write_text(accepted_datamap_text(summary["derived_digest"]))
     reconcile_command = ["python3", str(scripts / "reconcile.py"), f"--repo={repo}", "--output=json"]
     review_command = ["python3", str(scripts / "review.py"), f"--repo={repo}", "--output=json"]
+    seed_fixture_classification(repo)
     assert run(reconcile_command + ["--seal"]).returncode == 0
     assert run(reconcile_command).returncode == 0
     assert run(review_command).returncode == 0
@@ -2564,6 +2770,7 @@ def test_datamap_candidate_collection(results, tmp):
             unresolved_question="Does the mapped runtime preserve the prior processing purpose?",
             resolution_needed="Confirm the purpose and categories for this runtime.",
             decision_impact="Determines whether the earlier processing scope remains covered.")
+    document = seed_fixture_classification(repo, document=document)
     workflow.analysis_storage.save(preview_proposals_path, document)
     reviewed = run(review_command + ["--candidate"])
     evidence = datamap_evidence(repo, candidate=True)
@@ -2605,7 +2812,10 @@ def test_datamap_candidate_collection(results, tmp):
     results.check("[privacy-datamap] repeated candidate scans preserve completed analysis and review",
                   repeat_collection.returncode == 0 and repeat_reconciliation.returncode == 0
                   and json.loads(preview_proposals_path.read_text()) == completed_analysis
-                  and (preview / "privacy-datamap.review.md").read_bytes() == completed_review)
+                  and (preview / "privacy-datamap.review.md").read_bytes() == completed_review,
+                  {"analysis_changed": [key for key in completed_analysis if completed_analysis.get(key) != json.loads(preview_proposals_path.read_text()).get(key)],
+                   "canonical_changed": [key for key in completed_analysis.get("classification_review", {}) if completed_analysis["classification_review"].get(key) != json.loads(preview_proposals_path.read_text()).get("classification_review", {}).get(key)],
+                   "review_changed": (preview / "privacy-datamap.review.md").read_bytes() != completed_review})
     results.check("[privacy-datamap] candidate mode cannot seal or run acceptance checks",
                   run(reconcile_command + ["--candidate", "--seal"]).returncode == 2
                   and run(candidate_command + ["--check"]).returncode == 2)
@@ -2784,6 +2994,7 @@ def test_datamap_repeatable_evidence_baseline(results, tmp):
     document["evidence_dependencies"] = [dependency]
     manifest_path.write_text(workflow.to_yaml(document))
     command = ["python3", str(scripts / "reconcile.py"), f"--repo={repo}", "--output=json", "--quiet"]
+    seed_fixture_classification(repo)
     sealed = run(command + ["--seal"])
     results.check("[privacy-datamap] sealing records reviewed code dependencies and runtime topology", sealed.returncode == 0, sealed.stderr)
     baseline_lock = lock_path.read_bytes()
@@ -2829,8 +3040,9 @@ def test_datamap_repeatable_evidence_baseline(results, tmp):
     results.check("[privacy-datamap] unregistered changed code blocks export without reopening known field decisions", valid.returncode == 1)
     (repo / "src/payload.py").write_text("# moved citation\n" + source)
     datamap_scan(repo)
+    seed_fixture_classification(repo)
     valid = run(["python3", str(scripts / "validate_manifest.py"), str(manifest_path), f"--emit-parsed={parsed_path}", "--quiet"])
-    results.check("[privacy-datamap] unchanged evidence validates before export", valid.returncode == 0, valid.stderr)
+    results.check("[privacy-datamap] unchanged semantics with refreshed source spans validate before export", valid.returncode == 0, valid.stderr)
     (repo / "src/payload.py").write_text(source.replace('"account"', '"external_account"'))
     code_summary, _ = datamap_scan(repo)
     changed = json.loads(run(command).stdout)
@@ -2849,6 +3061,7 @@ def test_datamap_repeatable_evidence_baseline(results, tmp):
     # An explicit reviewed fixture update establishes the next baseline, not an agent proposal.
     document["evidence_dependencies"][0]["fingerprint"] = workflow.dependencies.observe(repo, dependency)["fingerprint"]
     manifest_path.write_text(workflow.to_yaml(document))
+    seed_fixture_classification(repo)
     accepted = run(command + ["--seal"])
     accepted_result = json.loads(run(command).stdout)
     results.check("[privacy-datamap] accepting the reviewed fingerprint clears the next scan", accepted.returncode == 0 and not accepted_result["blocked"] and not accepted_result["drift"], accepted.stderr)
@@ -2929,9 +3142,9 @@ def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
         return
     bootstrap_payload = json.loads(bootstrap.stdout)
     results.check(
-        "[privacy-datamap] bootstrap sends every context-dependent field to the agent",
+        "[privacy-datamap] bootstrap sends every new field through contextual review",
         [row["field"] for row in bootstrap_payload["proposal_required"]]
-        == ["id", "weird_column"],
+        == ["created_at", "email", "id", "password_hash", "weird_column"],
         bootstrap_payload["proposal_required"],
     )
 
@@ -2947,15 +3160,16 @@ def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
     )
     migrated_payload = json.loads(migrated.stdout)
     results.check(
-        "[privacy-datamap] a reviewed pre-lock manifest migrates without agent reclassification",
+        "[privacy-datamap] a pre-lock manifest cannot bypass current evidence classification",
         migrated.returncode == 0
-        and migrated_payload["mode"] == "migration"
-        and migrated_payload["counts"]["proposal_required"] == 0,
+        and migrated_payload["mode"] == "bootstrap"
+        and migrated_payload["counts"]["proposal_required"] == 5,
         migrated_payload,
     )
 
     manifest.write_text(accepted_datamap_text(summary["derived_digest"]), encoding="utf-8")
     datamap_scan(repo)
+    seed_fixture_classification(repo)
     sealed = run(
         ["python3", str(reconcile), f"--repo={repo}", "--seal", "--output=json", "--quiet"]
     )
@@ -3030,10 +3244,10 @@ def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
     )
     delta_payload = json.loads(delta.stdout)
     results.check(
-        "[privacy-datamap] an exact addition is deterministic and an ambiguous addition alone reaches the agent",
+        "[privacy-datamap] both name-hinted and ambiguous additions require contextual review",
         delta.returncode == 0
-        and delta_payload["counts"]["deterministically_classified"] == 1
-        and [row["field"] for row in delta_payload["proposal_required"]] == ["profile_notes"],
+        and delta_payload["counts"]["deterministically_classified"] == 0
+        and [row["field"] for row in delta_payload["proposal_required"]] == ["phone_number", "profile_notes"],
         delta_payload,
     )
     results.check(
@@ -3077,6 +3291,7 @@ def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
         "confidence": "high", "refs": ["db/schema.sql:1"]} for change in removal_cache.get("discovery_required", [])]
     (repo / ".noru/.cache/privacy-datamap.analysis.json").write_text(json.dumps(removal_cache))
     prior_manifest = renderer.workflow.load_manifest(manifest)
+    seed_fixture_classification(repo)
     reviewed_candidate = load_datamap_candidate(repo / ".noru/.cache/privacy-datamap.analysis.json")
     for collection in reviewed_candidate["dataset"][0]["collections"]:
         collection.pop("needs_review", None)
@@ -3092,6 +3307,7 @@ def test_datamap_reconciles_only_the_privacy_delta(results, tmp):
         rationale="The fixture's reviewed schema no longer contains the retired field.",
         decision_summary="Retire the obsolete account field.")
     (repo / ".noru/.cache/privacy-datamap.analysis.json").write_text(json.dumps(removal_cache))
+    seed_fixture_classification(repo)
     accepted_seal = run(["python3", str(reconcile), f"--repo={repo}", "--seal", "--output=json"])
     results.check("[privacy-datamap] seal CLI accepts a valid manifest with investigated retirement",
                   accepted_seal.returncode == 0, accepted_seal.stderr)
@@ -3752,6 +3968,7 @@ def test_datamap_native_input_acceptance(results, tmp):
     manifest.write_text(workflow.to_yaml(doc))
     summary, derived = datamap_scan(repo);doc["source"]["derived_digest"] = summary["derived_digest"];manifest.write_text(workflow.to_yaml(doc))
     cmd = ["python3", str(PRIVACY_DATAMAP / "scripts/reconcile.py"), f"--repo={repo}", "--output=json"]
+    seed_fixture_classification(repo)
     sealed = run(cmd + ["--seal"])
     results.check("[privacy-datamap] evidenced native supplemental datasets and external systems can be accepted", sealed.returncode == 0, sealed.stderr)
     if sealed.returncode: return
@@ -3931,8 +4148,8 @@ system:
         payload,
     )
     results.check(
-        "[privacy-datamap] identity migration carries the accepted field classification",
-        '"fides_key": "db"' in candidate and "user.contact.email" in candidate,
+        "[privacy-datamap] identity migration without current evidence cannot carry a historical classification",
+        '"fides_key": "db"' in candidate and "user.contact.email" not in candidate and '"needs_review": true' in candidate,
         candidate[:1200],
     )
     lock["entities"]["db_migrations_002/users/email"] = {
@@ -4012,6 +4229,7 @@ def test_datamap_render_is_gated_and_matches_the_push(results, tmp):
         run(["node", str(collector), f"--repo={repo}", "--output=json", "--quiet"]).stdout
     )["derived_digest"]
     manifest.write_text(accepted_datamap_text(digest), encoding="utf-8")
+    seed_fixture_classification(repo)
     validator = piece / "scripts" / "validate_manifest.py"
     parsed = repo / ".noru" / ".cache" / "privacy-datamap.parsed.json"
     validated = run(["python3", str(validator), str(manifest), f"--emit-parsed={parsed}", "--quiet"])
@@ -4627,6 +4845,10 @@ def main(argv):
         return 2
 
     results = Results()
+    for suite in ("test_field_review.py", "test_typescript_evidence.py", "test_classification_evaluation.py", "test_privacy_investigation.py", "test_privacy_delivery_gate.py"):
+        checks = run([sys.executable, str(ROOT / "scripts" / suite)])
+        results.check("[privacy-datamap] " + suite, checks.returncode == 0, checks.stderr)
+
     try:
         with tempfile.TemporaryDirectory(prefix="noru-collectors-") as tmp:
             test_art50_disclosure_states(results, tmp)
@@ -4640,6 +4862,7 @@ def main(argv):
             test_datamap_scans_what_ci_checks_out(results, tmp)
             test_datamap_parses_drizzle_without_execution(results, tmp)
             test_datamap_classifies_only_what_it_knows(results, tmp)
+            test_datamap_context_and_test_schema_policy(results, tmp)
             test_datamap_normalises_naming_styles(results, tmp)
             test_datamap_citations_point_at_the_real_line(results, tmp)
             test_datamap_surfaces_special_category_data(results, tmp)
@@ -4697,6 +4920,8 @@ def main(argv):
         test_entry_point_guard_tolerates_a_non_path_argv(results)
         test_every_entry_point_resolves_before_it_compares(results)
     except Exception as exc:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
         sys.stderr.write(f"error: {exc}\n")
         return 2
 

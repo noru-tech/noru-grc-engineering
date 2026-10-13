@@ -6,6 +6,44 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Resolve every wildcard in static workspace package export targets, preserve literal dollar
+  sequences in module substitutions, and report unsupported multi-wildcard TypeScript paths.
+
+- Require cited semantic-review dimensions for privacy decisions, remove automatic maintenance-timestamp classifications, and reject loss of established personal association when taxonomy fit remains unresolved. Separate scalar extraction resolution from unresolved privacy meaning, keep sensitive findings visible in blocked reviews, and clarify consistent modeled/runtime scope and purpose-specific flows.
+
+- Register current, source-bound supplemental field citations as freshness dependencies when projecting investigated shapes, without changing existing reviewed fingerprints.
+
+- Preserve nested shape evidence across repeated refinements and accepted-cache restoration, require explicit composite openness, validate complete classification batches after member aggregation, retain every distinct question in grouped privacy reviews, and apply one evidenced gap disposition to every identical observation atomically.
+
+- Privacy investigation can model source-evidenced nested members and primitive arrays before classification, with atomic application and source-bound invalidation.
+
+- Integrate compiler-backed TypeScript evidence, contextual decision records, bounded agent
+  investigation and mandatory recursive classification review in the existing analysis cache.
+  Field names are hints only. Fresh mode ignores previous classifications without a second
+  authoritative artifact. Preserve the manifest, accepted-lock and Fides artifact layout.
+  Bundle the pinned compiler with license and integrity metadata; scans remain offline and
+  install-free. Add independent synthetic application evaluation and stale/bypass regression tests.
+  Revalidate current evidence before diff and push; cached parsed manifests cannot authorize delivery.
+  Validate standalone schema fixtures explicitly without allowing them to produce accepted exports.
+
+- Exclude migration files from classification across supported languages and common migration
+  conventions. Migration-only stores require current schema evidence instead of replay fallback.
+
+
+- Defer recognized object/array shapes before scalar-name classification, and require contextual
+  review for token/secret names that can refer to people or machines. Add synthetic regression
+  cases. Expand agent guidance for identity linkage, taxonomy meaning, security sensitivity and
+  incomplete nested modeling; these checks do not establish semantic correctness.
+
+
+- Resolve corporate/person geography and identity names contextually in the privacy plugin, and
+  exclude unbound test-module schema fixtures without repository-specific collector patches.
+
+- Make field-level privacy classification policy explicit in the plugin: distinguish identifiers,
+  person-linked attributes/events and operational metadata; prohibit blanket person-table fallbacks
+  and private replacement policies. Require contextual investigation of maintenance timestamps and
+  review for activity, access state and session identifiers. Add collector regression coverage.
+
 - Ask privacy-review questions only when answers change the exported map. Require a concrete mapped
   property or inclusion decision in the impact, and retain non-impacting unknowns as local notes.
 

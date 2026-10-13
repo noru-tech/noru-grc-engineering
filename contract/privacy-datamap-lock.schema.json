@@ -115,6 +115,97 @@
           }
         }
       }
+    },
+    "classification_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "policy_digest",
+        "structural_digest",
+        "source_inventory_digest",
+        "inventory_digest",
+        "manifest_semantics_digest",
+        "gap_inventory_digest"
+      ],
+      "properties": {
+        "version": {
+          "const": 2
+        },
+        "policy_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "structural_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "source_inventory_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "inventory_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "manifest_semantics_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "migration_exclusions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "roots": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "support_paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "gap_inventory_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "shape_observations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "entity_id",
+              "base_observation_digest",
+              "rationale",
+              "structure",
+              "binding"
+            ],
+            "properties": {
+              "entity_id": {
+                "type": "string"
+              },
+              "base_observation_digest": {
+                "type": "string"
+              },
+              "rationale": {
+                "type": "string"
+              },
+              "structure": {
+                "type": "object"
+              },
+              "binding": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

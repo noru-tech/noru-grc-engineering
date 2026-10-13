@@ -153,13 +153,17 @@ def build_green_repo(dest, piece_name="ai-inventory"):
                 collection["interpretation"] = interpretation
                 for field in collection.get("fields", []):
                     field.pop("needs_review", None)
-                    field["data_categories"] = [
-                        "user.device.ip_address"
-                        if field.get("name") == "last_login_ip"
-                        else "user.authorization.password"
-                        if field.get("name") == "password_hash"
-                        else "user.contact.email"
-                    ]
+                    # Authored fixture meanings, not production field-name inference.
+                    key = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", field["name"]).lower()
+                    categories = {
+                        "email": "user.contact.email", "email_address": "user.contact.email",
+                        "password_hash": "user.authorization.password", "last_login_ip": "user.device.ip_address",
+                        "ip_address": "user.device.ip_address", "full_name": "user.name", "display_name": "user.name",
+                        "date_of_birth": "user.demographic.date_of_birth", "medical_record_number": "user.health_and_medical.record_id",
+                        "phone_number": "user.contact.phone_number", "street": "user.contact.address.street",
+                        "username": "user.account.username", "credit_card_number": "user.financial.credit_card", "iban": "user.financial.bank_account",
+                    }
+                    field["data_categories"] = [categories[key]] if key in categories else []
         for system in document.get("system", []):
             for declaration in system.get("privacy_declarations", []):
                 declaration.update(
@@ -180,6 +184,11 @@ def build_green_repo(dest, piece_name="ai-inventory"):
         reconcile = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(reconcile)
         manifest.write_text(reconcile.to_yaml(document), encoding="utf-8")
+        from test_collectors import seed_fixture_classification
+        seed_fixture_classification(repo, manifest=document)
+        sealed = run([sys.executable, str(reconcile_path), f"--repo={repo}", "--seal", "--quiet"])
+        if sealed.returncode:
+            raise RuntimeError("Synthetic privacy baseline did not seal: " + sealed.stderr + sealed.stdout)
         return repo, manifest
 
     fixture = piece / decl["validator"]["fixtures"]["valid"][0]
@@ -256,7 +265,7 @@ source:
     fetched_at: 2026-08-27T09:00:00Z
     via: [getPrivacyTaxonomy]
 data_categories:
-  allow: [user.contact, user.device, user.authorization]
+  allow: [user.contact, user.device, user.authorization, user.name, user.demographic, user.health_and_medical, user.account, user.financial]
 data_uses:
   allow: [essential]
 data_subjects:
@@ -588,6 +597,23 @@ def case_base_ref(results, tmp):
     )
 
     restamp_structure_digest(manifest)
+    from test_collectors import seed_fixture_classification
+    reconcile = PLUGINS / "privacy-datamap/scripts/reconcile.py"
+    refreshed = run([sys.executable, str(reconcile), f"--repo={repo}", "--quiet"])
+    if refreshed.returncode:
+        raise RuntimeError(refreshed.stderr)
+    document = seed_fixture_classification(repo)
+    import analysis_storage
+    import dependencies
+    document["discovery_proposals"] = [{"path": change["path"], "observation_digest": dependencies.digest(change),
+        "outcome": "analysed", "decision_summary": "Review the added account identity field.",
+        "rationale": "The only schema change adds the explicitly reviewed passport_number to the existing account collection.",
+        "confidence": "high", "refs": ["db/schema.sql:1"]} for change in document.get("discovery_required", [])]
+    analysis_storage.save(repo / ".noru/.cache/privacy-datamap.analysis.json", document)
+    # This branch's added field is reviewed before the policy comparison runs.
+    sealed = run([sys.executable, str(reconcile), f"--repo={repo}", "--seal", "--quiet"])
+    if sealed.returncode:
+        raise RuntimeError("Reviewed changed fixture did not seal: " + sealed.stderr + sealed.stdout)
     code, report = ci(repo, "--base-ref=HEAD", "--gate-on-new", piece="privacy-datamap")
     new = [f for f in (report or {}).get("findings", []) if f.get("first_seen") == "this_pr"]
     results.check(
