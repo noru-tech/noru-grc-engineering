@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.12.1 — 2026-10-13
+
 - Clarify privacy classification guidance for invoice events, mixed individual/company values,
   broad categories and unconstrained content. Add contextual examples and regression coverage for
   preserving processing purposes, subjects and native flows through acceptance and export.
