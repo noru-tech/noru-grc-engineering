@@ -50,18 +50,44 @@ REMOTE_BASE = os.environ.get("NORU_ACTIONS_REMOTE_BASE", "https://github.com/")
 
 # One row per published action. `source` is the directory whose contents become the mirror root;
 # `repo` is the distribution repository. Every mirror also receives the shared toolkit below.
+# `permissions_why` is the one sentence the mirror README puts under the `permissions:` block its
+# quick start copies from the in-tree README, so a Marketplace visitor sees what the token can do
+# before they paste anything. `quickstart_note`, optional, is a prerequisite the example assumes.
 ACTIONS = {
     "noru-ci": {
         "source": ".github/actions/noru-ci",
         "repo": "noru-tech/noru-ci-action",
+        "permissions_why": (
+            "The default steps (scan, validate, expiry, policy) only read the checkout: no network,"
+            " no Noru credential and no write to the repository, so `contents: read` is all the"
+            " token needs, including on a pull request from a fork."
+        ),
     },
     "noru-review": {
         "source": ".github/actions/noru-review",
         "repo": "noru-tech/noru-review-action",
+        "permissions_why": (
+            "The review is structurally read-only: no input enables `diff` or `push`, and"
+            " `NORU_API_KEY` is removed from every child process. It reads the checkout and nothing"
+            " else, so pull requests, including forks, need only `contents: read`."
+        ),
     },
     "enforce": {
         "source": "actions/enforce",
         "repo": "noru-tech/noru-enforce-action",
+        "permissions_why": (
+            "The action has no network step and reads no Noru credential; it validates the checkout"
+            " offline and reports through annotations, the job summary and a JSON file. It needs only"
+            " `contents: read`, and credential-like variables are removed before any piece runs."
+        ),
+        # Without a committed policy the action stops with a usage error, so say so before the
+        # visitor pastes the workflow rather than after the first red run.
+        "quickstart_note": (
+            "It needs a committed policy at `.noru/enforcement.yml`. The `repo-enforcement` plugin's",
+            "`/repo-enforcement:setup` command writes it, together with this workflow, as a",
+            "reviewable file plan.",
+            "",
+        ),
     },
 }
 
@@ -72,6 +98,7 @@ TOOLKIT_DIRS = ("plugins", "contract")
 ROOT_FILES = ("LICENSE", "NOTICE")
 COPY_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store", "node_modules", ".noru")
 COMMITTER = ("Noru", "support@noru.tech")
+SECURITY_ADVISORY_URL = f"{SOURCE_URL}/security/advisories/new"
 
 
 def run(args, cwd=None, check=True, env=None, timeout=600):
@@ -115,11 +142,40 @@ def runtime_scripts():
     return sorted(seen)
 
 
-def rewrite_readme(text, action, version):
-    """Turn the in-tree README into the mirror's README: banner, short `uses:` form, absolute links."""
+def usage_snippet(readme_text, repo):
+    """The first ```yaml block under the in-tree README's `## Usage` heading that uses this action.
+
+    The mirror's quick start is copied from here rather than written a second time, so the example
+    a Marketplace visitor pastes is the one the in-tree README already documents and check_repo.py
+    already keeps on the floating major tag.
+    """
+    match = re.search(r"^## Usage\n(.*?)(?=^## |\Z)", readme_text, re.M | re.S)
+    section = match.group(1) if match else ""
+    for block in re.findall(r"^```ya?ml\n(.*?)^```", section, re.M | re.S):
+        if f"uses: {repo}@v" in block:
+            return block.rstrip("\n")
+    return ""
+
+
+def permissions_block(snippet):
+    """The top-level `permissions:` mapping of a workflow snippet, verbatim."""
+    match = re.search(r"^permissions:\n(?:  .*\n?)+", snippet + "\n", re.M)
+    return match.group(0).rstrip("\n") if match else ""
+
+
+def rewrite_readme(text, action, version, description=""):
+    """Turn the in-tree README into the mirror's README.
+
+    What a Marketplace visitor reads first, in order: the action's one-sentence description (the
+    same text as `description` in action.yml), a workflow that works as pasted, the exact
+    `permissions:` it needs and why, and only then the distribution banner and the in-tree body
+    with short `uses:` forms and absolute links.
+    """
     spec = ACTIONS[action]
     source = spec["source"]
     repo = spec["repo"]
+    major = f"v{version.split('.')[0]}"
+    snippet = usage_snippet(text, repo)
 
     text = text.replace(f"{SOURCE_REPO}/{source}@", f"{repo}@")
 
@@ -132,9 +188,44 @@ def rewrite_readme(text, action, version):
     lines = text.splitlines()
     title = lines[0] if lines and lines[0].startswith("# ") else f"# {action}"
     body = "\n".join(lines[1:] if lines and lines[0].startswith("# ") else lines).lstrip("\n")
+    head = [title, ""]
+    if description:
+        head += [description, ""]
+    if snippet:
+        head += [
+            "## Quick start",
+            "",
+            "Add this workflow as `.github/workflows/<name>.yml`. The full walkthrough, inputs and",
+            "outputs follow below.",
+            "",
+            "```yaml",
+            snippet,
+            "```",
+            "",
+            *spec.get("quickstart_note", ()),
+            f"`@{major}` follows the newest {major[1:]}.x release. To take changes only when you",
+            "choose to, pin a full commit SHA and keep the version as a comment, for example",
+            f"`uses: {repo}@<commit-sha> # v{version}`. Resolve the commit a release tag points",
+            "at with:",
+            "",
+            "```bash",
+            f"git ls-remote https://github.com/{repo} 'refs/tags/v{version}^{{}}'",
+            "```",
+            "",
+        ]
+        permissions = permissions_block(snippet)
+        if permissions:
+            head += [
+                "## Permissions",
+                "",
+                "```yaml",
+                permissions,
+                "```",
+                "",
+                spec["permissions_why"],
+                "",
+            ]
     banner = [
-        title,
-        "",
         f"> **Distribution repository.** This is the GitHub Marketplace listing of the `{action}`",
         f"> action from [{SOURCE_REPO}]({SOURCE_URL}). It is generated by",
         "> `scripts/publish_actions.py` on every release: do not edit it here, changes land upstream",
@@ -153,7 +244,29 @@ def rewrite_readme(text, action, version):
             "> SHA, and `/repo-enforcement:verify` recognises only that form. Use this repository for",
             "> hand-written workflows; leave the managed one on the upstream pin.",
         ]
-    return "\n".join(banner) + "\n\n" + body.rstrip("\n") + "\n"
+    return "\n".join(head + banner) + "\n\n" + body.rstrip("\n") + "\n"
+
+
+def security_policy(action):
+    """SECURITY.md for a mirror: reports go upstream, privately, where the code is maintained."""
+    spec = ACTIONS[action]
+    return "\n".join([
+        "# Security policy",
+        "",
+        f"This repository is the generated GitHub Marketplace distribution of the `{action}` action.",
+        f"The code is maintained in [{SOURCE_REPO}]({SOURCE_URL}), path `{spec['source']}`, and",
+        "every release overwrites this tree.",
+        "",
+        "## Reporting a vulnerability",
+        "",
+        "Report it privately through GitHub private vulnerability reporting on the source",
+        f"repository: <{SECURITY_ADVISORY_URL}>. Do not open a public issue for an unfixed",
+        "vulnerability, here or upstream.",
+        "",
+        "The full policy, including supported versions, response times and the threat model, is",
+        f"[SECURITY.md in the source repository]({SOURCE_URL}/blob/main/SECURITY.md).",
+        "",
+    ])
 
 
 def build_one(action, out_dir, version, commit):
@@ -166,9 +279,12 @@ def build_one(action, out_dir, version, commit):
 
     readme = mirror / "README.md"
     if readme.is_file():
+        description = action_description((source / "action.yml").read_text(encoding="utf-8"))
         readme.write_text(
-            rewrite_readme(readme.read_text(encoding="utf-8"), action, version), encoding="utf-8"
+            rewrite_readme(readme.read_text(encoding="utf-8"), action, version, description),
+            encoding="utf-8",
         )
+    (mirror / "SECURITY.md").write_text(security_policy(action), encoding="utf-8")
 
     (mirror / "scripts").mkdir()
     for name in runtime_scripts():
@@ -290,11 +406,13 @@ def action_description(text):
 def check_metadata(results):
     """What the Marketplace validates at listing time, checked before a release rather than after."""
     names = {}
+    brandings = {}
     for action, spec in ACTIONS.items():
         source = ROOT / spec["source"]
         text = (source / "action.yml").read_text(encoding="utf-8") if (source / "action.yml").is_file() else ""
         results.check(f"[{action}] has action.yml and README.md", text and (source / "README.md").is_file(), spec["source"])
         branding = action_branding(text)
+        brandings[action] = branding
         results.check(f"[{action}] declares branding (Marketplace requires it)", bool(branding))
         results.check(
             f"[{action}] branding.icon is an allowed Feather icon",
@@ -318,6 +436,12 @@ def check_metadata(results):
         )
     for name, owners in names.items():
         results.check(f"action name '{name}' is unique across the mirrors", len(owners) == 1, owners)
+    # The three actions are listed as one family: one color, and an icon apiece so the listings
+    # are still told apart at a glance.
+    colors = {action: family["color"] for action, family in brandings.items() if family.get("color")}
+    icons = [family.get("icon") for family in brandings.values()]
+    results.check("every action shares one branding.color (one family on the Marketplace)", len(set(colors.values())) == 1, colors)
+    results.check("every action has its own branding.icon", len(set(icons)) == len(icons), icons)
 
 
 def check_ci(results, mirror, tmp):
@@ -468,8 +592,8 @@ def check(output_json, quiet):
         mirrors = build(tmp / "build", ACTIONS)
         for action, mirror in mirrors.items():
             results.check(
-                f"[{action}] mirror root holds action.yml, README.md, DISTRIBUTION.json and the toolkit",
-                all((mirror / name).exists() for name in ("action.yml", "README.md", "DISTRIBUTION.json", "scripts/ci_check.py", "plugins", "contract", "LICENSE")),
+                f"[{action}] mirror root holds action.yml, README.md, SECURITY.md, DISTRIBUTION.json and the toolkit",
+                all((mirror / name).exists() for name in ("action.yml", "README.md", "SECURITY.md", "DISTRIBUTION.json", "scripts/ci_check.py", "plugins", "contract", "LICENSE")),
                 sorted(p.name for p in mirror.iterdir()),
             )
             # The generated banner always carries a `uses:` line, so the usage example has to be
@@ -484,6 +608,33 @@ def check(output_json, quiet):
             results.check(
                 f"[{action}] mirror README has no dangling relative links",
                 "](../" not in readme and "](./" not in readme,
+            )
+            # What a Marketplace visitor sees first: the action.yml description, a quick start
+            # copied from the in-tree Usage section on the floating major tag, and its permissions,
+            # all before the distribution banner.
+            description = action_description((ROOT / ACTIONS[action]["source"] / "action.yml").read_text(encoding="utf-8"))
+            lines = readme.splitlines()
+            head, _, _ = readme.partition("> **Distribution repository.**")
+            snippet = usage_snippet(source_readme, ACTIONS[action]["repo"])
+            results.check(
+                f"[{action}] mirror README opens with the action.yml description",
+                len(lines) > 2 and lines[0].startswith("# ") and lines[2] == description,
+                lines[:3],
+            )
+            results.check(
+                f"[{action}] mirror README quick start is the in-tree Usage example, before the banner",
+                snippet and "## Quick start\n" in head and snippet in head and "@<commit-sha>" in head,
+                head[:300],
+            )
+            results.check(
+                f"[{action}] mirror README states the exact permissions, before the banner",
+                bool(permissions_block(snippet)) and f"## Permissions\n\n```yaml\n{permissions_block(snippet)}\n```" in head,
+                permissions_block(snippet),
+            )
+            security = (mirror / "SECURITY.md").read_text(encoding="utf-8") if (mirror / "SECURITY.md").is_file() else ""
+            results.check(
+                f"[{action}] mirror SECURITY.md points at private vulnerability reporting upstream",
+                SECURITY_ADVISORY_URL in security,
             )
         check_ci(results, mirrors["noru-ci"], tmp)
         check_review(results, mirrors["noru-review"], tmp)

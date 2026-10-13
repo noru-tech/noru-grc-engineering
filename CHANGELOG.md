@@ -45,6 +45,137 @@ one version number; the release workflow fails if they disagree.
   declaration-level system-key strings. Keep approval provenance separate from data descriptions
   and require review of identifier continuity and unavailable deployment evidence.
 
+## 0.11.0 — 2026-10-08
+
+- Add provider-neutral privacy CI checks and an opt-in REST publisher with explicit source
+  metadata, dependency-free export parsing, and offline regression tests.
+
+## 0.10.0 — 2026-10-02
+
+### Added
+
+- One marketplace for every Noru plugin: `compliance-assistant` (from
+  `noru-tech/compliance-assistant`) is now listed in the Claude Code and Codex marketplaces as a
+  `git-subdir` source pinned to its 0.1.1 release commit. `/plugin install
+  compliance-assistant@noru-grc-engineering` and `codex plugin add
+  compliance-assistant@noru-grc-engineering` work after the one `marketplace add`. It keeps its own
+  version.
+- `.github/plugin/marketplace.json` for GitHub Copilot CLI, which reads it before
+  `.claude-plugin/marketplace.json`. It is the Claude marketplace with the external source written
+  as a `github` source, because Copilot CLI rejects a marketplace that contains `git-subdir`.
+  Install guide: `docs/clients/copilot-cli.md`.
+- `docs/plugin-directory-submission.md`: the values to submit for each plugin to the Anthropic
+  plugin directory, and the results of the directory's own validation tooling run against these
+  manifests.
+- `docs/findings/`: a page for every finding kind the hub reports, named for the kind the tool
+  prints — the rule in one sentence, why it matters, controls (none mapped: the repository ships no
+  control catalogue), a failing and a passing example run against the repository's own fixtures,
+  and how to fix it or record a disposition. Covers the CI-mode kinds, the repository-enforcement
+  rules (`needs_review`, `missing_interpretation`, `tooling`, `invalid_baseline`,
+  `expired_exception`, `stale_baseline_entry`) and, on one page, the GitHub ruleset verification
+  kinds. `test_ci_mode.py` fails if a CI-mode kind has no page; `test_repo_enforcement.py` fails if
+  an enforcement rule has none.
+- `llms.txt` at the repository root, in the llmstxt.org format: the one-sentence summary, install
+  lines for the three marketplaces, the three actions at `@v0`, the CI exit codes, and links to the
+  key docs.
+- `docs/openssf-best-practices.md`: prepared answers to the OpenSSF Best Practices passing-level
+  criteria, with evidence, and what still blocks the badge.
+- README: a "Common questions" section, and links to the findings index.
+
+### Changed
+
+- Every human-readable finding line now ends with a link to its page. `ci_check.py`,
+  `check_expiry.py` and `check_policy.py` text output appends
+  ` (see https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/findings/<kind>.md)`;
+  the `noru-ci` job summary links each kind; the `enforce` action's annotations append the same
+  suffix for the rule they name, `expired_exception` and `stale_baseline_entry` included. The base
+  URL is defined once per language (`scripts/finding_docs.py`, `actions/enforce/dist/enforce.js`)
+  and a test asserts the two agree. JSON reports are unchanged: repository enforcement fingerprints
+  every key of a finding, so a new field would re-key every accepted baseline entry. The Marketplace
+  actions pick this up at the next release.
+
+- Both marketplaces list plugins sorted by name, which the Anthropic directory's I1 invariant
+  expects.
+- `check_repo.py` checks an external marketplace entry for a `noru-tech` https URL, a relative
+  path, a ref, a full commit sha, an identical pointer in every marketplace, and no local plugin of
+  the same name. It exempts that entry from the shared-version and manifest rules and checks that
+  the Copilot CLI file mirrors the Claude one. The release workflow skips external entries when it
+  asserts the shared version.
+
+### Fixed
+
+- **Repository enforcement fails closed (security-relevant).** A required piece whose check could
+  not run was reported as a pass: `enforce.py` turned only findings into violations, and
+  `ci_check.py` reports a check it could not run as status `error`, often with no finding. A strict
+  policy requiring `iac-scan` in a checkout with no `iac-scan` queue printed
+  `Repository enforcement: PASS` and the `enforce` action exited `0`. Now every required piece
+  whose check errored (collector cannot run, crash, timeout, non-JSON report, or a broken gate
+  whose own finding its `fail_on` omits) carries a `tooling` violation: `FAIL`, exit `1`, an
+  annotation in the action, and never acceptable through a ratchet baseline. The verdict is
+  `enforce.py`'s; the action inherits it. Repositories using the default setup policy, which
+  requires `iac-scan`, now fail the gate unless the job provides the `iac-scan` queue or the policy
+  stops requiring it. `test_repo_enforcement.py` reproduces both cases.
+- **The default enforcement policy no longer requires `iac-scan` (#69).** `configure.mjs` wrote
+  `iac-scan: required: true`, but `iac-scan` builds its manifest from Noru's queue
+  (`.noru/.cache/iac-queue.json`), and the installed PR workflow is offline, holds no Noru
+  credential and never has that file. With enforcement failing closed, every repository set up with
+  the defaults failed every pull request on an `iac-scan/tooling` violation it could not baseline.
+  New setups write `required: false` with a comment saying what the job needs before it can be
+  `true`. A committed `.noru/enforcement.yml` changes only when setup is re-planned and applied (the
+  plan shows it as an update) or edited by hand. In ratchet mode that changes the policy digest, so
+  re-bind the baseline's `policy_digest` in the same PR. `test_repo_enforcement.py` now runs the default
+  policy with no queue in the checkout and asserts every required piece runs.
+- **`next_review_due` is aged.** `check_expiry.py` (and so the expiry step of every action) read
+  only `expires_at` and `expiry_date`, so a procedural claim bounded by a review date instead —
+  `interpretation.next_review_due` in `ai-inventory`, a record's `next_review_due` in
+  `governance-records` — was reported as advisory `unbounded`, and a review date years in the past
+  never failed the build. Read in place of `expires_at`, it is now `expired` once past (exit `4`),
+  `expiring` inside the warning window, and its window counts against `--max-age-days`. Findings
+  carry `field: interpretation.next_review_due` (or `next_review_due`); no field is added to any
+  finding. `test_ci_mode.py` reproduces it for both pieces.
+
+## 0.9.1 — 2026-10-01
+
+### Added
+
+- `.github/workflows/codeql.yml`: CodeQL static analysis of the JavaScript, Python and workflow
+  code on every pull request, on main and weekly; results go to code scanning.
+- Repository health files: `CITATION.cff`, `KNOWN-LIMITATIONS.md` (an index of limitations
+  already stated in `docs/verification.md`, `docs/ci-mode.md`, `docs/repository-enforcement.md`
+  and the contract's non-goals), `.github/CODEOWNERS`, issue forms for bug reports and feature
+  requests, a pull request template, and Dependabot for the GitHub Actions the workflows pin.
+  `check_repo.py` fails when `CITATION.cff` does not name the current release and its changelog
+  date, and the release runbook now bumps it.
+- `SECURITY.md` names GitHub private vulnerability reporting as the preferred channel, states that
+  the latest 0.x release is supported, and covers the generated Marketplace repositories.
+- An OpenSSF Scorecard workflow (`.github/workflows/scorecard.yml`): weekly, on every push to
+  `main` and on branch protection changes, publishing to scorecard.dev and uploading SARIF to code
+  scanning, with write access only on its one job.
+
+### Changed
+
+- GitHub Actions dependencies move to their latest majors: `actions/checkout` 7.0.1,
+  `actions/setup-node` 7.0.0 and `actions/setup-python` 7.0.0, in this repository's workflows, in
+  the installed `templates/github/noru-grc-review.yml` and `repo-enforcement` workflow (checkout
+  was pinned to 4.2.2 there), and in the documented examples. None of the workflows uses an input
+  these majors changed; re-running `/repo-enforcement:setup` offers existing installs the update.
+- The three GitHub Actions carry one Marketplace description each, at most 125 characters, and
+  one branding family: `gray-dark` with `check-circle` (`noru-ci`), `shield` (`noru-review`) and
+  `lock` (`enforce`, previously `shield` on `purple`).
+- Every third-party action in this repository's workflows is pinned to a full commit SHA, at the
+  same major version as before (`actions/checkout` v5, `actions/setup-node` v5,
+  `actions/setup-python` v6). `check_repo.py` now fails on an unpinned action, a missing top-level
+  `permissions:`, or a top-level write grant in any workflow under `.github/workflows/`.
+- The README and the Claude Code marketplace description open with one canonical sentence. The
+  README gains a release, CI and OpenSSF Scorecard badge, moves Install to the top, and adds
+  "What it is not" and "Trust" sections. No plugin is renamed.
+- Each Marketplace mirror README now opens with the action's description, a quick start copied
+  from the in-tree `## Usage` example on `@v0` with how to pin a full commit SHA, and the exact
+  `permissions:` it needs and why, before the distribution note. Every mirror also ships a
+  `SECURITY.md` pointing at private vulnerability reporting on this repository.
+  `publish_actions.py --check` asserts the new README head, the `SECURITY.md`, one shared branding
+  color and a distinct icon per action.
+
 ## 0.9.0 — 2026-09-09
 
 - Add framework-independent connection relationship proposals and manifest bindings, with per-edge

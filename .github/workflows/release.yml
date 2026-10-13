@@ -30,11 +30,11 @@ jobs:
     name: verify the release is consistent
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # A manual run verifies the tag it names, not whatever main happens to be.
           ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "20"
 
@@ -47,6 +47,7 @@ jobs:
           python3 scripts/test_collectors.py
           python3 scripts/test_idempotency.py
           python3 scripts/contract_test.py
+          python3 scripts/test_privacy_ci.py
           python3 scripts/test_ci_mode.py
           python3 scripts/test_ci_review.py
           python3 scripts/test_hub.py
@@ -72,6 +73,10 @@ jobs:
           marketplace = json.loads(pathlib.Path(".claude-plugin/marketplace.json").read_text())
           for entry in marketplace["plugins"]:
               name = entry["name"]
+              # An entry with an object source is a Noru plugin from another repository, pinned
+              # to a commit there; it has its own version and is not part of this release.
+              if not isinstance(entry["source"], str):
+                  continue
               if entry.get("version") != expected:
                   problems.append(
                       f"marketplace entry '{name}' is {entry.get('version')}, expected {expected}"
@@ -106,10 +111,10 @@ jobs:
     # account that created it can satisfy GitHub's two-factor requirement.
     environment: marketplace
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "20"
 

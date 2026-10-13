@@ -1,6 +1,10 @@
 name: "Noru GRC repository enforcement"
-description: "Validate every configured GRC piece offline and enforce strict or ratcheted repository policy."
+description: "Make committed compliance records a merge condition: validate every configured Noru GRC piece offline and fail on violations."
 author: "Noru"
+
+branding:
+  icon: lock
+  color: gray-dark
 
 inputs:
   repo:
@@ -30,7 +34,3 @@ outputs:
 runs:
   using: "node24"
   main: "dist/enforce.js"
-
-branding:
-  icon: "shield"
-  color: "purple"

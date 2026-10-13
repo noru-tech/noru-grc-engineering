@@ -1,14 +1,23 @@
+<p align="center">
+  <img src="./docs/assets/grc-engineering.png" alt="grc-engineering" width="480">
+</p>
+
 # noru-grc-engineering
+
+Last-mile GRC engineering plugins for Claude Code and Codex: AI inventory, privacy data maps, infrastructure checks and change control, recorded in Noru.
+
+[![Release](https://img.shields.io/github/v/release/noru-tech/noru-grc-engineering)](https://github.com/noru-tech/noru-grc-engineering/releases)
+[![CI](https://github.com/noru-tech/noru-grc-engineering/actions/workflows/ci.yml/badge.svg)](https://github.com/noru-tech/noru-grc-engineering/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/noru-tech/noru-grc-engineering/badge)](https://scorecard.dev/viewer/?uri=github.com/noru-tech/noru-grc-engineering)
+[![License: MIT](https://img.shields.io/badge/Code-MIT-blue.svg)](./LICENSE)
+[![Codex Plugin](https://img.shields.io/badge/Codex-plugin-111827.svg)](./docs/clients/codex.md)
+[![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-da7756.svg)](./docs/clients/claude-code.md)
 
 > The compliance work that lives in your repo, your CI, or your laptop — done where it lives, and
 > landed in Noru with provenance, idempotency and a human review step. For file evidence, provenance
 > now means something you can check: `evidence-push` sends the SHA-256 of the bytes it uploads, and
 > compares it against the digest Noru computed over what it stored. Anyone holding the file can redo
 > that arithmetic.
-
-[![License: MIT](https://img.shields.io/badge/Code-MIT-blue.svg)](./LICENSE)
-[![Codex Plugin](https://img.shields.io/badge/Codex-plugin-111827.svg)](./docs/clients/codex.md)
-[![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-da7756.svg)](./docs/clients/claude-code.md)
 
 A GRC engineer's tooling usually stops at the API boundary. Some compliance work **structurally
 cannot** be done by a server-side integration, however good it is, because it needs something an API
@@ -23,6 +32,66 @@ key does not have:
 
 That is the last mile. These plugins do it, and **Noru holds the record.** There is no `grc-data/`
 directory, no flat-file risk register, no second source of truth to reconcile before an audit.
+
+## Install
+
+One marketplace gives access to every Noru plugin: the pieces in this repository and
+[`compliance-assistant`](https://github.com/noru-tech/compliance-assistant), which the marketplace
+lists from its own repository, pinned to its release commit. Add the marketplace once, then install
+the plugins you want.
+
+### Claude Code
+
+```text
+/plugin marketplace add noru-tech/noru-grc-engineering
+/plugin install noru@noru-grc-engineering
+/plugin install ai-inventory@noru-grc-engineering
+/plugin install evidence-push@noru-grc-engineering
+/plugin install governance-records@noru-grc-engineering
+/plugin install review-signoff@noru-grc-engineering
+/plugin install audit-pack@noru-grc-engineering
+/plugin install iac-scan@noru-grc-engineering
+/plugin install privacy-datamap@noru-grc-engineering
+/plugin install change-control@noru-grc-engineering
+/plugin install compliance-assistant@noru-grc-engineering
+```
+
+Then configure the Noru MCP connection: [Claude guide](./docs/clients/claude-code.md).
+
+### Codex
+
+```bash
+codex plugin marketplace add noru-tech/noru-grc-engineering
+codex plugin add noru@noru-grc-engineering
+codex plugin add ai-inventory@noru-grc-engineering
+codex plugin add evidence-push@noru-grc-engineering
+codex plugin add governance-records@noru-grc-engineering
+codex plugin add review-signoff@noru-grc-engineering
+codex plugin add audit-pack@noru-grc-engineering
+codex plugin add iac-scan@noru-grc-engineering
+codex plugin add privacy-datamap@noru-grc-engineering
+codex plugin add change-control@noru-grc-engineering
+codex plugin add compliance-assistant@noru-grc-engineering
+```
+
+Then configure Noru MCP: [Codex guide](./docs/clients/codex.md).
+
+### GitHub Copilot CLI
+
+```bash
+copilot plugin marketplace add noru-tech/noru-grc-engineering
+copilot plugin install ai-inventory@noru-grc-engineering
+copilot plugin install compliance-assistant@noru-grc-engineering
+```
+
+Copilot CLI reads `.github/plugin/marketplace.json`, the same catalogue as the Claude marketplace.
+Read the [Copilot CLI guide](./docs/clients/copilot-cli.md) for what has and has not been verified there.
+
+Also: [Cursor](./docs/clients/cursor.md) · [generic MCP clients](./docs/clients/generic-mcp.md) ·
+[marketplace capability metadata](./docs/marketplace.md)
+
+For an end-to-end repository rollout, including read-only pull-request checks and the separate
+publication boundary, follow [developer onboarding](./docs/developer-onboarding.md).
 
 ## Pieces
 
@@ -94,47 +163,67 @@ one of them mostly assembles rather than discovers.
   a variable block. It is the only piece whose every write is a documented server-side upsert, so
   filing a finding and closing one are the same call.
 
-## Install
+## What it is not
 
-### Claude Code
+Drawn from the [contract's non-goals](./contract/README.md#non-goals-stated-so-they-can-be-pointed-at)
+and [docs/verification.md](./docs/verification.md), where each one is argued in full:
 
-```text
-/plugin marketplace add noru-tech/noru-grc-engineering
-/plugin install noru@noru-grc-engineering
-/plugin install ai-inventory@noru-grc-engineering
-/plugin install evidence-push@noru-grc-engineering
-/plugin install governance-records@noru-grc-engineering
-/plugin install review-signoff@noru-grc-engineering
-/plugin install audit-pack@noru-grc-engineering
-/plugin install iac-scan@noru-grc-engineering
-/plugin install privacy-datamap@noru-grc-engineering
-/plugin install change-control@noru-grc-engineering
-```
+- **Not a second register.** A manifest is an input to Noru and a record of provenance, never a
+  parallel store. There is no `grc-data/` directory and no state only a plugin reads.
+- **Not a framework catalogue.** No control text, guidance or evidence-item list is vendored here.
+  Pieces work the queue Noru serves.
+- **Not a credential store.** Authentication belongs to the MCP host. The one REST path,
+  `evidence-push:push`, reads `NORU_API_KEY` from the environment at the point of use.
+- **Not a SaaS connector.** Scheduled integrations with other SaaS products are Noru's job, run
+  server-side with encrypted credentials. The forge exporters in `change-control` are explicit,
+  read-only steps you run, not a connector.
+- **Not a check of Noru's record.** CI mode is offline: it proves the repository's own record is
+  true and current, not that Noru agrees with it.
+- **Not field-tested at scale.** Every piece is proven against fixtures on every build, not against
+  a live organization at production scale. The limits are collected in
+  [KNOWN-LIMITATIONS.md](./KNOWN-LIMITATIONS.md).
 
-Then configure the Noru MCP connection: [Claude guide](./docs/clients/claude-code.md).
+## Common questions
 
-### Codex
+### How do I keep an AI inventory in my repository?
 
-```bash
-codex plugin marketplace add noru-tech/noru-grc-engineering
-codex plugin add noru@noru-grc-engineering
-codex plugin add ai-inventory@noru-grc-engineering
-codex plugin add evidence-push@noru-grc-engineering
-codex plugin add governance-records@noru-grc-engineering
-codex plugin add review-signoff@noru-grc-engineering
-codex plugin add audit-pack@noru-grc-engineering
-codex plugin add iac-scan@noru-grc-engineering
-codex plugin add privacy-datamap@noru-grc-engineering
-codex plugin add change-control@noru-grc-engineering
-```
+Install `ai-inventory` and run `/ai-inventory:scan`: it writes `.noru/ai-inventory.yml`, a
+committed list of the model and provider calls, agents, prompts, retrieval, evals and oversight
+points the code contains, each with the `file:line` it came from. A person adds an owner, a date
+and an expiry to each claim; review it in the pull request, land it in Noru with
+`/ai-inventory:diff` then `/ai-inventory:push`, and let [CI](#in-ci) fail when the code and the
+inventory stop agreeing.
 
-Then configure Noru MCP: [Codex guide](./docs/clients/codex.md).
+### How do I generate a privacy data map from source code?
 
-Also: [Cursor](./docs/clients/cursor.md) · [generic MCP clients](./docs/clients/generic-mcp.md) ·
-[marketplace capability metadata](./docs/marketplace.md)
+Install `privacy-datamap` and run `/privacy-datamap:scan`: it reads the schemas the repository
+holds — ORM models, migrations, SQL DDL, protobuf, GraphQL — and writes a Fides data map of the
+personal data in them to `.noru/privacy-datamap.yml`, marking what it cannot classify for a person
+to decide. `/privacy-datamap:push` lands the whole map in Noru in one `ingestDatamap` call. See the
+[piece README](./plugins/privacy-datamap/) for the formats it parses and the ones it reports as
+gaps.
 
-For an end-to-end repository rollout, including read-only pull-request checks and the separate
-publication boundary, follow [developer onboarding](./docs/developer-onboarding.md).
+### How do I fail a pull request when the compliance record goes stale?
+
+Add the [`noru-review` action](#in-ci) to pull requests: in `mode: gate` it fails the check when a
+committed manifest no longer matches the code or a claim's interpretation has expired, with no
+credential, so it works on forks. Start in `mode: warn`. The single-piece `noru-ci` action exits `3`
+for drift and `4` for an expired claim, so a workflow can tell them apart; see
+[docs/ci-mode.md](./docs/ci-mode.md#exit-codes).
+
+### How do I stop a pull request adding personal data nobody approved?
+
+Commit an agreed privacy baseline at `.noru/privacy-baseline.yml`: the policy step of `noru-ci` and
+`noru-review` then fails (exit `7` from `noru-ci`) on any data category, purpose or data subject
+the baseline does not permit, and `--base-ref` with `--gate-on-new` gates only on what the pull
+request adds. See
+[docs/ci-mode.md](./docs/ci-mode.md#3-personal-data-nobody-agreed-to).
+
+### What does a finding in my CI log mean?
+
+Every finding line names its kind in brackets and links its page in
+[docs/findings/](./docs/findings/README.md), which gives the rule, why it matters, a failing and a
+passing example, and how to fix it or record a disposition.
 
 ## First run
 
@@ -194,7 +283,8 @@ personal data in it are the same file, and only one of them is good news.
 pieces execute through an authenticated MCP host, while `evidence-push` uses a key for its REST file
 upload. Headless CI never reports an emitted MCP call list as an executed write. Exit codes,
 warn-only adoption, and the GitLab and plain-shell recipes:
-[docs/ci-mode.md](./docs/ci-mode.md).
+[docs/ci-mode.md](./docs/ci-mode.md). What each finding means and how to clear it:
+[docs/findings/](./docs/findings/README.md).
 
 Add to `.gitignore`:
 
@@ -274,6 +364,7 @@ week, the contract is wrong — come back and fix the contract.
 noru-grc-engineering/
 ├── .claude-plugin/marketplace.json     # Claude Code marketplace
 ├── .agents/plugins/marketplace.json    # Codex marketplace
+├── .github/plugin/marketplace.json     # GitHub Copilot CLI marketplace (mirrors the Claude one)
 ├── contract/                           # the piece contract + manifest schemas (the durable asset)
 ├── plugins/
 │   ├── noru/                           # hub: connect, doctor, context
@@ -326,9 +417,35 @@ real organization.
 
 Report vulnerabilities privately: [SECURITY.md](./SECURITY.md).
 
+## Trust
+
+- **One version, verified at the tag.** Every plugin and action shares one version number, and
+  `scripts/check_repo.py` fails while any copy disagrees. A release is a reviewed
+  `chore: release X.Y.Z` pull request, then a `vX.Y.Z` tag on its merge commit. The `release`
+  workflow re-runs the full gate on that tag and asserts that the tag, both marketplaces and every
+  plugin manifest agree before anything is published.
+- **Generated, traceable Marketplace mirrors.** `noru-tech/noru-ci-action`,
+  `noru-tech/noru-review-action` and `noru-tech/noru-enforce-action` are built from the tag by
+  `scripts/publish_actions.py`. Each carries a `DISTRIBUTION.json` naming the source commit, and a
+  released tag that would point at a different tree is a hard failure, never overwritten.
+- **Pinned, least-privilege workflows.** Every workflow in this repository declares its top-level
+  `permissions:` and pins every third-party action to a full commit SHA; `scripts/check_repo.py`
+  fails the build otherwise.
+- **OpenSSF Scorecard.** The [`scorecard` workflow](./.github/workflows/scorecard.yml) publishes
+  results weekly and on every push to `main`:
+  [scorecard.dev](https://scorecard.dev/viewer/?uri=github.com/noru-tech/noru-grc-engineering).
+- **OpenSSF Best Practices, prepared.** The passing-level criteria are answered, Met, Unmet or N/A
+  with evidence, in [docs/openssf-best-practices.md](./docs/openssf-best-practices.md). No badge is
+  claimed until the form is submitted.
+- **Private vulnerability reporting.** Report through
+  [GitHub private vulnerability reporting](https://github.com/noru-tech/noru-grc-engineering/security/advisories/new);
+  [SECURITY.md](./SECURITY.md) has the policy, response time and threat model.
+
 ## Related
 
 [`noru-tech/compliance-assistant`](https://github.com/noru-tech/compliance-assistant) is Noru's
 conversational compliance assistant over the same MCP server: it guides sequencing, gaps and
 roadmaps. This repository is the other half — the hands-on work in your own repository. They install
 side by side.
+
+Maintained by [Noru](https://noru.tech), a continuous compliance platform.

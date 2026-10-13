@@ -97,7 +97,8 @@ node scripts/scaffold-piece.mjs <piece-name>
 
 You get a piece that already satisfies most of the contract. What is yours to write: the collector
 (requirement 2), the queue source (requirement 9), and the push plan (requirement 4). Then add it to
-both marketplace manifests — `scripts/check_repo.py` fails if you forget.
+the three marketplace manifests (Claude Code, Codex, and the GitHub Copilot CLI mirror at
+`.github/plugin/marketplace.json`) — `scripts/check_repo.py` fails if you forget.
 
 Read [`contract/README.md`](./contract/README.md) first and
 [`docs/authoring-a-piece.md`](./docs/authoring-a-piece.md) second.
@@ -113,6 +114,7 @@ python3 scripts/test_validators.py     # schema fixtures + validator unit tests
 python3 scripts/test_collectors.py     # collectors detect what the pieces claim they detect
 python3 scripts/test_idempotency.py    # a second push is a no-op
 python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
+python3 scripts/test_privacy_ci.py     # provider-neutral privacy gate and REST publisher
 python3 scripts/test_ci_mode.py        # CI mode fails on drift and on an expired interpretation
 python3 scripts/test_repo_enforcement.py # enforcement ratchet, action and GitHub adapter safety
 python3 scripts/publish_actions.py --check # each action runs from its Marketplace mirror layout
@@ -162,8 +164,10 @@ Every plugin and every action shares one version number, and `scripts/check_repo
 any copy of it disagrees. A release is three steps, and the third one is automatic:
 
 1. **Bump.** Open a `chore: release X.Y.Z` pull request that moves the version everywhere at once:
-   both marketplace manifests, the two `plugin.json` files of every piece, the `VERSION` constants,
-   and a `## X.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md`. Copyable `uses:` examples are not part
+   the three marketplace manifests (not the pinned `compliance-assistant` entry, which keeps its own
+   version), the two `plugin.json` files of every piece, the `VERSION` constants,
+   `version` and `date-released` in `CITATION.cff`, and a `## X.Y.Z — YYYY-MM-DD` section in
+   `CHANGELOG.md`. Copyable `uses:` examples are not part
    of a bump: they reference the floating major tag (`@v0`), which the publish step moves.
 2. **Tag.** After the merge, tag that commit and create the GitHub release for this repository:
 
@@ -194,7 +198,11 @@ publish step moves to each newest release, so documentation never carries a vers
 stale; `scripts/check_repo.py` rejects an in-tree path or an exact version in a copyable example.
 Both `uses:` forms — the in-tree path and the mirror — are the same code at the same tag. The
 mirrors are generated: never edit them by hand, the next release overwrites the tree. Each carries a
-`DISTRIBUTION.json` naming the source commit it was built from.
+`DISTRIBUTION.json` naming the source commit it was built from, and a `SECURITY.md` sending
+vulnerability reports to this repository's private vulnerability reporting. Each mirror README
+opens with the `description` from `action.yml`, a quick start copied from the in-tree README's
+`## Usage` example, and the `permissions:` that example needs, before the distribution note;
+`publish_actions.py --check` asserts all of it.
 
 **Republishing** is safe and idempotent. Re-run the `release` workflow with `workflow_dispatch` and
 the version, or from a checkout of the tag:

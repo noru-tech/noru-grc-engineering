@@ -977,6 +977,154 @@ def case_piece_agnostic(results, tmp):
     )
 
 
+def case_finding_docs(results, tmp):
+    """Every kind a finding line can name has a page, and the line links it.
+
+    The link lives on the human-readable line only. The JSON report stays as it was: a key added to
+    a finding would change every repo-enforcement fingerprint, which hashes the whole finding.
+    """
+    from finding_docs import FINDINGS_DOCS_BASE, finding_url  # noqa: PLC0415
+
+    findings_dir = ROOT / "docs" / "findings"
+    missing = [kind for kind in ci_check.FINDING_KINDS if not (findings_dir / f"{kind}.md").is_file()]
+    results.check("finding docs: every finding kind has a page", not missing, missing)
+    results.check(
+        "finding docs: the URL is under the repository's docs/findings/",
+        FINDINGS_DOCS_BASE.endswith("/blob/main/docs/findings/")
+        and finding_url("drift") == FINDINGS_DOCS_BASE + "drift.md",
+        FINDINGS_DOCS_BASE,
+    )
+
+    repo, manifest = build_green_repo(pathlib.Path(tmp) / "finding-docs")
+    add_new_provider(repo)
+    expire_every_claim(manifest)
+    completed = run(
+        [sys.executable, str(CI_CHECK), "--piece=ai-inventory", f"--repo={repo}",
+         f"--as-of={AS_OF}", "--output=text"]
+    )
+    lines = [line for line in completed.stdout.splitlines() if "] " in line and line.startswith("  ")]
+    finding_lines = [line for line in lines if line.lstrip().split(" ", 1)[0] in ("FAIL", "warn", "would-fail", "BLOCKING")]
+    results.check(
+        "finding docs: every ci_check finding line ends with its page",
+        finding_lines
+        and all(
+            line.endswith(f"(see {finding_url(line.split('[', 1)[1].split(']', 1)[0])})")
+            for line in finding_lines
+        ),
+        finding_lines[:3],
+    )
+    code, report = ci(repo)
+    results.check(
+        "finding docs: the JSON report carries no URL",
+        report is not None and all(set(f) & {"help_uri", "help_url", "url"} == set() for f in report["findings"]),
+        (report or {}).get("findings", [])[:1],
+    )
+    completed = run(
+        [sys.executable, str(CHECK_EXPIRY), str(manifest), f"--as-of={AS_OF}", "--output=text"]
+    )
+    expired_lines = [line for line in completed.stdout.splitlines() if "[expired]" in line]
+    results.check(
+        "finding docs: check_expiry finding lines end with their page",
+        expired_lines and all(line.endswith(f"(see {finding_url('expired')})") for line in expired_lines),
+        expired_lines[:2],
+    )
+
+    privacy, privacy_manifest = build_green_repo(pathlib.Path(tmp) / "finding-docs-policy", "privacy-datamap")
+    baseline = privacy / ".noru" / "privacy-baseline.yml"
+    baseline.write_text(BASELINE_STRICT, encoding="utf-8")
+    completed = run(
+        [sys.executable, str(ROOT / "scripts" / "check_policy.py"), str(privacy_manifest),
+         f"--baseline={baseline}", "--output=text"]
+    )
+    policy_lines = [line for line in completed.stdout.splitlines() if "[unpermitted_category]" in line]
+    results.check(
+        "finding docs: check_policy finding lines end with their page",
+        policy_lines
+        and all(line.endswith(f"(see {finding_url('unpermitted_category')})") for line in policy_lines),
+        policy_lines[:2],
+    )
+
+
+def case_next_review_due(results, tmp):
+    """A review date is an expiry: a procedural claim bounded by next_review_due must age too.
+
+    ai-inventory accepts `interpretation.next_review_due` in place of `expires_at` for a procedural
+    claim (the valid fixture's provider and its DPA claim). Until it is compared, those claims read
+    as `unbounded` and a review date years in the past never fails the build.
+    """
+    repo, manifest = build_green_repo(pathlib.Path(tmp) / "next-review-due")
+    original = manifest.read_text(encoding="utf-8")
+    results.check(
+        "next_review_due: the fixture really bounds claims with it",
+        original.count("next_review_due:") >= 2,
+        original.count("next_review_due:"),
+    )
+
+    code, report = ci(repo)
+    results.check(
+        "next_review_due: a future review date is a bound, not unbounded",
+        code == 0 and "unbounded" not in kinds(report),
+        kinds(report),
+    )
+
+    manifest.write_text(
+        re.sub(r"next_review_due: \d{4}-\d{2}-\d{2}", "next_review_due: 2020-01-01", original),
+        encoding="utf-8",
+    )
+    code, report = ci(repo)
+    expired = [
+        f for f in (report or {}).get("findings", [])
+        if f["kind"] == "expired" and f.get("field") == "interpretation.next_review_due"
+    ]
+    results.check("next_review_due: a past review date exits 4", code == 4, f"exit {code}, {kinds(report)}")
+    results.check(
+        "next_review_due: and is reported as expired, on that field, naming the owner",
+        len(expired) >= 2 and all(f.get("owner") for f in expired),
+        expired[:2],
+    )
+    standalone, payload = run_expiry(manifest)
+    results.check(
+        "next_review_due: check_expiry.py reports it too",
+        standalone == 1 and any(
+            f["kind"] == "expired" and f["field"] == "interpretation.next_review_due"
+            for f in (payload or {}).get("findings", [])
+        ),
+        (payload or {}).get("counts"),
+    )
+
+    manifest.write_text(
+        re.sub(r"next_review_due: \d{4}-\d{2}-\d{2}", "next_review_due: 2026-09-10", original),
+        encoding="utf-8",
+    )
+    code, report = ci(repo)
+    expiring = [
+        f for f in (report or {}).get("findings", [])
+        if f["kind"] == "expiring" and f.get("field") == "interpretation.next_review_due"
+    ]
+    results.check(
+        "next_review_due: a review date inside the window is expiring, and does not gate",
+        code == 0 and len(expiring) >= 2,
+        f"exit {code}, {kinds(report)}",
+    )
+
+    # governance-records puts the review date on the record itself rather than in the block.
+    fixture = PLUGINS / "governance-records" / "fixtures" / "valid.governance-records.yml"
+    governance = pathlib.Path(tmp) / "governance-records.yml"
+    governance.write_text(
+        fixture.read_text(encoding="utf-8").replace("next_review_due: 2027-05-14", "next_review_due: 2020-01-01"),
+        encoding="utf-8",
+    )
+    standalone, payload = run_expiry(governance)
+    findings = (payload or {}).get("findings", [])
+    results.check(
+        "next_review_due: a past record-level review date is expired, not unbounded",
+        standalone == 1
+        and any(f["kind"] == "expired" and f["field"] == "next_review_due" for f in findings)
+        and not any(f["kind"] == "unbounded" for f in findings),
+        [(f["kind"], f["path"], f["field"]) for f in findings],
+    )
+
+
 CASES = (
     case_green,
     case_policy,
@@ -994,6 +1142,8 @@ CASES = (
     case_every_piece,
     case_invalid_manifest,
     case_piece_agnostic,
+    case_finding_docs,
+    case_next_review_due,
 )
 
 USAGE = "usage: test_ci_mode.py [--output=json] [--quiet] [--emit-fixture=<dir>]\n"

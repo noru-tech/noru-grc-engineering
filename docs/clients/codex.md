@@ -13,10 +13,13 @@ codex plugin add audit-pack@noru-grc-engineering
 codex plugin add iac-scan@noru-grc-engineering
 codex plugin add privacy-datamap@noru-grc-engineering
 codex plugin add change-control@noru-grc-engineering
+codex plugin add compliance-assistant@noru-grc-engineering
 ```
 
 Codex reads the marketplace from `.agents/plugins/marketplace.json` and each plugin from
-`plugins/<name>/.codex-plugin/plugin.json`.
+`plugins/<name>/.codex-plugin/plugin.json`. `compliance-assistant` is listed from its own
+repository with a `git-subdir` source pinned to its release commit; Codex clones that commit and
+reads the plugin's `.codex-plugin/plugin.json` there.
 
 To try it against a local checkout without touching your real configuration:
 

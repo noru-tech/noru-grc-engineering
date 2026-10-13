@@ -1,0 +1,77 @@
+# noru-grc-engineering
+
+> Last-mile GRC engineering plugins for Claude Code and Codex: AI inventory, privacy data maps, infrastructure checks and change control, recorded in Noru.
+
+Each piece runs the same three commands: `/<piece>:scan` collects locally into a committed, reviewable `.noru/<piece>.yml`; `/<piece>:diff` shows what would change in Noru and writes nothing; `/<piece>:push` lands it once, idempotently, after explicit confirmation. Noru holds the record; there is no second register in the repository. Runtime code is Node built-ins and the Python 3 standard library, with no network during scan or validation. The plugins never handle a credential: authentication belongs to the MCP host connecting to `https://api.noru.tech/v1/mcp`. MIT licensed.
+
+Install from one marketplace, then add the pieces you want (`<piece>@noru-grc-engineering`):
+
+Claude Code:
+
+```text
+/plugin marketplace add noru-tech/noru-grc-engineering
+/plugin install noru@noru-grc-engineering
+/plugin install ai-inventory@noru-grc-engineering
+```
+
+Codex:
+
+```bash
+codex plugin marketplace add noru-tech/noru-grc-engineering
+codex plugin add noru@noru-grc-engineering
+codex plugin add ai-inventory@noru-grc-engineering
+```
+
+GitHub Copilot CLI:
+
+```bash
+copilot plugin marketplace add noru-tech/noru-grc-engineering
+copilot plugin install noru@noru-grc-engineering
+copilot plugin install ai-inventory@noru-grc-engineering
+```
+
+Pieces: `ai-inventory`, `evidence-push`, `governance-records`, `review-signoff`, `audit-pack`, `iac-scan`, `privacy-datamap`, `change-control`; the hub `noru`; the optional `repo-enforcement` utility; and `compliance-assistant`, listed from its own repository.
+
+Three GitHub Actions run the offline checks with no credential, so they work on a pull request from a fork. `@v0` follows the newest 0.x release:
+
+```yaml
+- uses: noru-tech/noru-review-action@v0   # route a pull request diff to the affected pieces; read-only
+- uses: noru-tech/noru-ci-action@v0       # one piece: scan, validate, expiry, privacy policy; fails on drift
+- uses: noru-tech/noru-enforce-action@v0  # whole-repository merge gate with a ratchet baseline
+```
+
+CI exit codes: `0` pass, `1` more than one failure condition, `2` usage, `3` manifest drift, `4` expired interpretation, `5` invalid manifest, `6` a check could not run, `7` personal data the privacy baseline does not permit.
+
+## Docs
+
+- [README](https://github.com/noru-tech/noru-grc-engineering/blob/main/README.md): what the plugins do, install, the pieces table, scopes
+- [Pieces](https://github.com/noru-tech/noru-grc-engineering/blob/main/README.md#pieces): what each piece collects and what it lands in Noru as
+- [Claude Code guide](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/clients/claude-code.md): install and Noru MCP connection
+- [Codex guide](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/clients/codex.md): install and Noru MCP connection
+- [GitHub Copilot CLI guide](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/clients/copilot-cli.md): install, and what has and has not been verified there
+- [Cursor guide](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/clients/cursor.md): running the pieces' scripts directly
+- [Generic MCP clients](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/clients/generic-mcp.md): connecting any MCP host
+- [Developer onboarding](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/developer-onboarding.md): an end-to-end repository rollout
+
+## CI and enforcement
+
+- [CI mode](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/ci-mode.md): drift, expiry and privacy-baseline gates, exit codes, warn-only adoption, GitLab and shell recipes
+- [Findings](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/findings/README.md): one page per finding kind, with the rule, examples, and how to fix it or record a disposition
+- [Repository enforcement](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/repository-enforcement.md): the merge gate, ratchet baseline, CODEOWNERS and GitHub ruleset
+- [noru-ci action](https://github.com/noru-tech/noru-grc-engineering/blob/main/.github/actions/noru-ci/README.md): inputs and outputs
+- [noru-review action](https://github.com/noru-tech/noru-grc-engineering/blob/main/.github/actions/noru-review/README.md): inputs and outputs
+- [enforce action](https://github.com/noru-tech/noru-grc-engineering/blob/main/actions/enforce/README.md): inputs and outputs
+
+## Trust and limits
+
+- [Verification](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/verification.md): what every build proves, and what is not verified
+- [Known limitations](https://github.com/noru-tech/noru-grc-engineering/blob/main/KNOWN-LIMITATIONS.md): maturity, known gaps, non-goals
+- [Security policy](https://github.com/noru-tech/noru-grc-engineering/blob/main/SECURITY.md): private vulnerability reporting and threat model
+
+## Optional
+
+- [The piece contract](https://github.com/noru-tech/noru-grc-engineering/blob/main/contract/README.md): the nine requirements every piece satisfies, each enforced by a test
+- [Authoring a piece](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/authoring-a-piece.md): scaffold and write a new piece
+- [Marketplace metadata](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/marketplace.md): capability metadata in the marketplace manifests
+- [Changelog](https://github.com/noru-tech/noru-grc-engineering/blob/main/CHANGELOG.md)
+- [Contributing](https://github.com/noru-tech/noru-grc-engineering/blob/main/CONTRIBUTING.md)

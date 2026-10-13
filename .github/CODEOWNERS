@@ -1,0 +1,9 @@
+# Review ownership. The contract, the actions and the workflows carry compatibility and security
+# commitments: the actions are what every consumer's compliance gate runs, and the workflows run
+# with repository credentials and publish the Marketplace mirrors.
+*                       @bipthelin
+/contract/              @bipthelin
+/scripts/               @bipthelin
+/.github/               @bipthelin
+/actions/               @bipthelin
+/SECURITY.md            @bipthelin

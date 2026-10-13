@@ -1,0 +1,59 @@
+name: Feature request
+description: A change to an existing piece or action, or a proposal for a new piece
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Read the contract's non-goals first (`contract/README.md`): no local register, no framework
+        control text, no credential handling, no SaaS connectors, and no runtime dependencies. A
+        request that needs one of those is best raised in Discussions.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - a new piece
+        - noru (hub)
+        - ai-inventory
+        - evidence-push
+        - governance-records
+        - review-signoff
+        - audit-pack
+        - privacy-datamap
+        - iac-scan
+        - change-control
+        - repo-enforcement
+        - noru-ci action
+        - noru-review action
+        - enforce action
+        - contract, schemas or scripts
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What compliance work cannot be done, or is done badly, today? Who does it and when?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What should the piece collect, check or land in Noru? For a new piece, sketch `:scan`, `:diff` and `:push`.
+    validations:
+      required: true
+  - type: textarea
+    id: api
+    attributes:
+      label: Published Noru API or MCP surface
+      description: >-
+        Which documented tools, endpoints and scopes would it use? Link the public documentation.
+        If it needs something that is not documented, say so rather than naming it.
+  - type: textarea
+    id: test
+    attributes:
+      label: How would it be tested?
+      description: Every claim gets a test. Which fixture or check would prove it works, and fail when it does not?

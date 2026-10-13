@@ -28,6 +28,9 @@ Five things it reports:
 expiry of the record it is about to create — `expiry_date` on an evidence upload — that field is
 compared the same way, because a record that expires in Noru next week is not evidence of anything
 the week after.
+A procedural claim that carries `next_review_due` in place of `expires_at` — in its interpretation
+block (ai-inventory) or on the claim itself (governance-records) — is bounded by that review date:
+past it is `expired`, inside the warning window is `expiring`.
 
 Usage:
     python3 scripts/check_expiry.py <manifest.yml|parsed.json> [--as-of=YYYY-MM-DD]
@@ -41,6 +44,8 @@ import pathlib
 import re
 import sys
 
+from finding_docs import see as see_finding_docs
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 
@@ -52,6 +57,9 @@ DEFAULT_WARN_WITHIN_DAYS = 30
 # a date after which this is no longer current. Kept as a tuple so adding a piece that records the
 # expiry under another name is a one-line change with a test, not a rewrite.
 RECORD_EXPIRY_FIELDS = ("expiry_date",)
+
+# The interpretation field a procedural claim may carry in place of `expires_at`.
+REVIEW_DATE_FIELD = "next_review_due"
 
 USAGE = (
     "usage: check_expiry.py <manifest.yml|parsed.json> [--as-of=YYYY-MM-DD] "
@@ -163,8 +171,18 @@ def evaluate_claim(path, claim, as_of, warn_within_days, max_age_days):
             _unparsable_message(decided_raw),
         )
 
-    # interpretation.expires_at first, then any record-level expiry the piece also records.
+    # interpretation.expires_at first, then any record-level expiry the piece also records. A
+    # procedural claim may carry a review date instead of an expiry — ai-inventory accepts
+    # `next_review_due` inside the interpretation block, governance-records on the record itself.
+    # Past that date nobody has looked again, which is the same failure, so it is aged the same
+    # way. Only in place of `expires_at`: a claim with both is bounded by its expiry, and one stale
+    # claim must not come back as two findings.
     expiries = [("interpretation.expires_at", block.get("expires_at"))]
+    if block.get("expires_at") is None:
+        if block.get(REVIEW_DATE_FIELD) is not None:
+            expiries = [(f"interpretation.{REVIEW_DATE_FIELD}", block.get(REVIEW_DATE_FIELD))]
+        elif claim.get(REVIEW_DATE_FIELD) is not None:
+            expiries = [(REVIEW_DATE_FIELD, claim.get(REVIEW_DATE_FIELD))]
     for field in RECORD_EXPIRY_FIELDS:
         if field in claim:
             expiries.append((field, claim.get(field)))
@@ -276,7 +294,10 @@ def render_text(payload, quiet):
             continue
         label = "ERROR" if failing else "warn "
         subject = f" \"{finding['subject']}\"" if finding.get("subject") else ""
-        lines.append(f"  {label} [{finding['kind']}] {finding['path']}{subject}: {finding['message']}")
+        lines.append(
+            f"  {label} [{finding['kind']}] {finding['path']}{subject}: {finding['message']}"
+            + see_finding_docs(finding["kind"])
+        )
     if not payload["ok"]:
         failing = sum(1 for f in payload["findings"] if f["kind"] in payload["policy"]["fail_on"])
         lines.append("")

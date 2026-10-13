@@ -45,3 +45,28 @@ file body; it is the only piece whose push reads `NORU_API_KEY` directly.
 The repository checks this metadata, plugin names and versions across both marketplace formats.
 Platform-only presentation such as suite collections, upgrade warnings and shared connection UI is
 not represented as a plugin runtime dependency.
+
+## One marketplace for every Noru plugin
+
+`/plugin marketplace add noru-tech/noru-grc-engineering` (or the Codex and Copilot CLI equivalents)
+gives access to every Noru plugin, including `compliance-assistant`, which lives in
+[`noru-tech/compliance-assistant`](https://github.com/noru-tech/compliance-assistant). The
+marketplaces list it from that repository rather than copying it:
+
+| File | Client | `compliance-assistant` source |
+|---|---|---|
+| `.claude-plugin/marketplace.json` | Claude Code | `git-subdir`: `url`, `path`, `ref`, `sha` |
+| `.agents/plugins/marketplace.json` | Codex | the same `git-subdir` object |
+| `.github/plugin/marketplace.json` | GitHub Copilot CLI | `github`: `repo`, with the same `path`, `ref`, `sha` |
+
+Copilot CLI needs its own file because it rejects a whole marketplace that contains a `git-subdir`
+source, while Claude Code ignores `path` on a `github` source. Copilot CLI reads
+`.github/plugin/marketplace.json` before `.claude-plugin/marketplace.json`.
+
+The external entry is pinned to the full commit of a `compliance-assistant` release, so what users
+install changes only when this repository changes. It keeps its own version (it is not part of this
+repository's release), so the shared-version rule does not apply to it. To move it to a new
+`compliance-assistant` release, update `ref`, `sha`, `version` and `description` in all three files
+together. `scripts/check_repo.py` checks that the source is a `noru-tech` repository over https, that
+the `sha` is a full commit, that Codex and Copilot carry the same pointer, and that no plugin
+directory here uses the same name.

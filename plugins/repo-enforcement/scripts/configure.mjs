@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const VERSION = "0.9.0";
+const VERSION = "0.11.0";
 const PLAN_REL = ".noru/.cache/repo-enforcement-files.json";
 const ALLOWED_FILES = new Set([
   ".noru/enforcement.yml", ".noru/enforcement-baseline.json",
@@ -93,7 +93,9 @@ function policyObject(opts) {
     adoption: opts.mode === "ratchet" ? { mode: opts.mode, baseline: ".noru/enforcement-baseline.json" } : { mode: opts.mode },
     pieces: {
       "ai-inventory": { required: true },
-      "iac-scan": { required: true },
+      // iac-scan builds its manifest from Noru's queue, which the offline, credential-free PR job
+      // cannot fetch. Requiring it by default would fail every pull request as a tooling violation.
+      "iac-scan": { required: false },
       "privacy-datamap": { required: true, fail_on: ["drift", "needs_review", "missing_interpretation", "expired", "coverage", "tooling"] },
     },
     reviews: {
@@ -130,8 +132,10 @@ ${opts.mode === "ratchet" ? "  baseline: .noru/enforcement-baseline.json\n" : ""
 pieces:
   ai-inventory:
     required: true
+  # Requires .noru/.cache/iac-queue.json (fetched from Noru by /iac-scan:scan) in the job's
+  # checkout. Set required: true only when the enforcement job provides that file.
   iac-scan:
-    required: true
+    required: false
   privacy-datamap:
     required: true
     fail_on: [drift, needs_review, missing_interpretation, expired, coverage, tooling]

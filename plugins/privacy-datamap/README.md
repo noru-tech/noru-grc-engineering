@@ -501,3 +501,10 @@ boundary reasoning for covered stores. The core workflow also requires checking 
 transient flows, identity continuity and separation of approval provenance from descriptions.
 These are agent review obligations; the validator checks missing records, not whether an explanation
 proves deployed behavior. Missing deployed evidence must remain visible.
+
+## Portable CI checks and publication
+
+Run `scripts/check_privacy.py --repo=<repository>` from this plugin to check the reviewed
+baseline and export offline. `scripts/publish_datamap.py` provides opt-in REST publication
+with provider-neutral source metadata. See [portable privacy CI](../../docs/privacy-ci.md)
+for inputs, exit codes and the supported document format.

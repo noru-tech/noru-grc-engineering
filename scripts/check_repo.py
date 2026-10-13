@@ -6,7 +6,10 @@ Standard library only, no network, no install step.
 What it covers, and why each one is here rather than left to review:
 
   * **Marketplace manifests** — the Claude Code and Codex marketplaces must agree on the same set of
-    plugins at the same paths. They are two files nobody edits together, so they drift.
+    plugins at the same paths. They are two files nobody edits together, so they drift. A Noru
+    plugin from another repository is listed by a git-subdir source pinned to a full commit,
+    identical in both, and keeps its own version outside this repository's release.
+    `.github/plugin/marketplace.json` mirrors the Claude marketplace for GitHub Copilot CLI.
   * **Plugin manifests** — every declared source directory really contains a plugin whose name
     matches, for both clients, and no public metadata contains an unfinished placeholder.
   * **MCP config** — when a plugin declares Noru access, it points at the hosted endpoint and
@@ -18,6 +21,9 @@ What it covers, and why each one is here rather than left to review:
     same enums. Two sources of truth is one too many, so this makes them one in effect.
   * **Schema evaluability** — no contract schema uses a JSON Schema keyword scripts/jsonschema_mini.py
     cannot evaluate, so the schemas can never quietly outgrow the checker that enforces them.
+  * **Workflow hardening** — this repository's workflows declare top-level permissions, read-only,
+    and pin every third-party action to a full commit SHA.
+  * **Citation** — CITATION.cff names the current release and its changelog date.
   * **Secret hygiene** — this repository is public.
 
 Usage:
@@ -105,6 +111,7 @@ SECRET_PATTERNS = [
 PLACEHOLDER_TOKENS = ("<NORU_API_KEY>", "${NORU_API_KEY}", "…", "<your", "<redacted>", "example")
 PUBLIC_METADATA_PLACEHOLDER = re.compile(r"\b(?:TODO|TBD|CHANGE_ME)\b", re.IGNORECASE)
 UNSUPPORTED_CODEX_MANIFEST_FIELDS = {"commands", "hooks"}
+EXTERNAL_SOURCE_URL = re.compile(r"https://github\.com/noru-tech/[A-Za-z0-9._-]+\.git")
 SCANNED_SUFFIXES = {".mjs", ".js", ".py", ".json", ".md", ".yml", ".yaml", ".txt", ".ts"}
 SKIP_DIRS = {".git", "node_modules", ".noru"}
 
@@ -135,6 +142,7 @@ def check_public_metadata(problems):
     paths = [
         ROOT / ".claude-plugin" / "marketplace.json",
         ROOT / ".agents" / "plugins" / "marketplace.json",
+        ROOT / ".github" / "plugin" / "marketplace.json",
     ]
     for _name, directory in marketplace_plugin_directories():
         paths.extend(
@@ -152,6 +160,53 @@ def check_public_metadata(problems):
                     f"{path.relative_to(ROOT)}:{number}: contains unfinished placeholder text "
                     f"'{match.group()}'"
                 )
+
+
+def copilot_source(source):
+    """The GitHub Copilot CLI form of a Claude git-subdir source.
+
+    Copilot CLI documents `github` and `url` plugin sources, each with an optional `path`, and
+    rejects the whole marketplace on a `git-subdir` entry; Claude Code accepts `git-subdir` and
+    ignores `path` on the other two. So the external entry needs one spelling per client.
+    """
+    if not isinstance(source, dict):
+        return source
+    repo = str(source.get("url", "")).removeprefix("https://github.com/").removesuffix(".git")
+    return {
+        "source": "github",
+        "repo": repo,
+        "path": source.get("path"),
+        "ref": source.get("ref"),
+        "sha": source.get("sha"),
+    }
+
+
+def check_copilot_marketplace(problems):
+    """`.github/plugin/marketplace.json` is the Claude marketplace, spelled for Copilot CLI.
+
+    Copilot CLI reads it before `.claude-plugin/marketplace.json`. It must list the same entries
+    with the same metadata; only an external entry's source differs, and only in spelling.
+    """
+    claude_path = ROOT / ".claude-plugin" / "marketplace.json"
+    copilot_path = ROOT / ".github" / "plugin" / "marketplace.json"
+    if not claude_path.is_file():
+        return
+    if not copilot_path.is_file():
+        problems.append("missing .github/plugin/marketplace.json (the GitHub Copilot CLI mirror)")
+        return
+    claude = json.loads(claude_path.read_text(encoding="utf-8"))
+    copilot = json.loads(copilot_path.read_text(encoding="utf-8"))
+    expected = {key: value for key, value in claude.items() if key != "$schema"}
+    expected["plugins"] = [
+        {**entry, "source": copilot_source(entry.get("source"))}
+        for entry in claude.get("plugins", [])
+    ]
+    if copilot != expected:
+        problems.append(
+            ".github/plugin/marketplace.json does not mirror .claude-plugin/marketplace.json; "
+            "copy it, drop $schema, and spell each git-subdir source as a github source with the "
+            "same path, ref and sha"
+        )
 
 
 def check_codex_manifests(problems):
@@ -176,6 +231,50 @@ def check_codex_manifests(problems):
         for prefix in ("Local read:", "Local write:", "Noru read:", "Noru write:"):
             if not any(isinstance(value, str) and value.startswith(prefix) for value in capabilities):
                 problems.append(f"[{name}] Codex capabilities do not declare '{prefix}'")
+
+
+def check_external_entry(problems, name, entry, codex_entry):
+    """A Noru plugin that lives in another repository, listed so one marketplace offers everything.
+
+    It is not part of this repository's release: it keeps its own version, its own manifests and
+    its own checks, so the shared-version and manifest rules below do not apply to it. What this
+    repository does own is the pointer, and a pointer that floats would let the code users install
+    change without a change here. So the entry must name a Noru repository over https, a
+    subdirectory, a ref and the full commit it resolves to, and both marketplaces must carry the
+    identical source.
+    """
+    source = entry["source"]
+    if source.get("source") != "git-subdir":
+        problems.append(
+            f"[{name}] external Claude marketplace source must be 'git-subdir', "
+            f"not {source.get('source')!r}"
+        )
+    url = source.get("url")
+    if not isinstance(url, str) or not EXTERNAL_SOURCE_URL.fullmatch(url):
+        problems.append(
+            f"[{name}] external source url {url!r} must be https://github.com/noru-tech/<repo>.git"
+        )
+    path = source.get("path")
+    if not isinstance(path, str) or not path or path.startswith(("/", ".")) or ".." in path:
+        problems.append(f"[{name}] external source path {path!r} must be a relative subdirectory")
+    if not isinstance(source.get("ref"), str) or not source.get("ref"):
+        problems.append(f"[{name}] external source has no ref")
+    sha = source.get("sha")
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        problems.append(f"[{name}] external source sha {sha!r} must be a full 40-character commit")
+    for field in ("version", "license", "description"):
+        if not entry.get(field):
+            problems.append(f"[{name}] Claude marketplace entry has no {field}")
+    if (ROOT / "plugins" / name).exists():
+        problems.append(
+            f"[{name}] is listed as an external plugin but plugins/{name} also exists here; "
+            "one name, one source"
+        )
+    if codex_entry is not None and codex_entry.get("source") != source:
+        problems.append(
+            f"[{name}] Codex marketplace source {codex_entry.get('source')} differs from Claude's "
+            f"{source}"
+        )
 
 
 def check_marketplaces(problems):
@@ -208,11 +307,19 @@ def check_marketplaces(problems):
 
     shared_mcp = None
     shared_mcp_owner = None
+    local_names = []
     for name, entry in sorted(claude_entries.items()):
         source = entry.get("source")
-        if not isinstance(source, str):
-            problems.append(f"[{name}] Claude marketplace source must be a path string")
+        if isinstance(source, dict):
+            check_external_entry(problems, name, entry, codex_entries.get(name))
             continue
+        if not isinstance(source, str):
+            problems.append(
+                f"[{name}] Claude marketplace source must be a path string or a pinned "
+                "git-subdir object"
+            )
+            continue
+        local_names.append(name)
         directory = (ROOT / source).resolve()
         if not directory.is_dir():
             problems.append(f"[{name}] Claude marketplace source {source} is not a directory")
@@ -273,7 +380,43 @@ def check_marketplaces(problems):
                 "plugins must declare the same logical Noru server without depending on the hub"
             )
 
-    return sorted(claude_entries)
+    return sorted(local_names)
+
+
+def check_citation(problems):
+    """CITATION.cff names the current release, so a citation never points at a stale version.
+
+    It is one more copy of the shared version number, and a copy nobody reads until someone cites
+    the toolkit, which is exactly the copy that goes stale.
+    """
+    citation = ROOT / "CITATION.cff"
+    marketplace = ROOT / ".claude-plugin" / "marketplace.json"
+    if not citation.is_file() or not marketplace.is_file():
+        if not citation.is_file():
+            problems.append("missing CITATION.cff")
+        return
+    entries = {e.get("name"): e for e in json.loads(marketplace.read_text(encoding="utf-8")).get("plugins", [])}
+    expected = (entries.get("noru") or {}).get("version")
+    text = citation.read_text(encoding="utf-8")
+    version = re.search(r'^version:\s*"?([^"\n]+)"?\s*$', text, re.M)
+    released = re.search(r'^date-released:\s*"?(\d{4}-\d{2}-\d{2})"?\s*$', text, re.M)
+    if not version or version.group(1).strip() != expected:
+        problems.append(
+            f"CITATION.cff version is {version.group(1).strip() if version else 'missing'}, expected "
+            f"{expected}; bump it with the rest of the release"
+        )
+        return
+    changelog = ROOT / "CHANGELOG.md"
+    heading = re.search(
+        rf"^## {re.escape(expected)} \S+ (\d{{4}}-\d{{2}}-\d{{2}})\s*$",
+        changelog.read_text(encoding="utf-8") if changelog.is_file() else "",
+        re.M,
+    )
+    if heading and (not released or released.group(1) != heading.group(1)):
+        problems.append(
+            f"CITATION.cff date-released is {released.group(1) if released else 'missing'}, but "
+            f"CHANGELOG.md dates {expected} {heading.group(1)}"
+        )
 
 
 def check_pieces_registered(problems, plugin_names):
@@ -288,7 +431,8 @@ def check_pieces_registered(problems, plugin_names):
         if directory.name not in listed:
             problems.append(
                 f"plugins/{directory.name} exists but is in neither marketplace — add it to "
-                ".claude-plugin/marketplace.json and .agents/plugins/marketplace.json"
+                ".claude-plugin/marketplace.json, .agents/plugins/marketplace.json and "
+                ".github/plugin/marketplace.json"
             )
 
 
@@ -805,6 +949,33 @@ def check_enforcement_action(problems):
         problems.append("actions/enforce must remove credential-like environment variables")
 
 
+def check_workflow_hardening(problems):
+    """This repository's own workflows: explicit top-level permissions, every action pinned by SHA.
+
+    A workflow with no top-level `permissions:` inherits the repository default, which can be
+    write-all; a tag is a pointer its owner can move. The templates under templates/ and the
+    plugin assets are what consumers copy and have their own checks; this covers what runs here.
+    """
+    workflows = ROOT / ".github" / "workflows"
+    uses_re = re.compile(r"^\s*(?:-\s+)?uses:\s*['\"]?([^\s'\"#]+)", re.M)
+    for path in sorted(workflows.glob("*.y*ml")) if workflows.is_dir() else []:
+        text = path.read_text(encoding="utf-8")
+        where = path.relative_to(ROOT)
+        top = re.search(r"^permissions:(.*)$", text, re.M)
+        if not top:
+            problems.append(f"{where}: declares no top-level permissions; add one, read-only")
+        elif re.search(r"write-all", top.group(1)) or re.search(r"^permissions:\n(?:  .*\n)*  [\w-]+:\s*write\b", text, re.M):
+            problems.append(f"{where}: top-level permissions grant write; grant it on the job that needs it")
+        for match in uses_re.finditer(text):
+            ref = match.group(1)
+            if ref.startswith("./") or ref.startswith("docker://"):
+                continue
+            _, _, version = ref.partition("@")
+            if not re.fullmatch(r"[0-9a-f]{40}", version):
+                line = text[: match.start()].count("\n") + 1
+                problems.append(f"{where}:{line}: {ref} is not pinned to a full commit SHA")
+
+
 def check_secrets(problems):
     for path in sorted(ROOT.rglob("*")):
         if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
@@ -867,6 +1038,8 @@ def main(argv):
     try:
         plugin_names = check_marketplaces(problems)
         check_public_metadata(problems)
+        check_copilot_marketplace(problems)
+        check_citation(problems)
         check_codex_manifests(problems)
         check_pieces_registered(problems, plugin_names)
         check_hub_routing(problems)
@@ -879,6 +1052,7 @@ def main(argv):
         check_schemas_evaluable(problems)
         check_enforcement_registry(problems)
         check_enforcement_action(problems)
+        check_workflow_hardening(problems)
         check_skills(problems, plugin_names)
         check_secrets(problems)
     except Exception as exc:  # noqa: BLE001

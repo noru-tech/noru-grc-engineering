@@ -26,6 +26,15 @@ entry needs a named person, rationale, decision date, and expiry. New, mutated, 
 resolved, or reintroduced debt fails. Invalid records, tooling failures, credential exposure,
 expired exceptions, stale plans, and GitHub/workflow drift cannot be baselined.
 
+Enforcement fails closed. A required piece whose check could not run — its collector cannot start,
+a child process crashes or times out, its report is not JSON — is a `tooling` violation whatever
+else it reported, so the gate fails and no baseline entry can accept it
+([docs/findings/tooling.md](./findings/tooling.md)). Require only pieces the gate can run: the
+check is offline and holds no Noru credential, so a queue-driven piece such as `iac-scan` needs its
+queue file (`.noru/.cache/iac-queue.json`) in the job's checkout. The policy setup writes therefore
+lists `iac-scan` as `required: false`; set it to `true` only when the enforcement job provides that
+file.
+
 Use `/repo-enforcement:status` for the derived worklist. It groups current debt by owning piece and
 named person and sorts blockers, stale cleanup, entries due within seven days, and scheduled debt.
 `/repo-enforcement:work <fingerprint>` inspects one exact item, routes it to the owning piece, and
@@ -38,7 +47,10 @@ push.
 The pull-request workflow runs on every PR with no path filter. It has only `contents: read`, carries
 no Noru or GitHub administration credential, passes the current UTC date explicitly, and invokes the
 released action at the exact SHA recorded in policy. The action runs every configured piece
-independently and emits one JSON report, annotations, and a job summary.
+independently and emits one JSON report, annotations, and a job summary. Each annotation links the
+page for the rule it names; [docs/findings/](./findings/README.md) lists every rule, including the
+ratchet's own (`invalid_baseline`, `expired_exception`, `stale_baseline_entry`), and says which can
+be baselined.
 
 ## GitHub administration
 

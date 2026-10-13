@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -66,6 +67,35 @@ def configure(repo):
             "--break-glass=@example/security-admins",
             "--mode=ratchet", "--output=json", "--quiet",
         ]
+    )
+
+
+def default_policy_tests(results, repo):
+    """The default setup must give a gate the offline, credential-free PR job can run (#69)."""
+    policy = (repo / ".noru" / "enforcement.yml").read_text(encoding="utf-8")
+    results.check(
+        "the default policy does not require iac-scan, whose queue the PR job cannot fetch",
+        "  iac-scan:\n    required: false\n" in policy,
+        policy,
+    )
+    # No queue of any kind in the checkout, exactly as on a pull request.
+    cache = repo / ".noru" / ".cache"
+    queues = sorted(path.name for path in cache.glob("*queue*.json")) if cache.is_dir() else []
+    validated = run([
+        sys.executable, str(ENFORCE), "validate", f"--repo={repo}", f"--suite-root={ROOT}",
+        f"--registry={REGISTRY}", "--as-of=2026-09-04", "--output=json", "--quiet",
+    ])
+    payload = json.loads(validated.stdout)
+    blockers = sorted(
+        (row["piece"], row["rule"]) for row in payload["new_violations"]
+        if row["rule"] in {"tooling", "invalid_baseline"}
+    )
+    results.check(
+        "every piece the default policy requires runs without a Noru queue",
+        not queues and not blockers
+        and all(row["status"] != "error" for row in payload["pieces"])
+        and "iac-scan" not in {row["piece"] for row in payload["pieces"]},
+        (queues, blockers, [(row["piece"], row["status"]) for row in payload["pieces"]]),
     )
 
 
@@ -138,7 +168,7 @@ def policy_validation_tests(results, repo):
     ])
     results.check(
         "worklist text is concise and gives the next exact work command",
-        worklist_text.returncode == 0 and "Baseline debt: 2" in worklist_text.stdout
+        worklist_text.returncode == 0 and f"Baseline debt: {len(accepted['violations'])}" in worklist_text.stdout
         and "/repo-enforcement:work sha256:" in worklist_text.stdout,
         worklist_text.stderr or worklist_text.stdout,
     )
@@ -217,6 +247,143 @@ def policy_validation_tests(results, repo):
     results.check("line movement does not change a violation fingerprint", one["fingerprint"] == two["fingerprint"], (one, two))
     never = module.violation_from_finding("repo-enforcement", {"kind": "ruleset_drift", "path": "github", "message": "weakened"})
     results.check("ruleset drift can never be baselined", never["baselineable"] is False, never)
+
+
+def annotation_tests(results, stderr):
+    """Every annotation the action emits links the page for the rule it names, and that page exists."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from finding_docs import FINDINGS_DOCS_BASE  # noqa: PLC0415
+
+    source = ACTION.read_text(encoding="utf-8")
+    results.check(
+        "the action runtime and scripts/finding_docs.py agree on the findings URL",
+        f'const FINDINGS_DOCS_BASE = "{FINDINGS_DOCS_BASE}";' in source,
+        FINDINGS_DOCS_BASE,
+    )
+    annotations = [line for line in stderr.splitlines() if line.startswith("::error title=Noru GRC")]
+    linked = [line.rsplit(" (see ", 1) for line in annotations]
+    pages = [
+        row[1][len(FINDINGS_DOCS_BASE):-1] if len(row) == 2 and row[1].startswith(FINDINGS_DOCS_BASE) else None
+        for row in linked
+    ]
+    results.check(
+        "every enforcement annotation ends with a link to its finding page",
+        annotations and all(page and page.endswith(".md") for page in pages),
+        annotations[:3],
+    )
+    missing = sorted({page for page in pages if page and not (ROOT / "docs" / "findings" / page).is_file()})
+    results.check("every linked enforcement finding page exists", not missing, missing)
+    documented = {path.stem for path in (ROOT / "docs" / "findings").glob("*.md")}
+    offline_rules = {"needs_review", "missing_interpretation", "tooling", "invalid_baseline",
+                     "expired_exception", "stale_baseline_entry"}
+    undocumented = sorted(offline_rules - documented)
+    results.check("every offline enforcement rule has a finding page", not undocumented, undocumented)
+
+
+STRICT_POLICY_PIECES = "pieces:\n{pieces}\nreviews:"
+
+
+def strict_repo(base, name, pieces):
+    """A configured repository whose policy is strict and requires exactly `pieces` (YAML lines)."""
+    repo = base / name
+    init_repo(repo)
+    configure(repo)
+    run(["node", str(CONFIGURE), "apply", f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    policy = repo / ".noru" / "enforcement.yml"
+    text = policy.read_text(encoding="utf-8")
+    text = re.sub(r"adoption:\n  mode: ratchet\n  baseline: [^\n]+", "adoption:\n  mode: strict", text)
+    text = re.sub(r"pieces:\n.*?\n\nreviews:", STRICT_POLICY_PIECES.format(pieces=pieces + "\n"), text, flags=re.S)
+    policy.write_text(text, encoding="utf-8")
+    return repo
+
+
+def validate(repo, *extra):
+    return run([
+        sys.executable, str(ENFORCE), "validate", f"--repo={repo}", f"--suite-root={ROOT}",
+        f"--registry={REGISTRY}", "--as-of=2026-09-04", *extra,
+    ])
+
+
+def fail_closed_tests(results, base):
+    """A required piece that cannot run is a failed gate, never a pass and never baselineable."""
+    # iac-scan works Noru's queue; with no queue in the checkout its collector cannot run at all.
+    repo = strict_repo(base, "no-queue", "  iac-scan:\n    required: true")
+    completed = validate(repo, "--output=json", "--quiet")
+    payload = json.loads(completed.stdout or "{}")
+    tooling = [row for row in payload.get("new_violations", []) if row["piece"] == "iac-scan" and row["rule"] == "tooling"]
+    results.check(
+        "a required piece that cannot run fails the gate",
+        completed.returncode == 1 and payload.get("ok") is False and len(tooling) == 1,
+        payload.get("new_violations") or completed.stderr or payload,
+    )
+    results.check(
+        "the tooling violation says which step could not run, and is never baselineable",
+        tooling and tooling[0]["baselineable"] is False and "scan" in tooling[0]["message"]
+        and "no queue" in tooling[0]["message"],
+        tooling,
+    )
+    text = validate(repo, "--output=text")
+    results.check(
+        "the text report says FAIL and names the tooling violation",
+        text.returncode == 1 and "Repository enforcement: FAIL" in text.stdout and "FAIL [iac-scan/tooling]" in text.stdout,
+        text.stdout or text.stderr,
+    )
+    action_env = {
+        **dict(os.environ), "GITHUB_WORKSPACE": str(repo), "INPUT_AS-OF": "2026-09-04", "INPUT_REPO": ".",
+        "INPUT_POLICY": ".noru/enforcement.yml", "RUNNER_TEMP": str(repo / ".noru" / ".cache"),
+    }
+    action = subprocess.run(["node", str(ACTION)], cwd=repo, env=action_env, text=True, capture_output=True, check=False, timeout=180)
+    results.check(
+        "the action fails and annotates the tooling violation",
+        action.returncode == 1 and "::error title=Noru GRC iac-scan/tooling::" in action.stderr,
+        action.stderr or action.stdout,
+    )
+
+    # Ratchet mode: an entry accepting that exact fingerprint must not let it through.
+    if tooling:
+        policy = repo / ".noru" / "enforcement.yml"
+        policy.write_text(
+            policy.read_text(encoding="utf-8").replace(
+                "adoption:\n  mode: strict", "adoption:\n  mode: ratchet\n  baseline: .noru/enforcement-baseline.json"
+            ),
+            encoding="utf-8",
+        )
+        digest = json.loads(validate(repo, "--output=json", "--quiet").stdout)["policy_digest"]
+        (repo / ".noru" / "enforcement-baseline.json").write_text(json.dumps({
+            "version": 1, "policy_digest": digest,
+            "violations": [{
+                "piece": "iac-scan", "rule": "tooling", "subject": tooling[0]["subject"],
+                "fingerprint": tooling[0]["fingerprint"], "owner": "Dana Okafor",
+                "rationale": "Attempting to accept a gate that cannot run.",
+                "decided_at": "2026-09-01", "expires_at": "2026-09-20",
+            }],
+        }, indent=2) + "\n", encoding="utf-8")
+        ratchet = validate(repo, "--output=json", "--quiet")
+        ratchet_payload = json.loads(ratchet.stdout or "{}")
+        results.check(
+            "a baseline entry cannot accept a piece that could not run",
+            ratchet.returncode == 1 and not ratchet_payload.get("baselined_violations")
+            and any(row["rule"] == "tooling" for row in ratchet_payload.get("new_violations", [])),
+            ratchet_payload,
+        )
+
+    # A broken gate whose only finding the piece's fail_on excludes is still a broken gate.
+    repo = strict_repo(base, "unreadable-schema", "  privacy-datamap:\n    required: true\n    fail_on: [drift]")
+    (repo / "src").mkdir()
+    (repo / "src" / "user.model.ts").write_text(
+        "import mongoose from \"mongoose\"\nconst UserSchema = new mongoose.Schema({ email: String })\n",
+        encoding="utf-8",
+    )
+    run(["git", "add", "-A"], repo)
+    run(["git", "commit", "-q", "-m", "an unreadable schema"], repo)
+    completed = validate(repo, "--output=json", "--quiet")
+    payload = json.loads(completed.stdout or "{}")
+    results.check(
+        "a collector that parsed nothing fails the gate even when fail_on omits coverage",
+        completed.returncode == 1
+        and any(row["piece"] == "privacy-datamap" and row["rule"] == "tooling" for row in payload.get("new_violations", [])),
+        payload.get("new_violations") or completed.stderr or payload,
+    )
 
 
 def github_tests(results, repo, commit):
@@ -325,6 +492,7 @@ def main(argv):
         applied = run(["node", str(CONFIGURE), "apply", f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
         codeowners = (repo / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
         results.check("confirmed setup preserves existing CODEOWNERS and protects itself", applied.returncode == 0 and "/docs/ @example/docs" in codeowners and "/.github/CODEOWNERS @example/grc-reviewers" in codeowners, applied.stderr or codeowners)
+        default_policy_tests(results, repo)
         policy_validation_tests(results, repo)
         action_env = {
             **dict(os.environ), "GITHUB_WORKSPACE": str(repo),
@@ -334,6 +502,8 @@ def main(argv):
         action = subprocess.run(["node", str(ACTION)], cwd=repo, env=action_env, text=True, capture_output=True, check=False, timeout=180)
         action_report = repo / ".noru" / ".cache" / "noru-grc-enforcement.json"
         results.check("the bundled action fails closed and writes its JSON report", action.returncode == 1 and action_report.is_file() and not json.loads(action_report.read_text())["ok"], action.stderr or action.stdout)
+        annotation_tests(results, action.stderr)
+        fail_closed_tests(results, pathlib.Path(tmp))
         # GitHub planning reads policy only; baseline state is irrelevant from here.
         github_tests(results, repo, commit)
     return results.finish(output_json, quiet)

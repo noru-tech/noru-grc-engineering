@@ -14,6 +14,10 @@ write access is not a check, it is a report someone remembers to run.
 Three things fail a build. Two are computable from the repository and a calendar; the third needs
 one more committed file, and no network either.
 
+Every finding line names its kind in brackets and ends with a link to that kind's page in
+[docs/findings/](./findings/README.md): the rule, why it matters, a failing and a passing example,
+and how to fix it or record a disposition.
+
 ## 1. Manifest drift
 
 The collector is deterministic and offline. It reduces everything it found in the repository to a
@@ -29,7 +33,7 @@ The failure is readable. Alongside the digests, the report lists what the collec
 repository that the manifest names nowhere, with the `file:line` where each was first seen:
 
 ```text
-  FAIL [drift] .noru/ai-inventory.yml: the committed manifest no longer matches the repository
+  FAIL [drift] .noru/ai-inventory.yml: the committed manifest no longer matches the repository (see https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/findings/drift.md)
          present in the repository, named nowhere in the manifest:
            + frameworks[0]: vercel-ai-sdk  (first seen at src/summarize.ts:1)
            + models[0]: claude-sonnet-4-5  (first seen at src/summarize.ts:5)
@@ -66,13 +70,21 @@ manifest, finds every mapping that carries an `interpretation`, and reports:
 | `cadence` | outside the review cadence this pipeline declared with `--max-age-days` | yes |
 | `unparsable` | a date that cannot be compared, so the expiry cannot be trusted | yes |
 | `expiring` | expires inside the warning window (default 30 days). A heads-up, not a gate | no |
-| `unbounded` | no expiry at all — permitted by the contract for a point-in-time procedural claim | no |
+| `unbounded` | no expiry and no review date at all — permitted by the contract for a point-in-time procedural claim | no |
 | `dangling_ref` | a `file:line` citation that no longer resolves: the file is gone, or the line is past its end | no |
 
 `interpretation.expires_at` is the field the contract requires. Where a piece also records the
 expiry of the record it is about to create — `expiry_date` on an evidence upload — that field is
 compared the same way: a record that expires in Noru next week is not evidence of anything the week
 after.
+
+A procedural claim may carry a review date instead of an expiry: `ai-inventory` accepts
+`interpretation.next_review_due` in place of `expires_at`, and `governance-records` a
+`next_review_due` on the record. Past that date nobody has looked again, so it is aged exactly like
+`expires_at` — `expired` once it has passed, `expiring` inside the warning window, and against
+`--max-age-days` as the declared review window. It is read only in place of `expires_at`, so a claim
+carrying both is aged once. Releases up to 0.9.1 ignored it and reported those claims as
+`unbounded`.
 
 ### Two kinds of cadence, and who checks which
 
@@ -288,8 +300,8 @@ jobs:
   inventory:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
       - uses: noru-tech/noru-ci-action@v0
@@ -380,8 +392,8 @@ pull request cannot safely fetch that state. What happens after the diff depends
     runs-on: ubuntu-latest
     environment: compliance     # so a human can require an approval on the write
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
       - uses: noru-tech/noru-ci-action@v0

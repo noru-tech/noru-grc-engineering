@@ -580,7 +580,7 @@ function main(argv) {
   written.push(`contract/${name}.schema.json`);
 
   const nextSteps = [
-    `Add "${name}" to .claude-plugin/marketplace.json and .agents/plugins/marketplace.json.`,
+    `Add "${name}" to .claude-plugin/marketplace.json, .agents/plugins/marketplace.json and .github/plugin/marketplace.json.`,
     "Replace every TODO — the piece is wired up but collects nothing yet.",
     "Run: python3 scripts/contract_test.py && python3 scripts/test_validators.py",
     "Then: python3 scripts/check_repo.py (it will flag the missing marketplace entries).",
