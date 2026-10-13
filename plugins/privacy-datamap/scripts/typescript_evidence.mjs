@@ -156,12 +156,20 @@ export function extractRepository(repository, options = {}) {
     if (name.startsWith('.')) return candidateFile(path.resolve(path.dirname(containingFile), name));
     const config = [...configs.entries()].filter(([directory]) => containingFile.startsWith(directory + path.sep)).sort((a,b) => b[0].length - a[0].length)[0]?.[1];
     if (config) for (const [pattern, substitutions] of Object.entries(config.paths)) {
+      if (pattern.split('*').length > 2) {
+        gap('configuration_paths', pattern, 'TypeScript path patterns must contain at most one wildcard');
+        continue;
+      }
       const star = pattern.indexOf('*');
       const matched = star < 0 ? name === pattern : name.startsWith(pattern.slice(0, star)) && name.endsWith(pattern.slice(star + 1));
       if (!matched || !Array.isArray(substitutions)) continue;
       const middle = star < 0 ? '' : name.slice(star, name.length - (pattern.length - star - 1));
       for (const replacement of substitutions) if (typeof replacement === 'string') {
-        const found = candidateFile(path.resolve(config.baseUrl, replacement.replace('*', middle)));
+        if (replacement.split('*').length > 2) {
+          gap('configuration_paths', pattern, 'TypeScript path substitutions must contain at most one wildcard');
+          continue;
+        }
+        const found = candidateFile(path.resolve(config.baseUrl, replacement.replaceAll('*', () => middle)));
         if (found) return found;
       }
     }
@@ -172,7 +180,7 @@ export function extractRepository(repository, options = {}) {
       if (!target && pkg.data.exports && typeof pkg.data.exports === 'object') for (const [pattern, value] of Object.entries(pkg.data.exports)) {
         if (!pattern.includes('*')) continue;
         const [before, after] = pattern.split('*');
-        if (sub.startsWith(before) && sub.endsWith(after)) target = staticExport(value)?.replace('*', sub.slice(before.length, sub.length - after.length));
+        if (sub.startsWith(before) && sub.endsWith(after)) target = staticExport(value)?.replaceAll('*', () => sub.slice(before.length, sub.length - after.length));
       }
       if (typeof target === 'string') { const found = candidateFile(path.resolve(pkg.directory, target)); if (found) return found; }
       if (sub !== '.') { const found = candidateFile(path.resolve(pkg.directory, sub)); if (found) return found; }

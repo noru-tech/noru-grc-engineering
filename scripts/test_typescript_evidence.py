@@ -79,6 +79,31 @@ class CompilerEvidenceTests(unittest.TestCase):
         self.write('schema.ts',IMPORT+"import type {Contact} from '@sample/model/types';const rows=pgTable('rows',{data:jsonb('data').$type<Contact>()});")
         self.assertEqual(self.extract()['tables'][0]['fields'][0]['members'][0]['name'],'address')
 
+    def test_workspace_export_replaces_every_wildcard_literally(self):
+        self.write('packages/model/package.json', json.dumps({
+            'name': '@sample/model', 'exports': {'./*': './src/*/copy-*.ts'}}))
+        self.write('packages/model/src/$&/copy-$&.ts', 'export interface Contact { address:string; }')
+        self.write('schema.ts', IMPORT+"import type {Contact} from '@sample/model/$&';const rows=pgTable('rows',{data:jsonb('data').$type<Contact>()});")
+        self.assertEqual(self.extract()['tables'][0]['fields'][0]['members'][0]['name'], 'address')
+
+    def test_tsconfig_path_substitution_preserves_literal_dollar_sequences(self):
+        self.write('tsconfig.json', json.dumps({'compilerOptions': {
+            'baseUrl': '.', 'paths': {'@models/*': ['models/*']}}}))
+        self.write('models/$&.ts', 'export interface Contact { address:string; }')
+        self.write('schema.ts', IMPORT+"import type {Contact} from '@models/$&';const rows=pgTable('rows',{data:jsonb('data').$type<Contact>()});")
+        self.assertEqual(self.extract()['tables'][0]['fields'][0]['members'][0]['name'], 'address')
+
+    def test_tsconfig_paths_reject_multiple_wildcards(self):
+        for pattern, replacement in (('@models/*/*', 'models/*'), ('@models/*', 'models/*/*')):
+            with self.subTest(pattern=pattern, replacement=replacement):
+                self.write('tsconfig.json', json.dumps({'compilerOptions': {
+                    'baseUrl': '.', 'paths': {pattern: [replacement]}}}))
+                self.write('models/types/*.ts', 'export interface Contact { address:string; }')
+                self.write('schema.ts', IMPORT+"import type {Contact} from '@models/types';const rows=pgTable('rows',{data:jsonb('data').$type<Contact>()});")
+                report = self.extract()
+                self.assertIn('configuration_paths', {gap['kind'] for gap in report['gaps']})
+                self.assertEqual(report['tables'][0]['fields'][0]['members'], [])
+
     def test_foreign_key_is_fact_without_person_verdict(self):
         self.write('principals.ts',IMPORT+"export const principals=pgTable('principals',{id:text('id'),kind:text('kind'),email:text('email')});")
         self.write('schema.ts',IMPORT+"import {principals as entities} from './principals';const rows=pgTable('rows',{owner:text('owner').references(()=>entities.id)});")
@@ -257,10 +282,10 @@ class CompilerEvidenceTests(unittest.TestCase):
         self.assertIn('history/old.ts',compiler['coverage']['migration_sources'])
 
     def test_security_literals_and_defaults_are_redacted_but_discriminators_remain(self):
-        secret='synthetic-private-value-that-must-not-appear'
-        self.write('schema.ts',IMPORT+"const rows=pgTable('rows',{apiToken:text('api_token').default('"+secret+"'),kind:text('kind'),payload:jsonb('payload')});function store(db:any){return db.insert(rows).values({apiToken:'"+secret+"',kind:'person',payload:{secretKey:'"+secret+"',kind:'service'}});}")
+        fixture_value='synthetic-redaction-marker-that-must-not-appear'
+        self.write('schema.ts',IMPORT+"const rows=pgTable('rows',{apiToken:text('api_token').default('"+fixture_value+"'),kind:text('kind'),payload:jsonb('payload')});function store(db:any){return db.insert(rows).values({apiToken:'"+fixture_value+"',kind:'person',payload:{secretKey:'"+fixture_value+"',kind:'service'}});}")
         report=self.extract()
-        self.assertNotIn(secret,json.dumps(report))
+        self.assertNotIn(fixture_value,json.dumps(report))
         fields={field['property']:field for field in report['tables'][0]['fields']}
         self.assertIn('<redacted>',fields['apiToken']['shape'])
         self.assertEqual(fields['kind']['writes'][0]['value']['literal'],'person')
@@ -283,9 +308,9 @@ class CompilerEvidenceTests(unittest.TestCase):
         self.assertEqual(compiler['tables'],[])
 
     def test_collector_unbound_security_defaults_are_redacted(self):
-        secret='synthetic-secret-in-unbound-builder'
-        self.write('schema.ts',"const rows=pgTable('rows',{token:text('token').default('"+secret+"')});")
-        self.assertNotIn(secret,json.dumps(self.collect()))
+        fixture_value='synthetic-redaction-marker-in-unbound-builder'
+        self.write('schema.ts',"const rows=pgTable('rows',{token:text('token').default('"+fixture_value+"')});")
+        self.assertNotIn(fixture_value,json.dumps(self.collect()))
 
     def test_rails_migrate_directory_is_always_excluded(self):
         self.write('db/migrate/old.ts',IMPORT+"const old=pgTable('historical',{id:text('id')});")

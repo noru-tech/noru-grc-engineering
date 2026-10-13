@@ -6,6 +6,9 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Resolve every wildcard in static workspace package export targets, preserve literal dollar
+  sequences in module substitutions, and report unsupported multi-wildcard TypeScript paths.
+
 - Require cited semantic-review dimensions for privacy decisions, remove automatic maintenance-timestamp classifications, and reject loss of established personal association when taxonomy fit remains unresolved. Separate scalar extraction resolution from unresolved privacy meaning, keep sensitive findings visible in blocked reviews, and clarify consistent modeled/runtime scope and purpose-specific flows.
 
 - Register current, source-bound supplemental field citations as freshness dependencies when projecting investigated shapes, without changing existing reviewed fingerprints.
