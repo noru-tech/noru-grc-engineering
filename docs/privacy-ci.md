@@ -16,6 +16,13 @@ freshness and export consistency. It writes diagnostic cache only. Human review,
 export generation happen outside CI. Unregistered processing evidence remains outside the
 baseline's monitoring scope. Exit codes: 0 passed, 1 blocked, 2 tooling/usage error.
 
+After reviewing and sealing the map, generate its export explicitly before committing the three
+artifacts:
+
+```sh
+node "$TOOLKIT/plugins/privacy-datamap/scripts/collect.mjs" --repo="$REPOSITORY" --export
+```
+
 This strict privacy-specific gate complements the existing multi-piece `scripts/ci_check.py`;
 it does not replace that runner's policy-baseline or reporting options.
 

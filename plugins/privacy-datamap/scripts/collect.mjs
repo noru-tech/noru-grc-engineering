@@ -5,7 +5,7 @@
 // scripts/contract_test.py runs this twice and diffs the result, so a timestamp or an unsorted
 // directory listing anywhere in here will fail the build.
 //
-// Usage: node collect.mjs [--repo=<path>] [--check | --candidate] [--output=json|text] [--quiet]
+// Usage: node collect.mjs [--repo=<path>] [--check | --candidate | --export] [--output=json|text] [--quiet]
 // Exit codes: 0 ok, 1 drift against the manifest (--check), 2 usage/IO error.
 
 import { createHash } from "node:crypto";
@@ -29,7 +29,7 @@ const TABLE = JSON.parse(
 // A schema file is small. Anything past this is generated data or a checked-in dump, and
 // reading it would cost more than it could ever tell us.
 const MAX_BYTES = 1_000_000;
-const SUPPLEMENT_PATH = ".noru/privacy-datamap-stores.json";
+const MANIFEST_INPUT_PATH = ".noru/privacy-datamap.yml";
 
 // Directories that are in the repository but are not the repository: a checked-in vendor/ or dist/
 // describes a dependency's schema or a build's output, not anything this codebase decided to store.
@@ -40,7 +40,7 @@ const SKIP_DIRS = new Set([
   "vendor", "target", ".venv", "venv", "__pycache__", ".noru",
 ]);
 const USAGE =
-  "usage: collect.mjs [--repo=<path>] [--check | --candidate] [--output=json|text] [--quiet]\n";
+  "usage: collect.mjs [--repo=<path>] [--check | --candidate | --export] [--output=json|text] [--quiet]\n";
 
 function parseArgs(argv) {
   const opts = { repo: process.cwd(), check: false, candidate: false, json: false, quiet: false };
@@ -48,12 +48,14 @@ function parseArgs(argv) {
     if (arg.startsWith("--repo=")) opts.repo = arg.slice(7);
     else if (arg === "--check") opts.check = true;
     else if (arg === "--candidate") opts.candidate = true;
+    else if (arg === "--export") opts.export = true;
     else if (arg === "--output=json") opts.json = true;
     else if (arg === "--output=text") opts.json = false;
     else if (arg === "--quiet") opts.quiet = true;
     else if (arg === "-h" || arg === "--help") return { help: true };
     else return { error: `unknown option '${arg}'` };
   }
+  if (opts.export && (opts.check || opts.candidate)) return { error: "--export requires a normal accepted scan" };
   if (opts.check && opts.candidate) return { error: "--candidate cannot be used with --check" };
   return opts;
 }
@@ -104,7 +106,7 @@ function trackedFiles(repo) {
   // A Set because an unmerged path is listed once per conflict stage.
   const out = new Set();
   for (const rel of raw.split("\0")) {
-    if (rel === "" || (rel !== SUPPLEMENT_PATH && isSkipped(rel))) continue;
+    if (rel === "" || (rel !== MANIFEST_INPUT_PATH && isSkipped(rel))) continue;
     let stat;
     try {
       stat = lstatSync(join(repo, rel));
@@ -704,8 +706,53 @@ export function fieldEntityId(datasetKey, collectionName, fieldName) {
 
 const BOUNDARY_DIRS = new Set(["migration", "migrations", "schema", "schemas", "model", "models"]);
 
-function isMigrationPath(rel) {
-  return rel.split("/").some((part) => /^(?:migration|migrations)$/i.test(part));
+// Match migration conventions across source languages, before parsing any file contents.
+export function isMigrationPath(rel) {
+  if (isNonRuntimePath(rel) || /\.(?:md|mdx|rst|txt)$/i.test(rel)) return false;
+  const parts = rel.split("/");
+  return parts.slice(0, -1).some((part) => /(?:^|[-_.])migrations?(?:$|[-_.])/i.test(part))
+    || /(?:^|[-_.])migrations?\.sql$/i.test(parts.at(-1))
+    || /\.migration\.[cm]?[jt]s$/i.test(parts.at(-1))
+    || /(?:^|\/)alembic\/versions\//i.test(rel)
+    || /(?:^|\/)db\/(?:migrate|changelog)\//i.test(rel)
+    || /(?:^|\/)drizzle\/.*\.sql$/i.test(rel)
+    || /(?:^|\/)(?:V[0-9][^/]*|R(?:[0-9][^/]*)?)__[^/]+\.sql$/i.test(rel)
+    || /(?:^|\/)[0-9]{8,}[_-][^/]+\.(?:sql|[cm]?[jt]s|py|rb|php|cs)$/i.test(rel);
+}
+
+function readMigrationSupport(repo, files) {
+  const rows = JSON.parse(execFileSync("python3", [join(HERE, "migration_support.py"), repo], {encoding: "utf8"}));
+  for (const row of rows) {
+    const path = join(repo, row.path);
+    if (!files.includes(row.path) || !isMigrationPath(row.path) || isNonRuntimePath(row.path)) {
+      throw new Error(`Migration support must name a scanned migration-like source file: ${row.path}`);
+    }
+    const resolved = relative(realpathSync(repo), realpathSync(path));
+    if (resolved === ".." || resolved.startsWith(`..${sep}`) || resolve(realpathSync(repo), resolved) !== realpathSync(path)) {
+      throw new Error(`Migration support escapes repository: ${row.path}`);
+    }
+    if (createHash("sha256").update(readFileSync(path)).digest("hex") !== row.sha256) {
+      throw new Error(`Migration support evidence changed; review and refresh declaration: ${row.path}`);
+    }
+  }
+  return rows;
+}
+
+export function migrationPaths(repo, files, topology = discoverDrizzleTopology(repo, files), support = readMigrationSupport(repo, files)) {
+  const allowed = new Set();
+  for (const row of support) {
+    // Reinclude only support sources caught by a directory name, never explicit history.
+    const withoutDirectory = basename(row.path);
+    if (topology.excludedPaths.has(row.path) || isMigrationPath(withoutDirectory)
+        || /^\d+[_-]/.test(withoutDirectory)
+        || /\.(?:sql|xml|ya?ml|json)$/i.test(row.path)
+        || /(?:^|\/)(?:alembic\/versions|db\/(?:migrate|changelog)|drizzle)\//i.test(row.path)) {
+      throw new Error(`Cannot declare explicit migration history as support code: ${row.path}`);
+    }
+    allowed.add(row.path);
+  }
+  return files.filter((path) => !isNonRuntimePath(path) && !allowed.has(path)
+    && (isMigrationPath(path) || topology.excludedPaths.has(path)));
 }
 
 export function datastoreBoundary(rel) {
@@ -876,11 +923,12 @@ function discoverDrizzleTopology(repo, files) {
   const gaps = [];
   const links = [];
   const parsedConfigs = [];
+  const excludedPaths = new Set();
   const addClaim = (path, claim) => {
     if (!claims.has(path)) claims.set(path, []);
     claims.get(path).push(claim);
   };
-  for (const configPath of files.filter((path) => DRIZZLE_CONFIG.test(path))) {
+  for (const configPath of files.filter((path) => DRIZZLE_CONFIG.test(path) && !isMigrationPath(path))) {
     const text = safeText(repo, configPath);
     if (text === null) {
       gaps.push({ format: "drizzle_config", ref: `${configPath}:1` });
@@ -899,8 +947,12 @@ function discoverDrizzleTopology(repo, files) {
       gaps.push({ format: "drizzle_config", ref: `${configPath}:${schema.ref}` });
       continue;
     }
+    // Recognize generated output even if its configured current schema is missing.
+    for (const path of files) {
+      if (path !== configPath && matchesOutputPath(path, outputPath)) excludedPaths.add(path);
+    }
     const schemaFiles = files.filter((path) =>
-      path !== configPath
+      path !== configPath && !isMigrationPath(path) && !excludedPaths.has(path)
       && /\.[cm]?[jt]sx?$/.test(path)
       && schemaPatterns.some((pattern) => matchesSchemaPattern(path, pattern))
     );
@@ -914,7 +966,7 @@ function discoverDrizzleTopology(repo, files) {
       continue;
     }
     const outputFiles = files.filter((path) =>
-      path !== configPath && path.endsWith(".sql") && matchesOutputPath(path, outputPath)
+      path !== configPath && matchesOutputPath(path, outputPath)
     );
     for (const path of schemaFiles) {
       addClaim(path, { boundary, role: "canonical", ref: `${configPath}:${schema.ref}` });
@@ -945,6 +997,7 @@ function discoverDrizzleTopology(repo, files) {
   }
   return {
     byPath,
+    excludedPaths,
     gaps: gaps.sort((a, b) => BY_PATH(a.ref, b.ref)),
     links: links.sort((a, b) => BY_PATH(a.config_ref, b.config_ref)),
     parsedConfigs: [...new Set(parsedConfigs)].sort(BY_PATH),
@@ -965,322 +1018,6 @@ function cloneCollections(collections, rel) {
       refs: refsFor(rel, field),
     })),
   }));
-}
-
-const SUPPLEMENT_VERSION = "1.0.0";
-const SUPPLEMENT_STORE_TYPES = new Set([
-  "object_storage", "queue", "search_index", "third_party_store", "other",
-]);
-const SUPPLEMENT_EVIDENCE_KINDS = new Set([
-  "typed_contract", "serializer", "upload_payload", "download_result",
-]);
-const FIDES_KEY = /^[A-Za-z0-9_.<>-]+$/;
-
-function supplementalError(path, message) {
-  throw new Error(`${SUPPLEMENT_PATH}${path}: ${message}`);
-}
-
-function supplementalObject(value, path) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    supplementalError(path, "must be an object");
-  }
-}
-
-function supplementalKeys(value, allowed, path) {
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) supplementalError(path, `unknown key '${key}'`);
-  }
-}
-
-function supplementalString(value, path, pattern = null) {
-  if (typeof value !== "string" || value.trim() === "") supplementalError(path, "must be a non-empty string");
-  if (pattern && !pattern.test(value)) supplementalError(path, `has invalid value '${value}'`);
-  return value;
-}
-
-function supplementalArray(value, path) {
-  if (!Array.isArray(value) || value.length === 0) supplementalError(path, "must be a non-empty array");
-  return value;
-}
-
-function supplementalRefs(repo, refs, path, knownFiles, lineCounts) {
-  const out = supplementalArray(refs, path).map((ref, index) => {
-    supplementalString(ref, `${path}[${index}]`);
-    const match = ref.match(/^([^:\s][^:]*):([1-9][0-9]*)$/);
-    if (!match) supplementalError(`${path}[${index}]`, "must be a repository-relative file:line citation");
-    const rel = match[1].split("\\").join("/");
-    if (rel === SUPPLEMENT_PATH) {
-      supplementalError(`${path}[${index}]`, "must cite repository evidence, not the declaration itself");
-    }
-    if (rel.startsWith("/") || rel.split("/").includes("..") || !knownFiles.has(rel)) {
-      supplementalError(`${path}[${index}]`, `cites a file outside the scanned repository: '${rel}'`);
-    }
-    if (!lineCounts.has(rel)) {
-      const text = safeText(repo, rel);
-      if (text === null) supplementalError(`${path}[${index}]`, `cannot read cited file '${rel}'`);
-      lineCounts.set(rel, text.split("\n").length);
-    }
-    const line = Number(match[2]);
-    if (line > lineCounts.get(rel)) {
-      supplementalError(`${path}[${index}]`, `cites line ${line}, but '${rel}' has only ${lineCounts.get(rel)} line(s)`);
-    }
-    return `${rel}:${line}`;
-  });
-  if (new Set(out).size !== out.length) supplementalError(path, "must not contain duplicate citations");
-  return out.sort(BY_PATH);
-}
-
-/**
- * Read explicitly declared stores whose structure cannot be recovered from a supported schema.
- * A provider client proves only that a store exists; every declared field therefore needs its own
- * typed/payload/serialization citation. The collector never derives object fields from SDK calls.
- */
-function loadSupplementalDatastores(repo, files, enumeratedBy) {
-  const full = join(repo, SUPPLEMENT_PATH);
-  if (!existsSync(full)) return [];
-  if (enumeratedBy === "git" && !files.includes(SUPPLEMENT_PATH)) {
-    throw new Error(`${SUPPLEMENT_PATH}: exists but is not tracked; stage it before scanning`);
-  }
-  let document;
-  try {
-    document = JSON.parse(readFileSync(full, "utf8"));
-  } catch (error) {
-    throw new Error(`${SUPPLEMENT_PATH}: invalid JSON: ${error.message}`);
-  }
-  supplementalObject(document, "");
-  supplementalKeys(document, new Set(["$schema", "version", "datastores"]), "");
-  if (document.$schema !== undefined) supplementalString(document.$schema, ".$schema");
-  if (document.version !== SUPPLEMENT_VERSION) {
-    supplementalError(".version", `must be '${SUPPLEMENT_VERSION}'`);
-  }
-  const stores = supplementalArray(document.datastores, ".datastores");
-  const knownFiles = new Set(files);
-  const lineCounts = new Map();
-  const seenStores = new Set();
-  const normalized = stores.map((store, storeIndex) => {
-    const path = `.datastores[${storeIndex}]`;
-    supplementalObject(store, path);
-    supplementalKeys(store, new Set([
-      "fides_key", "name", "store_type", "provider", "refs", "system_references", "collections",
-    ]), path);
-    const fidesKey = supplementalString(store.fides_key, `${path}.fides_key`, FIDES_KEY);
-    if (seenStores.has(fidesKey)) supplementalError(`${path}.fides_key`, `duplicate datastore key '${fidesKey}'`);
-    seenStores.add(fidesKey);
-    const name = supplementalString(store.name, `${path}.name`);
-    const storeType = supplementalString(store.store_type, `${path}.store_type`);
-    if (!SUPPLEMENT_STORE_TYPES.has(storeType)) {
-      supplementalError(`${path}.store_type`, `must be one of ${[...SUPPLEMENT_STORE_TYPES].join(", ")}`);
-    }
-    const provider = store.provider === undefined
-      ? null
-      : supplementalString(store.provider, `${path}.provider`);
-    const refs = supplementalRefs(repo, store.refs, `${path}.refs`, knownFiles, lineCounts);
-    const systemReferences = store.system_references === undefined ? [] : store.system_references;
-    if (!Array.isArray(systemReferences)) supplementalError(`${path}.system_references`, "must be an array");
-    for (let index = 0; index < systemReferences.length; index += 1) {
-      supplementalString(systemReferences[index], `${path}.system_references[${index}]`, FIDES_KEY);
-    }
-    if (new Set(systemReferences).size !== systemReferences.length) {
-      supplementalError(`${path}.system_references`, "must not contain duplicate system keys");
-    }
-    const seenCollections = new Set();
-    const collections = supplementalArray(store.collections, `${path}.collections`).map((collection, collectionIndex) => {
-      const collectionPath = `${path}.collections[${collectionIndex}]`;
-      supplementalObject(collection, collectionPath);
-      supplementalKeys(collection, new Set(["name", "refs", "fields"]), collectionPath);
-      const collectionName = supplementalString(collection.name, `${collectionPath}.name`);
-      if (seenCollections.has(collectionName)) supplementalError(`${collectionPath}.name`, `duplicate collection '${collectionName}'`);
-      seenCollections.add(collectionName);
-      const collectionRefs = supplementalRefs(
-        repo, collection.refs, `${collectionPath}.refs`, knownFiles, lineCounts,
-      );
-      const seenFields = new Set();
-      const fields = supplementalArray(collection.fields, `${collectionPath}.fields`).map((field, fieldIndex) => {
-        const fieldPath = `${collectionPath}.fields[${fieldIndex}]`;
-        supplementalObject(field, fieldPath);
-        supplementalKeys(field, new Set(["name", "shape", "evidence_kind", "refs"]), fieldPath);
-        const fieldName = supplementalString(field.name, `${fieldPath}.name`);
-        if (seenFields.has(fieldName)) supplementalError(`${fieldPath}.name`, `duplicate field '${fieldName}'`);
-        seenFields.add(fieldName);
-        const shape = supplementalString(field.shape, `${fieldPath}.shape`);
-        const evidenceKind = supplementalString(field.evidence_kind, `${fieldPath}.evidence_kind`);
-        if (!SUPPLEMENT_EVIDENCE_KINDS.has(evidenceKind)) {
-          supplementalError(
-            `${fieldPath}.evidence_kind`,
-            `must be one of ${[...SUPPLEMENT_EVIDENCE_KINDS].join(", ")}`,
-          );
-        }
-        return {
-          name: fieldName,
-          shape,
-          evidence_kind: evidenceKind,
-          refs: supplementalRefs(repo, field.refs, `${fieldPath}.refs`, knownFiles, lineCounts),
-        };
-      });
-      return { name: collectionName, refs: collectionRefs, fields };
-    });
-    return {
-      fides_key: fidesKey,
-      name,
-      store_type: storeType,
-      ...(provider ? { provider } : {}),
-      refs,
-      system_references: [...systemReferences].sort(BY_PATH),
-      collections,
-    };
-  });
-  return normalized.sort((a, b) => BY_PATH(a.fides_key, b.fides_key));
-}
-
-function splitSqlStatements(text) {
-  // Drizzle uses this exact comment as an out-of-band statement delimiter. Removing only the
-  // marker, while preserving its newline, keeps the next statement's citation on its real line.
-  text = text.replace(/^[ \t]*-->[ \t]*statement-breakpoint[ \t]*\r?$/gmi, "");
-  const out = [];
-  let start = 0;
-  let line = 1;
-  let startLine = 1;
-  let quote = null;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (quote !== null) {
-      if (ch === quote && text[i + 1] === quote) i += 1;
-      else if (ch === quote) quote = null;
-    } else if (ch === "'" || ch === '"' || ch === "`") {
-      quote = ch;
-    } else if (text.startsWith("--", i)) {
-      const end = text.indexOf("\n", i + 2);
-      i = end < 0 ? text.length : end - 1;
-    } else if (text.startsWith("/*", i)) {
-      const comment = text.indexOf("*/", i + 2);
-      const end = comment < 0 ? text.length : comment + 2;
-      line += text.slice(i, end).split("\n").length - 1;
-      i = end - 1;
-    } else if (ch === ";") {
-      const statement = text.slice(start, i + 1).trim();
-      if (statement) out.push({ text: statement, line: startLine });
-      start = i + 1;
-      startLine = line;
-    }
-    if (ch === "\n") {
-      line += 1;
-      if (text.slice(start, i + 1).trim() === "") startLine = line;
-    }
-  }
-  const tail = text.slice(start).trim();
-  if (tail) out.push({ text: tail, line: startLine });
-  return out;
-}
-
-function migrationOperation(statement, rel) {
-  const compact = statement.text.replace(/--.*$/gm, " ").replace(/\/\*[\s\S]*?\*\//g, " ").trim();
-  const ref = `${rel}:${statement.line}`;
-  if (/^create\s+table\b/i.test(compact)) {
-    const parsed = parseSqlDdl(statement.text).map((collection) => ({
-      name: collection.name,
-      refs: [`${rel}:${statement.line + collection.line - 1}`],
-      fields: collection.fields.map((field) => ({
-        name: field.name,
-        shape: field.shape ?? "",
-        refs: [`${rel}:${statement.line + field.line - 1}`],
-      })),
-    }));
-    return parsed.length === 1
-      ? { kind: "create_table", table: parsed[0], ref }
-      : { kind: "unsupported", ref };
-  }
-  if (/^alter\s+table\b/i.test(compact) && /,\s*(?:add|drop|rename|alter)\b/i.test(compact)) {
-    return { kind: "unsupported", ref };
-  }
-  // Table constraints change validation or relationships, not the field inventory this replay
-  // computes. Their referenced columns already came from CREATE TABLE / ADD COLUMN operations.
-  if (
-    /^alter\s+table\s+[\s\S]+?\s+add\s+(?:constraint\s+[`"[]?[A-Za-z_][A-Za-z0-9_]*[`"\]]?\s+)?(?:foreign\s+key|check|unique|primary\s+key)\b/i
-      .test(compact)
-  ) {
-    return { kind: "non_structural", ref };
-  }
-  let match = compact.match(
-    /^alter\s+table\s+(?:if\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+add\s+(?:column\s+)?(?:if\s+not\s+exists\s+)?(?!constraint\b)[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s+([\s\S]+?);?$/i,
-  );
-  if (match) {
-    return {
-      kind: "add_column",
-      table: match[1].split(".").pop(),
-      field: { name: match[2], shape: normalizeSqlShape(match[3]), refs: [ref] },
-      ref,
-    };
-  }
-  match = compact.match(/^alter\s+table\s+(?:if\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+drop\s+(?:column\s+)?(?:if\s+exists\s+)?[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s*;?$/i);
-  if (match) return { kind: "drop_column", table: match[1].split(".").pop(), field: match[2], ref };
-  match = compact.match(/^alter\s+table\s+[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+rename\s+column\s+[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s+to\s+[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s*;?$/i);
-  if (match) return { kind: "rename_column", table: match[1].split(".").pop(), from: match[2], to: match[3], ref };
-  match = compact.match(/^alter\s+table\s+[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+rename\s+to\s+[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s*;?$/i);
-  if (match) return { kind: "rename_table", from: match[1].split(".").pop(), to: match[2], ref };
-  match = compact.match(/^drop\s+table\s+(?:if\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?(?:\s+(?:cascade|restrict))?\s*;?$/i);
-  if (match) return { kind: "drop_table", table: match[1].split(".").pop(), ref };
-  return /^(?:create|alter|drop)\s+(?:table|column)\b/i.test(compact)
-    ? { kind: "unsupported", ref }
-    : { kind: "non_structural", ref };
-}
-
-function replayMigrations(observations) {
-  const tables = new Map();
-  const operations = [];
-  const gaps = [];
-  for (const observation of observations.sort((a, b) => BY_PATH(a.path, b.path))) {
-    for (const statement of splitSqlStatements(observation.text)) {
-      const operation = migrationOperation(statement, observation.path);
-      operations.push(operation);
-      if (operation.kind === "unsupported") {
-        gaps.push({
-          format: "sql_migration",
-          ref: operation.ref,
-          reason: "unsupported structural migration statement",
-        });
-      }
-      else if (operation.kind === "create_table") {
-        if (tables.has(operation.table.name)) gaps.push({ format: "sql_migration", ref: operation.ref, reason: `table '${operation.table.name}' already exists during replay` });
-        else tables.set(operation.table.name, operation.table);
-      } else if (operation.kind === "add_column") {
-        const table = tables.get(operation.table);
-        if (!table || table.fields.some((field) => field.name === operation.field.name)) {
-          gaps.push({
-            format: "sql_migration", ref: operation.ref,
-            reason: "ADD COLUMN could not be applied to the observed state",
-          });
-        }
-        else table.fields.push(operation.field);
-      } else if (operation.kind === "drop_column") {
-        const table = tables.get(operation.table);
-        const index = table?.fields.findIndex((field) => field.name === operation.field) ?? -1;
-        if (!table || index < 0) gaps.push({ format: "sql_migration", ref: operation.ref, reason: "DROP COLUMN could not be applied to the observed state" });
-        else table.fields.splice(index, 1);
-      } else if (operation.kind === "rename_column") {
-        const table = tables.get(operation.table);
-        const field = table?.fields.find((item) => item.name === operation.from);
-        if (!field || table.fields.some((item) => item.name === operation.to)) {
-          gaps.push({
-            format: "sql_migration", ref: operation.ref,
-            reason: "RENAME COLUMN could not be applied to the observed state",
-          });
-        }
-        else { field.name = operation.to; field.refs.push(operation.ref); }
-      } else if (operation.kind === "rename_table") {
-        const table = tables.get(operation.from);
-        if (!table || tables.has(operation.to)) gaps.push({ format: "sql_migration", ref: operation.ref, reason: "RENAME TABLE could not be applied to the observed state" });
-        else {
-          tables.delete(operation.from);
-          table.name = operation.to;
-          table.refs.push(operation.ref);
-          tables.set(operation.to, table);
-        }
-      } else if (operation.kind === "drop_table") {
-        if (!tables.delete(operation.table)) gaps.push({ format: "sql_migration", ref: operation.ref, reason: "DROP TABLE could not be applied to the observed state" });
-      }
-    }
-  }
-  return { collections: gaps.length === 0 ? [...tables.values()] : [], operations, gaps };
 }
 
 function mergeCanonical(observations) {
@@ -1386,7 +1123,7 @@ function safeText(repo, rel) {
 /** Package metadata is consulted only when an executable script points to an existing entrypoint. */
 export function discoverServices(repo, files) {
   const evidence = new Map();
-  const runtimeFiles = files.filter((rel) => rel !== SUPPLEMENT_PATH);
+  const runtimeFiles = files.filter((rel) => rel !== MANIFEST_INPUT_PATH);
   const fileSet = new Set(runtimeFiles);
   const packageRoots = new Set(
     runtimeFiles
@@ -1453,7 +1190,7 @@ export function discoverServices(repo, files) {
   }
   if (evidence.size === 0) {
     evidence.set("", [{
-      ref: runtimeFiles.length > 0 ? `${runtimeFiles[0]}:1` : `${SUPPLEMENT_PATH}:1`,
+      ref: runtimeFiles.length > 0 ? `${runtimeFiles[0]}:1` : `${MANIFEST_INPUT_PATH}:1`,
       kind: "repository_fallback",
     }]);
   }
@@ -1481,16 +1218,18 @@ function assertUniqueKeys(kind, rows) {
 
 export function collectFacts(repo, { candidate = false } = {}) {
   const listing = listFiles(repo);
-  const supplementalStores = loadSupplementalDatastores(
-    repo, listing.files, listing.enumeratedBy,
-  );
-  const files = existsSync(join(repo, SUPPLEMENT_PATH)) && !listing.files.includes(SUPPLEMENT_PATH)
-    ? [...listing.files, SUPPLEMENT_PATH].sort(BY_PATH)
-    : listing.files;
+  const inputs = JSON.parse(execFileSync("python3", [join(HERE, "dataset_inputs.py"), `--repo=${repo}`, ...(candidate ? ["--candidate"] : [])], {encoding: "utf8"}));
+  const supplementalDatasets = inputs.datasets;
+  const excludedNonRuntime = listing.files.filter(isNonRuntimePath);
+  const productionFiles = listing.files.filter((path) => !isNonRuntimePath(path));
+  const drizzleTopology = discoverDrizzleTopology(repo, productionFiles);
+  const migrationSupport = readMigrationSupport(repo, productionFiles);
+  const excludedMigrations = migrationPaths(repo, productionFiles, drizzleTopology, migrationSupport);
+  const excludedPaths = new Set(excludedMigrations);
+  const files = productionFiles.filter((path) => !excludedPaths.has(path));
   const enumeratedBy = listing.enumeratedBy;
   const discovery = JSON.parse(execFileSync("python3", [join(HERE, "dependencies.py"), "--discover", `--repo=${repo}`],
     { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
-  const drizzleTopology = discoverDrizzleTopology(repo, files);
   const manifestPath = join(repo, ".noru", "privacy-datamap.yml");
   const relationships = candidate
     ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), "--candidate", repo], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }))
@@ -1515,38 +1254,18 @@ export function collectFacts(repo, { candidate = false } = {}) {
     }
     const parsed = parser.parse(text);
     const topology = drizzleTopology.byPath.get(rel);
-    const migrationOnly = parser.kind === "sql_ddl"
-      && (topology?.role === "migration" || isMigrationPath(rel));
-    const hasMigrationDdl = migrationOnly && splitSqlStatements(text).some(
-      (statement) => migrationOperation(statement, rel).kind !== "non_structural"
-    );
-    if (parsed.length === 0 && !hasMigrationDdl) continue;
+    if (parsed.length === 0) continue;
     parsedFiles.add(rel);
     parsedByKind[parser.kind] = (parsedByKind[parser.kind] ?? 0) + 1;
-    let bindings = relationships.bindings[rel];
-    if (!bindings && topology?.role === "migration") {
-      const configPath = topology.ref.slice(0, topology.ref.lastIndexOf(":"));
-      const canonicalPaths = [...drizzleTopology.byPath].filter(([, claim]) =>
-        claim.role === "canonical" && claim.ref.slice(0, claim.ref.lastIndexOf(":")) === configPath).map(([path]) => path);
-      const mapped = canonicalPaths.map((path) => relationships.bindings[path]);
-      if (mapped.some(Boolean)) {
-        if (!mapped.every((value) => value && JSON.stringify(value) === JSON.stringify(mapped[0]))) {
-          sourceReadGaps.push({ format: "relationship_migrations", ref: topology.ref,
-            reason: "Linked schemas have different or incomplete connection bindings; resolve migration ownership." });
-          continue;
-        }
-        bindings = mapped[0];
-      }
-    }
+    const bindings = relationships.bindings[rel];
     for (const boundary of bindings ?? [topology?.boundary ?? datastoreBoundary(rel)]) observations.push({
       path: rel,
       boundary,
       ...(bindings ? { relationship_bound: true } : {}),
       kind: parser.kind,
-      role: topology?.role === "canonical" || !migrationOnly ? "canonical" : "migration",
+      role: "canonical",
       collections: cloneCollections(parsed, rel),
       ...(topology ? { topology_ref: topology.ref } : {}),
-      ...(migrationOnly ? { text } : {}),
     });
   }
 
@@ -1566,22 +1285,8 @@ export function collectFacts(repo, { candidate = false } = {}) {
   const specialRefs = [];
   for (const [, group] of [...groups.entries()].sort(([a], [b]) => BY_PATH(a, b))) {
     const boundary = group[0].boundary;
-    const canonical = group.filter((item) => item.role === "canonical");
-    const migration = group.filter((item) => item.role === "migration");
-    const result = canonical.length > 0 ? mergeCanonical(canonical) : replayMigrations(migration);
-    schemaConflicts.push(...(canonical.length > 0 ? result.gaps : []));
-    if (migration.length > 0) {
-      const replay = replayMigrations(migration);
-      // Migration replay is structural coverage only when migrations are the current-state
-      // authority. With a canonical schema, migrations remain auditable history but an operation
-      // outside the safe replay subset cannot make the authoritative schema incomplete.
-      if (canonical.length === 0) migrationGaps.push(...replay.gaps);
-      migrationOperations.push(...replay.operations.map((operation) => ({
-        boundary,
-        ...operation,
-      })));
-      for (const observation of migration) delete observation.text;
-    }
+    const result = mergeCanonical(group);
+    schemaConflicts.push(...result.gaps);
     if (result.collections.length === 0) continue;
     const sourceKinds = [...new Set(group.map((item) => item.kind))].sort(BY_PATH);
     const normalized = normalizedDataset(boundary, result.collections, sourceKinds,
@@ -1592,8 +1297,21 @@ export function collectFacts(repo, { candidate = false } = {}) {
     needsReview += normalized.counts.needsReview;
     specialRefs.push(...normalized.specialRefs);
   }
-  for (const store of supplementalStores) {
-    parsedFiles.add(SUPPLEMENT_PATH);
+  const migrationBoundaries = new Map();
+  for (const path of excludedMigrations) {
+    const topology = drizzleTopology.byPath.get(path);
+    const boundary = topology?.boundary ?? datastoreBoundary(path);
+    if (!migrationBoundaries.has(boundary)) migrationBoundaries.set(boundary, path);
+  }
+  for (const [boundary, path] of migrationBoundaries) {
+    if (!observations.some((item) => item.boundary === boundary
+      || (drizzleTopology.byPath.get(item.path)?.boundary ?? datastoreBoundary(item.path)) === boundary)) {
+      migrationGaps.push({format: "excluded_migrations", ref: `${path}:1`,
+        reason: "Migration files are excluded; supply a current ORM or declarative schema for this boundary."});
+    }
+  }
+  for (const store of supplementalDatasets) {
+    parsedFiles.add(MANIFEST_INPUT_PATH);
     const normalized = normalizedDataset(
       store.fides_key,
       store.collections.map((collection) => ({
@@ -1605,7 +1323,7 @@ export function collectFacts(repo, { candidate = false } = {}) {
           refs: field.refs,
         })),
       })),
-      ["supplemental_datastore"],
+      ["supplemental_dataset"],
       store.fides_key,
       store.name,
     );
@@ -1613,14 +1331,13 @@ export function collectFacts(repo, { candidate = false } = {}) {
     normalized.dataset.refs = [...new Set([
       ...store.refs, ...normalized.dataset.refs,
     ])].sort(BY_PATH);
-    normalized.dataset.store_type = store.store_type;
-    if (store.provider) normalized.dataset.provider = store.provider;
+    normalized.dataset.definition = store.definition;
     normalized.dataset.system_references = store.system_references;
     datasets.push(normalized.dataset);
     observations.push({
-      path: SUPPLEMENT_PATH,
+      path: MANIFEST_INPUT_PATH,
       boundary: store.fides_key,
-      kind: "supplemental_datastore",
+      kind: "supplemental_dataset",
       role: "supplemental",
       refs: store.refs,
       collections: store.collections,
@@ -1629,17 +1346,17 @@ export function collectFacts(repo, { candidate = false } = {}) {
     classified += normalized.counts.classified;
     needsReview += normalized.counts.needsReview;
     specialRefs.push(...normalized.specialRefs);
-    parsedByKind.supplemental_datastore = (parsedByKind.supplemental_datastore ?? 0) + 1;
+    parsedByKind.supplemental_dataset = (parsedByKind.supplemental_dataset ?? 0) + 1;
   }
   assertUniqueKeys("dataset", datasets);
 
   const services = discoverServices(repo, files);
-  const systemKeys = new Set(services.map(({ root }) => fidesKeyFor(root || "repository")));
+  const systemKeys = new Set([...services.map(({ root }) => fidesKeyFor(root || "repository")), ...inputs.external_systems.map(s => s.fides_key)]);
   for (const dataset of datasets) {
     for (const systemKey of dataset.system_references ?? []) {
       if (!systemKeys.has(systemKey)) {
         throw new Error(
-          `${SUPPLEMENT_PATH}: datastore '${dataset.fides_key}' references undiscovered system '${systemKey}'`,
+          `${MANIFEST_INPUT_PATH}: datastore '${dataset.fides_key}' references undiscovered system '${systemKey}'`,
         );
       }
     }
@@ -1664,6 +1381,19 @@ export function collectFacts(repo, { candidate = false } = {}) {
         .map((dataset) => dataset.fides_key).sort(BY_PATH),
     };
   });
+  for (const external of inputs.external_systems) {
+    systems.push({...external, ref: external.refs[0], runtime_evidence: []});
+  }
+  for (const system of systems) {
+    const declared = inputs.systems.find(s => s.fides_key === system.fides_key);
+    for (const direction of ["ingress", "egress"]) {
+      if (declared?.[direction]) system[direction] = declared[direction];
+    }
+    if (declared?.meta) system.meta = declared.meta;
+    for (const edge of [...(system.ingress ?? []), ...(system.egress ?? [])]) {
+      if (edge.type !== "system" || !systemKeys.has(edge.fides_key)) throw new Error("Flow must reference an evidenced system");
+    }
+  }
   assertUniqueKeys("system", systems);
 
   return {
@@ -1672,6 +1402,7 @@ export function collectFacts(repo, { candidate = false } = {}) {
     files_scanned: files.length,
     datasets,
     systems,
+    input_dependencies: inputs.evidence_dependencies,
     observations,
     datastore_links: drizzleTopology.links,
     relationship_mapping: relationships,
@@ -1690,6 +1421,7 @@ export function collectFacts(repo, { candidate = false } = {}) {
     // What this scan could and could not read. Consumed by scripts/ci_check.py, which fails a
     // build where nothing was parsed and something was found that should have been — an empty map
     // must never be reportable as a clean one.
+    ...(migrationSupport.length ? {migration_support: migrationSupport} : {}),
     coverage: {
       // Which files this scan could even see. A `walk` means the file list is whatever is on disk
       // rather than whatever is committed, so a scan here and a scan in CI can legitimately
@@ -1698,6 +1430,8 @@ export function collectFacts(repo, { candidate = false } = {}) {
       // It sits under `coverage` so it is out of the digest: the same file set enumerated two
       // different ways is the same repository, and must not read as drift.
       enumerated_by: enumeratedBy,
+      excluded_migrations: excludedMigrations,
+      excluded_non_runtime: excludedNonRuntime,
       files_parsed: parsedFiles.size,
       parsed_by_kind: Object.fromEntries(Object.entries(parsedByKind).sort()),
       unparsed_candidates: [...new Map([
@@ -1706,7 +1440,7 @@ export function collectFacts(repo, { candidate = false } = {}) {
         ...sourceReadGaps,
         ...relationships.errors.map((reason) => ({ format: "relationship_graph", ref: ".noru/privacy-datamap.yml:1", reason })),
         ...Object.keys(relationships.bindings).filter((path) => !observations.some((o) => o.path === path)
-          && !relationships.bindings[path].every((key) => supplementalStores.some((store) => store.fides_key === key
+          && !relationships.bindings[path].every((key) => supplementalDatasets.some((store) => store.fides_key === key
             && store.collections.some((collection) => collection.fields.some((field) => field.refs.some((ref) => ref.slice(0, ref.lastIndexOf(":")) === path))))))
           .map((path) => ({ format: "relationship_payload", ref: `${path}:1`, reason: "Bound schema/payload has no supported extracted structure; supply typed supplemental evidence." })),
         ...Object.values(relationships.flows).flat().filter((key) => !systems.some((s) => s.fides_key === key))
@@ -1773,7 +1507,8 @@ export function previousDigestOf(derived) {
   // clear. Coverage is reported to CI from the derived facts directly, where it can be acted on.
   // Raw observations retain the evidence needed to audit normalization, but historical migration
   // files that lose to a canonical schema are not part of the current logical topology.
-  const { generated_by, coverage, observations, migration_operations, ...facts } = derived;
+  const { generated_by, coverage, observations, migration_operations, _scan, ...facts } = derived;
+  void _scan;
   void generated_by;
   void coverage;
   void observations;
@@ -1784,6 +1519,7 @@ export function previousDigestOf(derived) {
 /** Structural identity excludes citations, classification lookups and discovery counters. */
 export function digestOf(derived) {
   return canonicalDigest({
+    ...(derived.migration_support?.length ? {migration_support: derived.migration_support} : {}),
     datasets: (derived.datasets ?? []).map((dataset) => ({
       key: dataset.fides_key,
       collections: (dataset.collections ?? []).map((collection) => ({
@@ -1794,6 +1530,8 @@ export function digestOf(derived) {
     })).sort((a, b) => BY_PATH(a.key, b.key)),
     systems: (derived.systems ?? []).map((system) => ({
       key: system.fides_key, datasets: [...(system.dataset_references ?? [])].sort(BY_PATH),
+      ...Object.fromEntries(["ingress", "egress"].filter(k => system[k]?.length).map(k => [k,
+        system[k].map(edge => ({...edge, ...(edge.data_categories ? {data_categories: [...edge.data_categories].sort(BY_PATH)} : {})})).sort((a, b) => BY_PATH(a.fides_key, b.fides_key))])),
     })).sort((a, b) => BY_PATH(a.key, b.key)),
   });
 }
@@ -1943,9 +1681,8 @@ export function readParsedManifest(repo, digest) {
 
 const FIDES_HEADER = `# .fides/datamap.yml — rendered by ${GENERATED_BY}
 #
-# GENERATED. Edit .noru/${PIECE}.yml instead: this file is overwritten on every scan that finds a
-# validated manifest, and it will not warn you, because it cannot tell your edit from its own
-# output.
+# GENERATED. Edit .noru/${PIECE}.yml instead. An explicit export overwrites this file
+# only after validating the current manifest.
 #
 # This is the same content that :push sends to Noru: privacy-relevant fields projected to plain
 # Fideslang. Review bookkeeping and compact non-personal fields stay local; empty collections and
@@ -1995,16 +1732,24 @@ function main(argv) {
     return 2;
   }
   const manifestPath = join(opts.repo, ".noru", "privacy-datamap.yml");
-  const cachePath = join(opts.repo, ".noru", ".cache", ...(opts.candidate ? ["privacy-datamap-preview"] : []));
+  const cachePath = join(opts.repo, ".noru", ".cache");
   const derivedPath = join(cachePath, "privacy-datamap.derived.json");
-  const scanStatePath = join(cachePath, "privacy-datamap.scan.json");
 
   let wroteSkeleton = false;
   let drift = false;
   let rendered = null;
   try {
+    const scanState = {
+      piece: PIECE,
+      ...(opts.candidate ? { candidate_context: derived.relationship_mapping.candidate_context,
+        candidate_artifact_sha256: execFileSync("python3", ["-c", "import json,sys,hashlib; print(hashlib.sha256(json.dumps(json.load(sys.stdin), sort_keys=True, separators=(\",\", \":\")).encode()).hexdigest())"], {input: JSON.stringify(derived), encoding: "utf8"}).trim() } : {}),
+      derived_digest: digest,
+      legacy_derived_digest: legacyDigest,
+      previous_derived_digest: previousDigestOf(derived),
+      provenance,
+    };
     mkdirSync(cachePath, { recursive: true });
-    writeFileSync(derivedPath, `${JSON.stringify(derived, null, 2)}\n`, "utf8");
+    if (!opts.candidate) writeFileSync(derivedPath, `${JSON.stringify({...derived, _scan: scanState}, null, 2)}\n`, "utf8");
     const existing = readManifestDigest(manifestPath);
     if (opts.candidate) {
       drift = false;
@@ -2022,7 +1767,7 @@ function main(argv) {
     // nothing to render until a human has resolved the review flags and the validator has passed.
     // A parsed cache is not acceptance: revalidate the current manifest and watched evidence.
     let exportValidated = false;
-    if (!opts.candidate && !opts.check && existsSync(join(opts.repo, ".noru", ".cache", `${PIECE}.parsed.json`))) {
+    if (opts.export) {
       try {
         execFileSync("python3", [join(dirname(fileURLToPath(import.meta.url)), "validate_manifest.py"), manifestPath,
           `--emit-parsed=${join(opts.repo, ".noru", ".cache", `${PIECE}.parsed.json`)}`, "--quiet"], { stdio: "pipe" });
@@ -2032,23 +1777,18 @@ function main(argv) {
         rendered = null;
       }
     }
+    if (opts.export && !exportValidated) throw new Error("Cannot export: accept and validate the current manifest first");
     const parsed = readParsedManifest(opts.repo, digest);
-    if (parsed && exportValidated && !opts.check) {
+    if (parsed && exportValidated && opts.export) {
       rendered = relative(opts.repo, renderFides(opts.repo, parsed)).split(sep).join("/");
     }
-    writeFileSync(
-      scanStatePath,
-      `${JSON.stringify({
-        piece: PIECE,
-        ...(opts.candidate ? { candidate_context: derived.relationship_mapping.candidate_context,
-          candidate_artifact_sha256: createHash("sha256").update(`${JSON.stringify(derived, null, 2)}\n`).digest("hex") } : {}),
-        derived_digest: digest,
-        legacy_derived_digest: legacyDigest,
-        previous_derived_digest: previousDigestOf(derived),
-        provenance,
-      }, null, 2)}\n`,
-      "utf8",
-    );
+    if (opts.candidate) {
+      const analysisPath = join(cachePath, "privacy-datamap.analysis.json");
+      const analysis = JSON.parse(readFileSync(analysisPath, "utf8"));
+      analysis.preview = { derived, scan: scanState };
+      writeFileSync(analysisPath, `${JSON.stringify(analysis)}\n`, "utf8");
+    }
+
   } catch (error) {
     process.stderr.write(`error: ${error.message}\n`);
     return 2;
@@ -2060,7 +1800,7 @@ function main(argv) {
     ...(opts.candidate ? { mode: "candidate", status: "structure collected" } : {}),
     repo: opts.repo,
     manifest: relative(opts.repo, manifestPath).split(sep).join("/"),
-    derived_facts: relative(opts.repo, derivedPath).split(sep).join("/"),
+    derived_facts: opts.candidate ? ".noru/.cache/privacy-datamap.analysis.json#/preview/derived" : relative(opts.repo, derivedPath).split(sep).join("/"),
     derived_digest: digest,
     legacy_derived_digest: legacyDigest,
     drift,

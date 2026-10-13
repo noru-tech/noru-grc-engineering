@@ -15,7 +15,6 @@
     "deterministic": true,
     "network": false,
     "inputs": [
-      ".noru/privacy-datamap-stores.json",
       ".noru/.cache/privacy-datamap-queue.json"
     ]
   },
@@ -139,7 +138,7 @@
     "source": [
       {
         "kind": "repository",
-        "note": "The schemas, models, migrations and API contracts the repository actually contains. This half of the queue is repo-resident truth: no server-side integration can see which columns exist on a branch that has not merged, and no API key can read a migration."
+        "note": "The current schemas, models and API contracts the repository actually contains. Migration history is excluded. This half of the queue is repo-resident truth: no server-side integration can see which columns exist on a branch that has not merged."
       },
       {
         "kind": "mcp_tool",
@@ -169,7 +168,7 @@
     "quiet": true,
     "validate": { "runtime": "python3", "entrypoint": "scripts/validate_manifest.py", "arguments": ["{manifest}", "--output=json", "--quiet"] },
     "drift_check": { "runtime": "node", "entrypoint": "scripts/collect.mjs", "arguments": ["--repo={repo}", "--check", "--output=json", "--quiet"] },
-    "watch_paths": ["**/*.sql", "**/drizzle.config.*", "**/*.prisma", "**/*.py", "**/*.proto", "**/*.graphql", "**/*.gql", ".noru/privacy-datamap-stores.json", ".noru/privacy-datamap.yml"],
+    "watch_paths": ["**/*.sql", "**/drizzle.config.*", "**/*.prisma", "**/*.py", "**/*.proto", "**/*.graphql", "**/*.gql", ".noru/privacy-datamap.yml"],
     "exit_codes": {
       "0": "success",
       "1": "drift, validation failure, an unresolved needs_review claim, or a stale plan",

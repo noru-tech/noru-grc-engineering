@@ -62,7 +62,9 @@ export function toFideslang(manifest) {
     if (node && typeof node === "object") {
       return Object.fromEntries(
         ordered(Object.entries(node).filter(([key]) => !BOOKKEEPING.has(key))).map(
-          ([key, value]) => [key, strip(value)],
+          ([key, value]) => [key, key === "meta" && value && typeof value === "object"
+            ? Object.fromEntries(Object.entries(value).filter(([name]) => name !== "noru").map(([name, child]) => [name, strip(child)]))
+            : strip(value)],
         ),
       );
     }

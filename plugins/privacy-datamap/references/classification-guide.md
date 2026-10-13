@@ -47,6 +47,38 @@ in different schemas.
 | `token`, `key`, `secret` | `user.authorization.credentials` if it authenticates a person; `system.operations` if it is an idempotency key or a feature flag. |
 | `age` | `user.demographic.age_range` for a bucket, `user.demographic.date_of_birth` if it is derived from one. |
 
+## Contextual examples and limits
+
+Use `classification-examples.json` as worked examples for agent reasoning, not as automatic
+field-name rules. The examples are synthetic and inspired by Ethyca's
+[CookieHouse dataset](https://github.com/ethyca/fides-cicd-quickstart/blob/302b394e28ef713a1531ada541dbe3dc63fcb9e6/.fides/cookiehouse_core.yml).
+That quickstart demonstrates CI coverage and policy checks; its individual annotations are not a
+universal classification authority. In particular, do not copy its operational email annotation or
+its inconsistent timestamp treatment as general rules.
+
+Establish these distinctions from current schemas and relevant producers/consumers:
+
+- **Person identity versus record identity:** a customer or employee key can identify a natural
+  person; a product, address or order key identifies a record. Investigate lookup, correlation and
+  attribution before deciding whether that record key also identifies a person. A foreign key
+  proves a relationship, not the meaning of every field in the joined row.
+- **Value meaning versus table proximity:** a product label is not a person's name. An order's
+  customer reference and product reference have different meanings even though they share a row.
+- **Specific content categories:** use the most specific supported address component categories
+  once the address is established as a person's contact address. Corporate geography is not
+  automatically an individual's address.
+- **Relationships versus categories:** Fides relationship and identity metadata supports traversal
+  and matching. It does not substitute for `data_categories` or make an operational label proof
+  that the record has no privacy relevance.
+- **Events versus bookkeeping:** login/visit times need context about the event and its subject.
+  Do not generalize an example timestamp label to every timestamp. Likewise, aggregate counts
+  require evidence of their aggregation scope; a count on a person row may describe that person.
+
+Retain the existing scan and proposal workflow. These examples do not require a new classifier or
+all-field compiler investigation. Tests check taxonomy validity, expected distinctions in the
+examples, and that context-sensitive field names remain queued for agent review; tests cannot
+prove an agent's semantic judgment correct.
+
 ## Signals the exact table deliberately leaves out
 
 Use these when the context supports them.

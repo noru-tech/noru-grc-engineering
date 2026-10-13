@@ -172,11 +172,12 @@ def check_item_2(piece, decl, fail, workdir):
             )
 
     # Determinism: same repository state must produce byte-identical derived output. Two copies of
-    # the same fixture repo, so nothing either run writes can influence the other.
+    # the same fixture repo, so nothing either run writes can influence the other. Keep the
+    # basename equal because collectors may include fallback repository identity in provenance.
     digests = []
     targets = []
     for i in (0, 1):
-        target = workdir / f"{piece.name}-determinism-{i}"
+        target = workdir / f"determinism-{i}" / piece.name
         shutil.copytree(FIXTURE_REPO, target)
         targets.append(target)
         result = run(["node", str(collector), f"--repo={target}", "--output=json", "--quiet"])

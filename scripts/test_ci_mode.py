@@ -123,6 +123,9 @@ def build_green_repo(dest, piece_name="ai-inventory"):
     if repo.exists():
         shutil.rmtree(repo)
     shutil.copytree(FIXTURE_REPO, repo)
+    if piece_name == "privacy-datamap":
+        # The accepted-map fixture needs a current schema; historical migrations are excluded.
+        (repo / "db/migrations/0001_create_accounts.sql").rename(repo / "db/schema.sql")
 
     piece = PLUGINS / piece_name
     decl = json.loads((piece / "piece.json").read_text(encoding="utf-8"))
@@ -510,8 +513,8 @@ def case_coverage(results, tmp):
     code, report = ci(migration_gap, piece="privacy-datamap")
     finding = next((f for f in (report or {}).get("findings", []) if f["kind"] == "coverage"), None)
     results.check(
-        "coverage: an unsafe migration-only current state is a broken gate",
-        code == 6 and finding is not None and "sql_migration" in finding.get("formats", []),
+        "coverage: excluded migration-only scope requires a current schema",
+        code == 6 and finding is not None and "excluded_migrations" in finding.get("formats", []),
         f"exit {code}, finding {finding}",
     )
 
@@ -549,7 +552,7 @@ def case_base_ref(results, tmp):
 
     # Now this branch introduces one. The structure digest has to be re-stamped because adding a
     # field is exactly what that digest exists to notice — which is itself worth asserting.
-    schema = repo / "db" / "migrations" / "0001_create_accounts.sql"
+    schema = repo / "db" / "schema.sql"
     schema.write_text(
         schema.read_text(encoding="utf-8").replace(
             "    password_hash TEXT NOT NULL,",
@@ -571,7 +574,7 @@ def case_base_ref(results, tmp):
             "          - name: password_hash",
             "          - name: passport_number\n"
             "            data_categories: [user.government_id.passport_number]\n"
-            "            refs: [\"db/migrations/0001_create_accounts.sql:6\"]\n"
+            "            refs: [\"db/schema.sql:6\"]\n"
             "          - name: password_hash",
             1,
         ),

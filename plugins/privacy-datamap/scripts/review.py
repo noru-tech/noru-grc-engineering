@@ -2,6 +2,7 @@
 """Validate agent enrichment and render its review; never accept or export decisions."""
 
 import json
+import analysis_storage
 import pathlib
 import re
 import sys
@@ -10,13 +11,16 @@ import reconcile as workflow
 
 
 def requested_systems(candidate):
-    return [system for system in candidate.get("system", []) if any(
+    return [system for system in candidate.get("system", []) if not system.get("privacy_declarations") or any(
         declaration.get("needs_review") for declaration in system.get("privacy_declarations", [])
     )]
 
 
 def validate(document, result, candidate, repo):
+    lock = workflow.load_json(repo / ".noru" / "privacy-datamap.lock.json")
+    workflow.add_semantic_review(result, lock, candidate, document)
     errors = workflow.analysis_cache.refresh(document, repo)
+    errors.extend(workflow.VALIDATOR.dataset_inputs.dependency_gaps(candidate))
     current_discovery = result.get("discovery_sources", workflow.analysis_cache.discover(repo))
     pending_discovery = workflow.analysis_cache.refresh_discovery(document, current_discovery, candidate.get("evidence_dependencies", []))
     errors.extend(f"{row['path']}: investigate newly discovered code/configuration scope" for row in pending_discovery)
@@ -137,6 +141,11 @@ def validate(document, result, candidate, repo):
     datasets = {row["fides_key"] for row in candidate.get("dataset", [])}
     for identity, row in indexed("system_proposals", systems).items():
         evidence(row, identity)
+        require(text(row.get("system_type")), f"{identity}: propose the architectural system type")
+        investigation = row.get("investigation", {})
+        for scope in ("runtime_processing", "external_recipients", "storage", "infrastructure"):
+            require(isinstance(investigation, dict) and text(investigation.get(scope)),
+                    f"{identity}: record {scope} investigation, including evidence for absence or missing evidence")
         activities = row.get("processing_activities")
         require(isinstance(activities, list) and bool(activities), f"{identity}: separate processing activities")
         activity_ids = set()
@@ -146,7 +155,7 @@ def validate(document, result, candidate, repo):
                     f"{identity}: activities need unique identifiers")
             activity_ids.add(activity.get("activity_id"))
             evidence(activity, label)
-            for key, vocab in (("proposed_data_uses", "data_use"), ("proposed_data_subjects", "data_subjects")):
+            for key, vocab in (("proposed_data_uses", "data_use"), ("proposed_data_subjects", "data_subjects"), ("proposed_categories", "data_categories")):
                 keys(activity, key, vocab, label)
                 require(bool(activity.get(key)) or text(activity.get("unresolved_question")),
                         f"{label}: propose {key} or explain missing evidence")
@@ -157,6 +166,17 @@ def validate(document, result, candidate, repo):
             require(isinstance(relationships, list) and all(isinstance(v, str) and v in datasets
                     for v in relationships), f"{label}: invalid dataset references")
             require(text(activity.get("relationship_rationale")), f"{label}: explain datastore access or uncertainty")
+            mode = activity.get("processing_mode")
+            require(mode in ("stored", "transient", "unknown"), f"{label}: identify stored, transient or unknown processing")
+            require(mode != "stored" or bool(relationships), f"{label}: stored processing needs a dataset")
+            require(mode != "unknown" or text(activity.get("unresolved_question")), f"{label}: explain unknown processing scope")
+            recipients = activity.get("recipient_systems")
+            known_systems = {system["fides_key"] for system in candidate.get("system", [])}
+            require(isinstance(recipients, list) and all(isinstance(v, str) and v in known_systems for v in recipients),
+                    f"{label}: recipient_systems must reference represented systems")
+            require(text(activity.get("recipient_rationale")), f"{label}: explain recipients, evidence for no sharing, or unresolved destination")
+
+    errors.extend(validate_removals(document, result, candidate, repo))
 
     require(document.get("analysis_binding") == workflow.analysis_binding(repo, repo / ".noru" / "privacy-datamap.yml", result),
             "structure or accepted baseline changed since enrichment; rerun collection and reconciliation")
@@ -178,7 +198,10 @@ def validate(document, result, candidate, repo):
         uncertainty(discovery, "discovery proposal")
     proposed_mapping = document.get("relationship_proposal")
     if result.get("candidate_context"):
-        require(proposed_mapping is not None, "Candidate review requires the collected relationship_proposal")
+        require(proposed_mapping is not None or document.get("structural_proposal"), "Candidate review requires the collected relationship_proposal or structural_proposal")
+    if document.get("structural_proposal"):
+        require(bool(result.get("candidate_context")), "Preview structural proposals with --candidate before review")
+        require(workflow.dependencies.digest(document["structural_proposal"]) == result.get("candidate_context", {}).get("structural_digest"), "Structural proposal differs from collected candidate")
     if proposed_mapping is not None:
         errors.extend(workflow.relationships.validate_proposal(proposed_mapping, repo))
         require(bool(result.get("candidate_context")),
@@ -208,8 +231,67 @@ def validate(document, result, candidate, repo):
                 uncertainty(finding, "store finding")
                 summary(finding, "store finding")
             else:
+                require(text(finding.get("structure_rationale")),
+                        "store finding: explain the modeled payload boundary and verify nested structure against its evidence")
                 require(finding.get("dataset_reference") in datasets,
                         "store finding: covered stores must reference a collected dataset")
+    return errors
+
+
+def validate_removals(document, result, candidate, repo, accepting=False):
+    """Removed observations need explanations independently of the candidate's remaining flags."""
+    expected = {r["entity_id"]: r for r in result.get("removal_required", [])}
+    rows = document.get("removal_proposals", [])
+    errors = []
+    if not isinstance(rows, list):
+        return ["removal_proposals: supply the investigation queue"]
+    index = {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("entity_id"), str):
+            errors.append("removal_proposals: each entry needs an entity_id")
+            continue
+        identity = row["entity_id"]
+        if identity in index:
+            errors.append(f"{identity}: duplicate removal proposal")
+        index[identity] = row
+    if set(index) != set(expected):
+        errors.append("removal_proposals: missing or unexpected queue items: " + ", ".join(sorted(set(index) ^ set(expected))))
+    references = {r["fides_key"] for key in ("dataset", "system") for r in candidate.get(key, [])}
+    for identity, row in index.items():
+        for key in ("rationale", "decision_summary"):
+            if not isinstance(row.get(key), str) or not row[key].strip():
+                errors.append(f"{identity}: supply {key}")
+        decision_summary = row.get("decision_summary")
+        if isinstance(decision_summary, str) and (len(decision_summary) > 240 or "\n" in decision_summary):
+            errors.append(f"{identity}: use a concise single-line decision summary")
+        if row.get("confidence") not in ("low", "medium", "high"):
+            errors.append(f"{identity}: set confidence")
+        refs = row.get("refs")
+        if not isinstance(refs, list) or not refs:
+            errors.append(f"{identity}: cite current evidence for the removal")
+        for ref in refs if isinstance(refs, list) else []:
+            match = re.fullmatch(r"(.+):(\d+)", ref) if isinstance(ref, str) else None
+            try:
+                path = (repo / match[1]).resolve() if match else None
+                valid = path and path.is_relative_to(repo.resolve()) and path.is_file() and 0 < int(match[2]) <= len(path.read_text().splitlines())
+            except (OSError, UnicodeError):
+                valid = False
+            if not valid:
+                errors.append(f"{identity}: invalid current removal citation {ref!r}")
+        if row.get("observation_digest") != expected.get(identity, {}).get("observation_digest"):
+            errors.append(f"{identity}: stale removal investigation")
+        outcome = row.get("outcome")
+        if outcome not in ("retired", "replaced", "amended", "gap"):
+            errors.append(f"{identity}: explain retirement, replacement, amendment or coverage gap")
+        question = row.get("unresolved_question") or row.get("business_context_question")
+        if outcome == "gap" and not question:
+            errors.append(f"{identity}: explain missing coverage")
+        if question and not all(isinstance(row.get(k), str) and row[k].strip() for k in ("resolution_needed", "decision_impact")):
+            errors.append(f"{identity}: state what resolves the question and its decision impact")
+        if accepting and (outcome == "gap" or question):
+            errors.append(f"{identity}: resolve the disappearance before accepting the new baseline")
+        if outcome == "replaced" and row.get("replacement_reference") not in references:
+            errors.append(f"{identity}: reference the represented replacement dataset or system")
     return errors
 
 
@@ -256,7 +338,7 @@ def build_outputs(document, result, derived, candidate, errors):
     activities = []
     proposed_systems = {row["entity_id"] for row in document.get("system_proposals", [])}
     for system in document.get("system_proposals", []):
-        activities.extend({**activity, "system": system["entity_id"], "decision_state": "proposed"}
+        activities.extend({**activity, "system": system["entity_id"], "system_type": system.get("system_type"), "decision_state": "proposed"}
                           for activity in system.get("processing_activities", []))
     for system in candidate.get("system", []):
         if system["fides_key"] not in proposed_systems:
@@ -264,6 +346,7 @@ def build_outputs(document, result, derived, candidate, errors):
                 activities.append({"system": system["fides_key"], "purpose": declaration.get("name"),
                     "proposed_data_uses": [declaration.get("data_use")],
                     "proposed_data_subjects": declaration.get("data_subjects", []),
+                    "proposed_categories": declaration.get("data_categories", []),
                     "dataset_references": system.get("dataset_references", []), "decision_state": "accepted",
                     "evidence": declaration})
     stores = []
@@ -296,7 +379,7 @@ def build_outputs(document, result, derived, candidate, errors):
         group["data_categories"] = sorted(set(group["data_categories"]) | set(field["classification"]))
     return {"version": "1.0.0", "status": status, "observation_digest": result["observation_digest"],
             "collection_mode": "candidate" if result.get("candidate_context") else "manifest",
-            "data_map": {"stores": stores, "processing_activities": activities, "monitoring_scope": result.get("monitoring_scope", {}), "connection_questions": (derived.get("relationship_mapping") or {}).get("questions", []), "relationship_proposal": document.get("relationship_proposal")},
+            "data_map": {"system_flows": [{"system": s["fides_key"], "direction": k, "resources": s[k]} for s in candidate.get("system", []) for k in ("ingress", "egress") if s.get(k)], "stores": stores, "processing_activities": activities, "monitoring_scope": result.get("monitoring_scope", {}), "connection_questions": (derived.get("relationship_mapping") or {}).get("questions", []), "relationship_proposal": document.get("relationship_proposal")},
             "review_queue": {"structural_blockers": blockers, "analysis_errors": errors,
                              "field_groups": [] if blockers else [groups[key] for key in sorted(groups)],
                              "technical_coverage": technical,
@@ -305,7 +388,7 @@ def build_outputs(document, result, derived, candidate, errors):
                              "dependency_decisions": document.get("dependency_proposals", []),
                              "control_changes": result.get("control_changes", []), "system_changes": result.get("system_changes", [])},
             "evidence_record": {"fields": inventory, "reasoning_groups": document.get("reasoning_groups", {}),
-                                "agent_analysis": document, "reconciliation": result, "candidate_manifest": candidate, "coverage": derived.get("coverage", {}),
+                                "agent_analysis": {k: v for k, v in document.items() if k not in {"evidence", "preview", "candidate", "reconciliation"}}, "reconciliation": result, "candidate_manifest": candidate, "coverage": derived.get("coverage", {}),
                                 "special_category_refs": result.get("special_category_refs", []), "relationship_mapping": derived.get("relationship_mapping", {})}}
 
 
@@ -319,27 +402,50 @@ def question(lines, row):
             lines.append(f"  Affects: {row['decision_impact']}")
 
 
+def review_scope(values):
+    values = sorted(set(values))
+    if len(values) <= 3:
+        return ", ".join(values)
+    return f"{', '.join(values[:3])} and {len(values) - 3} other collections (full scope in evidence)"
+
+
 def render_outputs(outputs):
     status = outputs["status"]
-    data_map = ["# Privacy data map", "", f"Status: **{status}**." + (" Proposed meanings require human acceptance." if status != "accepted" else " No changes within the monitored scope."), ""]
+    data_map = ["# Privacy review", "", f"Status: **{status}**." + (" Proposed meanings require human acceptance." if status != "accepted" else " No changes within the monitored scope."), ""]
     if outputs["evidence_record"]["reconciliation"].get("candidate_context"):
         data_map.extend(["Candidate collection: stores and fields below use the proposed relationship graph. Accepted files are unchanged.", ""])
-    scope = outputs["data_map"].get("monitoring_scope", {})
-    data_map.extend([f"Monitoring: collected structure and {scope.get('registered_dependencies', 0)} registered code dependencies. Unregistered processing code is outside this baseline.", ""])
+    if status == "enrichment incomplete":
+        data_map.extend(["Investigation is unfinished. Supported privacy proposals follow; remaining work is summarized below.", ""])
+    data_map.extend(["Coverage is limited to inspected code and registered evidence; gaps remain explicit.", ""])
     for store in outputs["data_map"]["stores"]:
-        data_map.extend([f"## {store['name']}", "", f"Collections: {', '.join(store['collections'])}",
+        data_map.extend([f"## {store['name']}", "", f"Scope: {len(store['collections'])} collections",
                          f"Categories: {', '.join(store['data_categories']) or 'None established'}", ""])
     data_map.extend(["## Processing and flows", ""])
     for activity in outputs["data_map"]["processing_activities"]:
         data_map.extend([f"- **{activity['system']}: {activity.get('purpose')}** ({activity['decision_state']})",
+                         f"  Categories: {', '.join(activity.get('proposed_categories', [])) or 'Unresolved'}",
                          f"  Subjects: {', '.join(activity.get('proposed_data_subjects', [])) or 'Unresolved'}; uses: {', '.join(activity.get('proposed_data_uses', []))}",
-                         f"  Stores: {', '.join(activity.get('dataset_references', [])) or 'Unresolved datastore'}; flow: {activity.get('relationship_rationale') or 'See accepted declaration evidence'}"])
+                         f"  Stores: {', '.join(activity.get('dataset_references', [])) or ('Transient processing' if activity.get('processing_mode') == 'transient' else 'Unresolved datastore')}; flow: {activity.get('relationship_rationale') or 'See accepted declaration evidence'}"])
+        if activity.get("recipient_systems"):
+            data_map.append(f"  Recipients: {', '.join(activity['recipient_systems'])}")
+    if outputs["data_map"].get("system_flows"):
+        data_map.extend(["", "## External and internal system flows", ""])
+        for flow in outputs["data_map"]["system_flows"]:
+            for resource in flow["resources"]:
+                source, target = (flow["system"], resource["fides_key"]) if flow["direction"] == "egress" else (resource["fides_key"], flow["system"])
+                data_map.append(f"- {source} → {target}; categories: {', '.join(resource.get('data_categories', [])) or 'Unresolved'}")
     for row in outputs["data_map"].get("connection_questions", []):
         data_map.append(f"- Connection **{row['id']}**: destination unresolved.")
     queue = outputs["review_queue"]
     discovery = outputs["evidence_record"]["agent_analysis"].get("discovery_required", [])
-    review = ["# Privacy decision review", "", f"Status: **{status}**", "",
-              "[Data map](privacy-datamap.map.md) · [Full evidence](privacy-datamap.evidence.json)", ""]
+    review = ["# Privacy decisions", "",
+              "[Analysis and evidence](privacy-datamap.analysis.json)", ""]
+    for change in outputs["evidence_record"]["reconciliation"].get("semantic_changes", []):
+        if change["kind"] != "personal_to_non_personal_or_removed":
+            review.append(f"- **{change['kind'].replace('_', ' ')}**: {change['entity_id'].removeprefix('semantic:')}")
+    for removal in outputs["evidence_record"]["agent_analysis"].get("removal_proposals", []):
+        review.append(f"- **{removal.get('decision_summary') or removal['entity_id']}**: {removal.get('outcome') or 'Investigation required'}")
+        question(review, removal)
     proposed_mapping = outputs["data_map"].get("relationship_proposal")
     if isinstance(proposed_mapping, dict):
         review.append(f"- **{proposed_mapping.get('decision_summary', 'Review relationship mapping')}**")
@@ -357,22 +463,21 @@ def render_outputs(outputs):
         review.append("Privacy decisions are deferred. Independent analysis remains in the evidence record.")
     else:
         technical = queue["technical_coverage"]
-        if queue["field_groups"] or queue["collection_decisions"]:
+        meaningful_groups = [g for g in queue["field_groups"] if g["summary"] != "Analysis required"]
+        if meaningful_groups or queue["collection_decisions"]:
             review.extend(["## Changes requiring decisions", ""])
-        for group in queue["field_groups"]:
+        for group in meaningful_groups:
             review.extend([f"- **{group['summary']}**",
-                           f"  Scope: {', '.join(group['collections'])} ({len(group['field_ids'])} fields; {', '.join(group['proposal_kinds'])})."])
+                           f"  Scope: {review_scope(group['collections'])} ({', '.join(group['proposal_kinds'])})."])
             if group["data_categories"]:
                 review.append(f"  Categories: {', '.join(group['data_categories'])}")
             question(review, group)
         if queue["collection_decisions"] or queue["processing_decisions"]:
             review.extend(["", "Accept or amend the proposals and record the accountable owner once for the affected scope."])
         if queue["collection_decisions"]:
-            review.append(f"Collections: {', '.join(queue['collection_decisions'])}.")
+            review.append(f"Acceptance scope: {review_scope(queue['collection_decisions'])}.")
         if technical:
-            review.extend(["", "<details><summary>Technical field coverage</summary>", ""])
-            review.extend(f"- {collection}: {count} proposed non-personal fields; included in collection acceptance." for collection, count in sorted(technical.items()))
-            review.extend(["", "</details>"])
+            review.extend(["", f"Technical coverage: {sum(technical.values())} proposed non-personal fields across {len(technical)} collections; details remain in evidence."])
         removed = [row for row in queue["changes"] if row["action"] == "remove"]
         if removed:
             review.extend(["", f"{len(removed)} removed field(s); exact identities are in the evidence record."])
@@ -384,7 +489,7 @@ def render_outputs(outputs):
         if queue["system_changes"]:
             review.extend(["", "## Observed runtime changes", ""])
             for change in queue["system_changes"]:
-                review.append(f"- {change['id']}: {change['previous']} → {change['current']}. {change['reason']}")
+                review.append(f"- **{change['id']}**: {change['reason']} Review the affected processing and sharing relationships.")
         if queue["processing_decisions"]:
             review.extend(["", "## Systems and processing decisions", ""])
         for activity in queue["processing_decisions"]:
@@ -399,18 +504,30 @@ def render_outputs(outputs):
                 review.append(f"- {finding.get('store')}: {finding.get('decision_summary') or 'Coverage unresolved'}")
                 question(review, finding)
         for gap in gaps:
-            review.append(f"- Unparsed structure: {gap}. To resolve: supply a supported schema or an evidence-backed supplemental store.")
+            review.append(f"- Coverage gap at {gap.get('ref', 'unknown source')}: {gap.get('reason', 'structure not established')}. To resolve: establish the stored payload and its privacy meaning.")
         special_keys = workflow.VALIDATOR.load_vocabulary()["special_categories"]
-        special = [row["entity_id"] for row in outputs["evidence_record"]["fields"] if any(
-            key in special_keys for key in row["classification"]) or (row["proposal"] or {}).get("proposal_kind") == "special_category"]
+        special = {}
+        for row in outputs["evidence_record"]["fields"]:
+            categories = {key for key in row["classification"] if key in special_keys}
+            if categories or (row["proposal"] or {}).get("proposal_kind") == "special_category":
+                collection = row["entity_id"].rsplit("/", 1)[0]
+                item = special.setdefault(collection, {"count": 0, "categories": set()})
+                item["count"] += 1
+                item["categories"].update(categories)
         review.extend(["", "## Possible Article 9 or Article 10 data", ""])
-        review.extend([f"- {identity}" for identity in special] or ["None identified."])
+        review.extend([f"- {collection}: {', '.join(sorted(item['categories'])) or 'classification unresolved'} ({item['count']} fields; citations in evidence)."
+                       for collection, item in sorted(special.items())] or ["None identified."])
     if discovery:
-        review.extend(["", "## New scope to investigate", ""])
-        for item in discovery:
-            review.append(f"- {item['path']}: {item['question']}")
+        review.extend(["", "## New scope to investigate", "",
+                       f"{len(discovery)} code/configuration changes need investigation for new data, purposes or sharing. Source-level work items remain in evidence."])
     if queue["analysis_errors"]:
-        review.extend(["", "## Outstanding analysis", ""] + [f"- {error}" for error in queue["analysis_errors"]])
+        review.extend(["", "## Outstanding analysis", "",
+                       f"{len(queue['analysis_errors'])} validation issues remain. The agent must resolve missing analysis and invalid proposals before requesting acceptance."])
+        # Report investigation scope, not one diagnostic per field. Full errors remain available
+        # through the machine-readable result and explicit evidence view.
+        pending = sum(len(g["field_ids"]) for g in queue["field_groups"] if g["summary"] == "Analysis required")
+        if pending:
+            review.append(f"{pending} fields still lack a supported privacy decision; this is agent investigation work.")
     return "\n".join(data_map) + "\n", "\n".join(review) + "\n"
 
 
@@ -420,29 +537,32 @@ def main(argv):
         if opts["seal"]:
             raise ValueError("review.py cannot seal decisions")
         if opts.get("help"):
-            print("usage: review.py --repo=<path> [--candidate] [--output=json]")
+            print("usage: review.py --repo=<path> [--candidate] [--output=json|evidence]")
             return 0
         repo = opts["repo"]
         cache = workflow.cache_directory(repo, opts["candidate"])
-        derived = workflow.load_json(cache / "privacy-datamap.derived.json", required=True)
-        scan = workflow.load_json(cache / "privacy-datamap.scan.json", required=True)
+        derived, scan = workflow.load_observations(repo, opts["candidate"])
         path = repo / ".noru" / "privacy-datamap.yml"
         manifest = workflow.load_manifest(path)
         lock = workflow.load_json(repo / ".noru" / "privacy-datamap.lock.json")
         mapping = workflow.validate_scan_mode(repo, derived, scan, opts["candidate"])
         result = workflow.reconcile(derived, scan, manifest, lock, path)
+        result["status"] = "structure collected"
         candidate = workflow.build_candidate(derived, scan, {} if result["mode"] == "bootstrap" else manifest,
                     workflow.build_lock(derived, scan, path) if result["mode"] == "migration" else lock)
         candidate = workflow.apply_candidate_mapping(workflow.refresh_candidate_evidence(candidate, result), mapping)
-        document = workflow.load_json(cache / "privacy-datamap.proposals.json", required=True)
+        document = analysis_storage.load(cache / "privacy-datamap.analysis.json")
+        if document is None:
+            raise ValueError("Run reconciliation before enrichment")
         errors = validate(document, result, candidate, repo)
-        if not errors:
-            (cache / "privacy-datamap.proposals.json").write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         outputs = build_outputs(document, result, derived, candidate, errors)
         data_map, report = render_outputs(outputs)
-        (cache / "privacy-datamap.map.md").write_text(data_map, encoding="utf-8")
+        report = data_map + "\n" + report
+        analysis_storage.save(cache / "privacy-datamap.analysis.json", document)
+        if opts.get("evidence"):
+            print(json.dumps(outputs))
+            return 1 if outputs["status"] == "enrichment incomplete" else 0
         (cache / "privacy-datamap.review.md").write_text(report, encoding="utf-8")
-        (cache / "privacy-datamap.evidence.json").write_text(json.dumps(outputs, indent=2) + "\n", encoding="utf-8")
         output = {"status": outputs["status"], "errors": errors,
                   "structural_blockers": outputs["review_queue"]["structural_blockers"]}
         print(json.dumps(output) if opts["json"] else report)

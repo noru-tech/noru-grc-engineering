@@ -184,6 +184,33 @@
           }
         }
       }
+    },
+    "migration_support": {
+      "type": "array",
+      "description": "Exact reviewed support sources caught by migration directory naming; re-included in collection and discovery, invalidated when bytes change.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sha256",
+          "rationale"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -283,6 +310,15 @@
           "items": {
             "$ref": "#/$defs/collection"
           }
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "noru": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": true
         }
       }
     },
@@ -380,6 +416,15 @@
           "items": {
             "$ref": "#/$defs/field"
           }
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "noru": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": true
         }
       }
     },
@@ -418,6 +463,65 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/declaration"
+          }
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "noru": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": true
+        },
+        "ingress": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fides_key",
+              "type"
+            ],
+            "properties": {
+              "fides_key": {
+                "type": "string"
+              },
+              "type": {
+                "const": "system"
+              },
+              "data_categories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "egress": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fides_key",
+              "type"
+            ],
+            "properties": {
+              "fides_key": {
+                "type": "string"
+              },
+              "type": {
+                "const": "system"
+              },
+              "data_categories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }
@@ -465,6 +569,18 @@
         },
         "needs_review": {
           "type": "boolean"
+        },
+        "ingress": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "egress": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

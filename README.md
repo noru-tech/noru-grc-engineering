@@ -102,7 +102,7 @@ publication boundary, follow [developer onboarding](./docs/developer-onboarding.
 | [`governance-records`](./plugins/governance-records/) | minutes, ISMS scope, statement of applicability, audit plans and reports, findings, corrective action plans | attributed, dated records as evidence |
 | [`review-signoff`](./plugins/review-signoff/) | a periodic review of machine output, and the human decision about it | a named, dated, expiring sign-off as evidence |
 | [`audit-pack`](./plugins/audit-pack/) | the local artifacts, the sampling and the workpapers for one framework over one audit window | the tested conclusion for each control, as evidence |
-| [`privacy-datamap`](./plugins/privacy-datamap/) | the schemas a repository holds — ORM models, migrations, SQL DDL, protobuf, GraphQL — and the personal data in them | a Fides privacy data map (`read/write:datamaps`) |
+| [`privacy-datamap`](./plugins/privacy-datamap/) | the schemas a repository holds — current ORM models, SQL DDL, protobuf, GraphQL — and the personal data in them | a Fides privacy data map (`read/write:datamaps`) |
 | [`iac-scan`](./plugins/iac-scan/) | compliance-relevant misconfiguration in Terraform, CloudFormation, Kubernetes and pipeline configuration | security findings, keyed and closed by the same call |
 | [`change-control`](./plugins/change-control/) | who wrote, approved, merged and deployed each change over one window, and the branch protection that was supposed to keep those apart | a finding per separation that did not hold, plus the window as evidence |
 | [`noru`](./plugins/noru/) | repository signals and shared provenance | the hub: route, `connect`, `doctor`, `context` |

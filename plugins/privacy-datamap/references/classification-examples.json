@@ -1,0 +1,102 @@
+{
+  "description": "Synthetic evidence scenarios for agent guidance, not collector lookup rules. Empty categories mean non-personal only within the stated context; unresolved examples require more evidence.",
+  "examples": [
+    {
+      "id": "person-name",
+      "collection": "customers",
+      "field": "name",
+      "context": "Account holder supplies their own display name; profile rendering displays it as that individual name.",
+      "categories": [
+        "user.name"
+      ]
+    },
+    {
+      "id": "product-name",
+      "collection": "products",
+      "field": "name",
+      "context": "Catalog label supplied by a merchant; product lookup and checkout use it as the item label, not as a person name.",
+      "categories": []
+    },
+    {
+      "id": "person-id",
+      "collection": "customers",
+      "field": "id",
+      "context": "Account key used to retrieve an individual customer profile and attribute their orders.",
+      "categories": [
+        "user.unique_id"
+      ]
+    },
+    {
+      "id": "product-id",
+      "collection": "products",
+      "field": "id",
+      "context": "Catalog SKU record key used only to select a product. The same item can be purchased by many unrelated customers.",
+      "categories": []
+    },
+    {
+      "id": "order-person-reference",
+      "collection": "orders",
+      "field": "customer_id",
+      "context": "References an individual customer profile and attributes the order to that person.",
+      "categories": [
+        "user.unique_id"
+      ]
+    },
+    {
+      "id": "order-product-reference",
+      "collection": "order_items",
+      "field": "product_id",
+      "context": "References the catalog item. It does not identify the purchaser; that association is carried separately by the order.",
+      "categories": []
+    },
+    {
+      "id": "record-id-unresolved",
+      "collection": "orders",
+      "field": "id",
+      "context": "Only the primary-key declaration is available; lookup, correlation and person attribution have not been investigated.",
+      "categories": [],
+      "unresolved": true
+    },
+    {
+      "id": "personal-city",
+      "collection": "delivery_addresses",
+      "field": "city",
+      "context": "Customer supplies the city of their own delivery address, which fulfillment uses to deliver to that person.",
+      "categories": [
+        "user.contact.address.city"
+      ]
+    },
+    {
+      "id": "catalog-city",
+      "collection": "warehouse_locations",
+      "field": "city",
+      "context": "The city of a corporate warehouse used for inventory routing, with no individual address or personal attribution.",
+      "categories": []
+    },
+    {
+      "id": "login-event",
+      "collection": "logins",
+      "field": "time",
+      "context": "Timestamp emitted on successful individual login and displayed in that account authentication history.",
+      "categories": [
+        "user.behavior"
+      ]
+    },
+    {
+      "id": "scheduled-run-time",
+      "collection": "scheduled_runs",
+      "field": "time",
+      "context": "Planned background maintenance execution time; scheduling is system-driven and does not record an individual action.",
+      "categories": []
+    },
+    {
+      "id": "personal-email",
+      "collection": "support_requests",
+      "field": "email",
+      "context": "Requester email supplied for replying to their support ticket. An operational purpose does not change the address meaning.",
+      "categories": [
+        "user.contact.email"
+      ]
+    }
+  ]
+}

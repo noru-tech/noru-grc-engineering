@@ -117,11 +117,18 @@ class EndToEndGateTests(unittest.TestCase):
             run_json([sys.executable, str(scripts/'reconcile.py'), f'--repo={repo}', '--seal', '--output=json'], repo)
             parsed = repo/'.noru/.cache/privacy-datamap.parsed.json'
             run_json([sys.executable, str(scripts/'validate_manifest.py'), str(path), '--output=json', f'--emit-parsed={parsed}'], repo)
-            run_json(['node', str(scripts/'collect.mjs'), f'--repo={repo}', '--output=json'], repo)
+            run_json(['node', str(scripts/'collect.mjs'), f'--repo={repo}', '--export', '--output=json'], repo)
             git('add', '.noru/privacy-datamap.lock.json', '.fides/datamap.yml')
             accepted = {name: (repo/name).read_bytes() for name in ('.noru/privacy-datamap.yml','.noru/privacy-datamap.lock.json','.fides/datamap.yml')}
             self.assertEqual(check(repo), [])
             self.assertEqual(accepted, {name:(repo/name).read_bytes() for name in accepted})
+            # Unsealed narrowing of accepted privacy meaning remains blocked by the portable gate.
+            original_manifest = path.read_text()
+            manifest['system'][0]['privacy_declarations'] = []
+            path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+            failures = check(repo)
+            self.assertTrue(any('privacy meaning narrowed' in f for f in failures), failures)
+            path.write_text(original_manifest)
             # The actual upstream fingerprint logic catches processing-only changes.
             (repo/'app.py').write_text('def deliver(email):\n    return {"recipient": email, "new_provider": True}\n')
             self.assertTrue(any('PROCESSING_REVIEW_REQUIRED' in f for f in check(repo)))
