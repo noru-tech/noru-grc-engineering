@@ -184,6 +184,21 @@ def main(argv):
         git(repo, "add", "db/schema.sql", "src/agent.ts")
         git(repo, "commit", "-m", "add data and ai")
 
+        (repo / 'src/reviews.py').write_text('reviewer = "mock"\nreviewed_at = None\ndeploy = False\n')
+        git(repo, 'add', 'src/reviews.py')
+        scoped, scoped_payload = review(repo, '--scope=local-code')
+        scoped_pieces = dispositions(scoped_payload)
+        results.check('local code scope excludes application review and deployment terminology',
+            scoped.returncode == 0 and scoped_pieces['privacy-datamap']['disposition'] == 'selected'
+            and all(scoped_pieces[name]['disposition'] == 'skipped' for name in ('change-control', 'review-signoff')))
+        explicit, explicit_payload = review(repo, '--pieces=privacy-datamap')
+        results.check('explicit privacy scan cannot expand from application terminology',
+            explicit.returncode == 0 and [row['name'] for row in explicit_payload['pieces'] if row['disposition'] == 'selected'] == ['privacy-datamap'])
+        conflicting, _ = review(repo, '--scope=local-code', '--pieces=change-control')
+        results.check('conflicting local scope is rejected actionably', conflicting.returncode == 2 and 'conflict' in conflicting.stderr)
+        git(repo, 'reset', '--', 'src/reviews.py')
+        (repo / 'src/reviews.py').unlink()
+
         changed, payload = review(repo)
         pieces = dispositions(payload)
         results.check("changed branch succeeds", changed.returncode == 0, changed.stderr)

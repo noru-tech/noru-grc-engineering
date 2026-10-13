@@ -1292,6 +1292,30 @@
               }
             }
           }
+        },
+        "user_feedback": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "required": [
+              "statement",
+              "interpretation"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "interpretation": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
         }
       }
     }

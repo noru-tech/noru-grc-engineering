@@ -18,6 +18,83 @@ import investigate
 
 
 class InvestigationTests(unittest.TestCase):
+    def test_progress_separates_investigation_missing_facts_and_approval(self):
+        import review
+        result = {'actions': [], 'collection_review_required': ['db/records'], 'observation_digest': 'fixture'}
+        progress = review.scan_progress(self.document, result, self.derived, [], [])
+        self.assertEqual(progress['collection'], 'complete')
+        self.assertEqual(progress['agent_investigation'], 'incomplete')
+        self.assertEqual(progress['human_approval'], 'deferred')
+        for row in self.document['classification_review']['fields']:
+            row.update(status='proposed', resolution_owner=None)
+        progress = review.scan_progress(self.document, result, self.derived, [], [])
+        self.assertEqual(progress['agent_investigation'], 'complete')
+        self.assertEqual(progress['human_approval'], 'pending')
+        self.assertEqual(progress['publication'], 'blocked')
+        row.update(status='needs_investigation', resolution_owner='human', business_context_question='Is this an individual account?')
+        progress = review.scan_progress(self.document, result, self.derived, [], [])
+        self.assertEqual(progress['agent_investigation'], 'complete')
+        self.assertEqual(progress['source_information'], 'missing')
+        self.assertEqual(progress['human_approval'], 'deferred')
+        self.assertEqual(progress['missing_facts'], ['Is this an individual account?'])
+        row.update(status='proposed', resolution_owner=None)
+        result['accepted_current'] = True
+        self.assertEqual(review.scan_progress(self.document, result, self.derived, [], [])['human_approval'], 'recorded')
+
+    def test_feedback_is_deduplicated_and_does_not_accept_or_classify(self):
+        entries = [{'entity_id': 'db/records/code', 'statement': 'This is not PII.',
+                    'interpretation': 'User means it does not directly identify a person; investigate remaining person association.'}]
+        before = copy.deepcopy(self.document)
+        updated = investigate.record_feedback(self.document, entries)
+        self.assertEqual(before, self.document)
+        row = updated['classification_review']['fields'][0]
+        self.assertEqual(row['personal_data'], 'unknown')
+        self.assertEqual(row['resolution_owner'], 'agent')
+        self.assertEqual(row['uncertainty'], 'user_feedback')
+        self.assertEqual(len(row['user_feedback']), 1)
+
+        self.assertEqual(investigate.record_feedback(updated, entries), updated)
+        self.assertFalse(field_review.validate_contract(updated, self.derived, self.repo, require_complete=False))
+        self.assertTrue(field_review.validate_contract(updated, self.derived, self.repo, require_complete=True))
+        with self.assertRaises(ValueError):
+            investigate.record_feedback(updated, entries + [{'entity_id': 'missing'}])
+        self.assertEqual(len(row['user_feedback']), 1)
+
+    def test_feedback_survives_decision_and_reextraction_without_acceptance(self):
+        entries = [{'entity_id': 'db/records/code', 'statement': 'It is only an internal record key.',
+                    'interpretation': 'Investigate whether the key still relates to an individual.'}]
+        self.document = investigate.record_feedback(self.document, entries)
+        row = self.document['classification_review']['fields'][0]
+        decision = self.decision(row)
+        self.assertEqual(field_review.apply_decisions(self.document, [decision], self.repo), [])
+        row = self.document['classification_review']['fields'][0]
+        self.assertEqual(row['user_feedback'][0]['statement'], entries[0]['statement'])
+        bad = self.decision(row)
+        bad['user_feedback'] = []
+        self.assertTrue(field_review.apply_decisions(self.document, [bad], self.repo))
+        (self.repo/'schema.sql').write_text((self.repo/'schema.sql').read_text()+'\n')
+        field_review.build_contract(self.document, self.repo, compiler_report={'tables': [], 'gaps': []})
+        row = self.document['classification_review']['fields'][0]
+        self.assertEqual(row['user_feedback'][0]['statement'], entries[0]['statement'])
+        self.assertEqual(row['status'], 'needs_investigation')
+
+    def test_report_preserves_known_json_members_and_explains_extraction_gap(self):
+        import review
+        parent = self.document['classification_review']['fields'][0]
+        child = copy.deepcopy(parent)
+        child.update(entity_id=parent['entity_id']+'.email', name='email', categories=['user.contact.email'], personal_data='yes', status='proposed')
+        parent.update(composite=True, open_content=True, nested_members=[child])
+        self.document['classification_review']['gaps'] = [{'kind': 'runtime_object_shape', 'subject': parent['entity_id'], 'message': 'Writer shape is unresolved.', 'status': 'unresolved'}]
+        result = {'actions': [], 'collection_review_required': [], 'observation_digest': 'fixture'}
+        output = review.build_outputs(self.document, result, self.derived, {'dataset': [], 'system': []}, ['Shape investigation required'])
+        report = '\n'.join(review.render_outputs(output))
+        self.assertIn('known members: email', report)
+        self.assertIn('Additional content: open or unresolved', report)
+        self.assertIn('Extraction limitation', report)
+        self.assertIn('Writer shape is unresolved', report)
+        self.assertIn('user.contact.email', report)
+        self.assertEqual(output['progress']['extraction_gaps'], 1)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

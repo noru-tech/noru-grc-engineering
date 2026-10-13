@@ -6,6 +6,11 @@ argument-hint: "[--base-ref=<ref>] [--pieces=auto|a,b] [--include-untracked] [--
 
 # /noru:review
 
+Honor explicit scope before inspecting routing signals. For local-code-only requests pass
+`--scope=local-code`, which limits selection to AI inventory, infrastructure scanning and privacy
+mapping. For a named piece pass `--pieces=<name>`. Application review/approval terminology alone
+must not expand that request to change-control or review-signoff.
+
 Assess the current branch, run every relevant installed piece independently, validate its local
 manifest and optionally prepare read-only diffs. This command may create or update local
 `.noru/*.yml` files when a selected collector does so. It must never write to Noru.
