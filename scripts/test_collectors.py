@@ -3805,6 +3805,16 @@ def test_datamap_contextual_examples(results, tmp):
     examples = json.loads((PRIVACY_DATAMAP / "references/classification-examples.json").read_text())["examples"]
     vocab = {r["fides_key"] for r in json.loads((PRIVACY_DATAMAP / "references/taxonomy/data_categories.json").read_text())}
     by_id = {r["id"]: r for r in examples}
+    results.check("[privacy-datamap] invoice examples retain financial meaning across stores and system outcomes",
+        all(by_id[key]["categories"] == ["user.financial"] for key in
+            ("invoice-reference", "invoice-event-reference", "invoice-event-outcome")))
+    results.check("[privacy-datamap] mixed payer example preserves conditional personal scope",
+        by_id["mixed-payer-name"]["personal_data"] == "mixed"
+        and by_id["mixed-payer-name"]["categories"] == ["user.name"]
+        and by_id["company-only-name"]["categories"] == [])
+    results.check("[privacy-datamap] broad and content examples avoid unsupported behavior and sensitive subtypes",
+        by_id["personal-record-status"]["categories"] == ["user"]
+        and by_id["unconstrained-personal-content"]["categories"] == ["user.content"])
     results.check("[privacy-datamap] contextual examples have supported taxonomy and explicit value meanings",
         len(by_id) == len(examples) and all(r["context"] and set(r["categories"]) <= vocab for r in examples))
     results.check("[privacy-datamap] examples distinguish people from product labels and record keys",
@@ -3960,6 +3970,7 @@ def test_datamap_native_input_acceptance(results, tmp):
                 "meta": {"noru": {"refs": ["src/storage.ts:1"]}}, "egress": [{"fides_key": "archive", "type": "system", "data_categories": ["user.contact.email"]}]},
                {"fides_key": "archive", "name": "Archive", "system_type": "Third Party", "dataset_references": ["objects"], "privacy_declarations": [declaration],
                 "meta": {"noru": {"origin": "external", "refs": ["src/storage.ts:1"]}}}]
+    systems[1]["ingress"] = [{"fides_key": "src", "type": "system", "data_categories": ["user.contact.email"]}]
     spec = {"id": "payload", "path": "src/storage.ts", "method": "typescript_ast", "selector": "payload", "targets": ["objects/documents", "system:src", "system:archive"]}
     spec["fingerprint"] = workflow.dependencies.observe(repo, spec)["fingerprint"]
     doc = {"version": "0.9.0", "piece": "privacy-datamap", "source": {"slug": "fixture/objects", "commit_sha": "a"*40, "branch": "main", "generated_by": "privacy-datamap@0.9.0", "derived_digest": "0"*64},
@@ -3978,6 +3989,13 @@ def test_datamap_native_input_acceptance(results, tmp):
     summary, _ = datamap_scan(repo, export=True)
     output = (repo / '.fides/datamap.yml').read_text()
     exported = workflow.VALIDATOR.load_yaml(output)[0]
+    expected_declaration = {key: declaration[key] for key in
+                            ("name", "data_use", "data_categories", "data_subjects")}
+    results.check("[privacy-datamap] acceptance and export preserve purposes subjects store access and directional flows",
+                  all(system["privacy_declarations"] == [expected_declaration]
+                      and system["dataset_references"] == ["objects"] for system in exported["system"])
+                  and exported["system"][0]["egress"] == systems[0]["egress"]
+                  and exported["system"][1]["ingress"] == systems[1]["ingress"])
     results.check("[privacy-datamap] Fides export retains nested fields and native flows without local provenance",
                   exported['dataset'][0]['collections'][0]['fields'][0]['fields'][0]['name'] == 'email'
                   and exported['system'][0]['egress'][0]['type'] == 'system' and 'evidence_kind' not in output

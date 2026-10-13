@@ -249,6 +249,27 @@ sends nothing. Cite the line, say what you found, and let the person who knows t
 
 ## Modeled semantics and execution
 
+### Consistency across related fields
+
+Compare related fields using their evidenced meaning. An invoice reference and an `invoice_issued`
+event attributed to an individual can both support `user.financial`, even in an analytics store.
+The analytics purpose does not turn billing information into generic `user` data or establish
+customer behavior. Check the corresponding activity categories when proposing a field correction;
+preserve its supported purpose, subjects and relationships.
+
+For individual/company branches, record `personal_data: mixed` when the evidence establishes both
+personal and non-personal cases. Explain the discriminator and the personal branch supporting each
+category in the existing review rationale. A category on a mixed field describes possible personal
+values, not every record. Company-only data requires its own association analysis; a company label
+does not rule out a named individual contact or a sole trader.
+
+Use broad `user` only when investigation supports personal meaning without a narrower supported
+category, and explain that choice. Opaque syntax alone does not make an invoice identifier generic.
+For unconstrained person-associated messages, document titles and uploaded content, `user.content`
+can capture the supported meaning. Note possible sensitive submissions in review rationale without
+asserting a sensitive subtype or a public/private audience that the evidence does not establish.
+See the paired scenarios in `classification-examples.json`; these are guidance, not name rules.
+
 Use the same meaning and person-association standard for real implementations, mocks and fixtures.
 Describe modeled information first, then separately identify implemented, simulated and absent
 storage/transmission operations. Constants and discarded records do not establish that modeled
