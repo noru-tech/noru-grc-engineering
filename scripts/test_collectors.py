@@ -3841,6 +3841,27 @@ def test_datamap_contextual_examples(results, tmp):
         "classification-examples.json" in guide and "tests cannot" in guide)
 
 
+def test_datamap_literal_store_bindings(results, tmp):
+    source = 'from dataclasses import dataclass\n@dataclass(frozen=True)\nclass Store:\n    destination: str\n    schema_path: str\n'
+    files = {f'schemas/store_{i}.sql': f'CREATE TABLE {"documents" if i < 2 else "items_" + str(i)} (\n field_{i} TEXT\n);\n' for i in range(17)}
+    source += ''.join(f'STORE_{i} = Store("store_{i}", "schemas/store_{i}.sql")\n' for i in range(17))
+    files['storage.py'] = source
+    derived, repo = datamap_repo(tmp, 'literal-store-bindings', files)
+    stores = {row['fides_key']: row for row in derived['datasets']}
+    results.check('[privacy-datamap] literal bindings preserve 17 datastore identities',
+                  set(stores) == {f'store_{i}' for i in range(17)})
+    results.check('[privacy-datamap] same-name tables in distinct stores do not merge',
+                  [field['name'] for field in stores['store_0']['collections'][0]['fields']] == ['field_0']
+                  and [field['name'] for field in stores['store_1']['collections'][0]['fields']] == ['field_1'])
+    results.check('[privacy-datamap] discovered store bindings retain source citations',
+                  'storage.py:6' in stores['store_0']['refs'])
+    (repo / 'storage.py').write_text(source.replace('"store_0"', '"renamed_store"'))
+    _, changed = datamap_scan(repo)
+    results.check('[privacy-datamap] binding changes alter collected datastore identity',
+                  'renamed_store' in {row['fides_key'] for row in changed['datasets']}
+                  and 'store_0' not in {row['fides_key'] for row in changed['datasets']})
+
+
 def test_datamap_normalized_storage(results, tmp):
     sys.path.insert(0, str(PRIVACY_DATAMAP / "scripts"))
     import analysis_storage as storage
@@ -4863,7 +4884,7 @@ def main(argv):
         return 2
 
     results = Results()
-    for suite in ("test_field_review.py", "test_typescript_evidence.py", "test_classification_evaluation.py", "test_privacy_investigation.py", "test_privacy_delivery_gate.py"):
+    for suite in ("test_field_review.py", "test_typescript_evidence.py", "test_classification_evaluation.py", "test_privacy_investigation.py", "test_privacy_delivery_gate.py", "test_static_bindings.py"):
         checks = run([sys.executable, str(ROOT / "scripts" / suite)])
         results.check("[privacy-datamap] " + suite, checks.returncode == 0, checks.stderr)
 
@@ -4910,6 +4931,7 @@ def main(argv):
             test_datamap_reads_evidence_backed_datasets(results, tmp)
             test_datamap_native_input_acceptance(results, tmp)
             test_datamap_normalized_storage(results, tmp)
+            test_datamap_literal_store_bindings(results, tmp)
             test_datamap_keys_are_unique_or_fail_actionably(results, tmp)
             test_datamap_output_is_byte_deterministic(results, tmp)
             test_datamap_reconciles_file_ids_to_logical_ids(results, tmp)

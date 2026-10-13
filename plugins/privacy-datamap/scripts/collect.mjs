@@ -1245,6 +1245,9 @@ export function collectFacts(repo, { candidate = false } = {}) {
   const excludedMigrations = migrationPaths(repo, productionFiles, drizzleTopology, migrationSupport);
   const excludedPaths = new Set(excludedMigrations);
   const files = productionFiles.filter((path) => !excludedPaths.has(path));
+  const staticBindings = files.some((path) => path.endsWith(".py"))
+    ? JSON.parse(execFileSync("python3", [join(HERE, "static_bindings.py"), repo],
+      { input: JSON.stringify(files), encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })) : {};
   const enumeratedBy = listing.enumeratedBy;
   const discovery = JSON.parse(execFileSync("python3", [join(HERE, "dependencies.py"), "--discover", `--repo=${repo}`],
     { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
@@ -1292,11 +1295,14 @@ export function collectFacts(repo, { candidate = false } = {}) {
     if (parsed.length === 0) continue;
     parsedFiles.add(rel);
     parsedByKind[parser.kind] = (parsedByKind[parser.kind] ?? 0) + 1;
-    const bindings = relationships.bindings[rel];
+    const discoveredBindings = staticBindings[rel] ?? [];
+    const bindings = relationships.bindings[rel] ?? (discoveredBindings.length
+      ? [...new Set(discoveredBindings.map((binding) => binding.key))] : undefined);
     for (const boundary of bindings ?? [topology?.boundary ?? datastoreBoundary(rel)]) observations.push({
       path: rel,
       boundary,
       ...(bindings ? { relationship_bound: true } : {}),
+      binding_refs: relationships.bindings[rel] ? [] : discoveredBindings.filter((binding) => binding.key === boundary).flatMap((binding) => binding.refs),
       kind: parser.kind,
       role: "canonical",
       collections: cloneCollections(parsed, rel),
@@ -1326,6 +1332,7 @@ export function collectFacts(repo, { candidate = false } = {}) {
     const sourceKinds = [...new Set(group.map((item) => item.kind))].sort(BY_PATH);
     const normalized = normalizedDataset(boundary, result.collections, sourceKinds,
       group.some((item) => item.relationship_bound) ? boundary : null);
+    normalized.dataset.refs = [...new Set([...normalized.dataset.refs, ...group.flatMap((item) => item.binding_refs ?? [])])].sort(BY_PATH);
     datasets.push(normalized.dataset);
     fieldCount += normalized.counts.fieldCount;
     classified += normalized.counts.classified;

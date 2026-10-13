@@ -9,6 +9,8 @@ one version number; the release workflow fails if they disagree.
 - Separate privacy scan progress into collection, agent investigation, missing source facts,
   human approval and publication. Show known JSON members and extraction limitations, record
   user corrections for reconsideration, and support explicit local-code routing scope.
+- Discover literal Python store/schema bindings without executing target code, keeping distinct
+  stores and their same-named tables separate on a fresh scan.
 
 ## 0.12.1 — 2026-10-13
 
