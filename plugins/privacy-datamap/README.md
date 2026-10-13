@@ -23,7 +23,7 @@ the accountable owner rather than handing over the raw structural inventory.
 
 | Format | Files | What it takes |
 |---|---|---|
-| SQL DDL | `*.sql` (schemas, migrations) | declarative `CREATE TABLE`, or ordered migration replay for the supported operations below |
+| SQL DDL | current `*.sql` schemas | declarative `CREATE TABLE`; recognized migrations are excluded |
 | Drizzle | `*.ts`, `*.tsx`, `*.js`, `*.jsx` | common multiline `pgTable`, `mysqlTable` and `sqliteTable` declarations, including nested builder calls |
 | Prisma | `*.prisma` | `model` → collection, each field |
 | Python ORM | `*.py` | Django `models.Model` and SQLAlchemy declarative classes; an attribute assigned from `Column(...)`, `mapped_column(...)` or a `*Field(...)` call |
@@ -77,30 +77,32 @@ collection-level `non_personal_fields` list without leaving the derived facts or
 Tracked `drizzle.config.ts`, `.js`, `.mts`, `.cts`, `.mjs` and `.cjs` files provide an explicit
 cross-directory topology edge when `schema` and `out` use static paths. Both paths are resolved
 relative to the config. Schema observations keep
-the canonical schema boundary and the generated SQL output joins it as migration history. A table
+the canonical schema boundary and the generated output is excluded from collection. A table
 name shared by two stores is never enough to merge them; only the config link is.
 
-Declarative schemas are the current-state authority when they share a boundary with migrations.
-That includes Drizzle, Prisma, Django/SQLAlchemy and standalone SQL schemas. Historical migrations
-remain as observations but do not produce duplicate datasets or fields. A migration-only datastore
-is replayed in lexical path order. The supported structural subset is:
+Current ORM and declarative schemas supply the field inventory. Migration files are excluded
+before parsing, runtime discovery and code-change discovery; the collector never replays them.
+Recognized paths include migration directories/filenames, Alembic versions, Rails db/migrate,
+Liquibase db/changelog, Drizzle SQL output, Flyway SQL names and timestamp-prefixed migration
+filenames. Static Drizzle `out` paths exclude generated files even when the directory has a custom
+name or its current schema is missing. Custom layouts that match none of these conventions remain
+a discovery limitation; do not treat historical declarations as current schemas during agent review.
 
-- `CREATE TABLE`
-- `ALTER TABLE ... ADD COLUMN`, `DROP COLUMN`, and `RENAME COLUMN ... TO ...`
-- `ALTER TABLE ... RENAME TO ...`
-- `DROP TABLE`
+`coverage.excluded_migrations` lists paths only, without reading their contents. A boundary with
+recognized migrations but no collected current schema is reported in `coverage.migration_gaps`;
+it contributes no guessed fields. Migrations cannot override current schemas through explicit
+connection bindings. An accepted map that previously used migrations needs normal removal/identity
+review against current evidence; do not silently carry obsolete fields forward.
 
-Drizzle's `--> statement-breakpoint` marker is only a delimiter. Table-level foreign-key, check,
-unique and primary-key constraints are inventory-neutral and do not create migration gaps. The SQL
-parser reads column declarations only at the top level of `CREATE TABLE`, so multiline `CHECK`
-expressions cannot become fields.
-
-For a migration-only datastore, a structural statement outside that subset or one that references
-missing state omits the datastore from the logical map and appears under
-`coverage.migration_gaps`; the collector does not guess a partial current state. When a canonical
-schema exists, it remains authoritative: migrations stay in the audit observations, but replay
-limitations are not current coverage gaps. Conflicting canonical field shapes remain blocking
-`coverage.schema_conflicts`. CI reports current coverage gaps alongside unsupported formats.
+For source helpers located under migration-named directories, the manifest may declare
+a `migration_support` list with `path`, `sha256` (64 lowercase hex characters), and `rationale`
+for each reviewed file.
+These are exact source-role declarations, not ignore patterns: the files re-enter structure and
+runtime/change discovery. Each file must be tracked/scanned and match its reviewed byte hash;
+changed, missing, duplicate or escaping paths fail collection. Configured migration outputs,
+SQL/data history, explicit migration filenames and known history layouts cannot be overridden.
+The declarations carry into the candidate and structural digest. Review helper code before adding
+one; never use this mechanism to treat migration history as a current schema.
 
 Dataset, collection and field identities come from the logical datastore boundary and schema
 names, not migration filenames. Normalized-key collisions are checked before any manifest is
@@ -474,7 +476,13 @@ Readiness also checks purpose-specific activity categories, stored versus transi
 recipient assessment, and system investigation covering runtime processing, sharing and storage.
 Disappeared field scope and systems require evidence-backed retirement, replacement or gap proposals.
 The validator enforces recorded coverage; it cannot prove that an agent's explanation is correct or
-that all integrations have been discovered. Continue broad repository investigation on every scan.
+that all integrations have been discovered. First scans establish the map and investigate material
+ambiguities. Repeat scans use structural, dependency, discovery and semantic change queues plus
+unresolved questions; reuse unaffected decisions and current cached reasoning. Source discovery
+still runs across the repository so changed purposes or sharing can trigger review without ORM
+changes. A broader manual audit requires an explicit user request. Stop at a supported conclusion
+or a specific missing fact and report the question instead of extending the search indefinitely.
+See the investigation scope in `commands/scan.md` for the agent stopping and reuse rules.
 
 Semantic review compares proposals and manifest edits with the compact accepted meaning in the
 existing lock. Personal-to-non-personal changes, collections lost through export filtering, and

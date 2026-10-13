@@ -2359,6 +2359,14 @@ def test_typescript_and_scoped_analysis(results, tmp):
     results.check("[privacy-datamap] proposal evidence binds fields, activities and relationships independently", not analysis.refresh(document, repo))
     discovery = analysis.discover(repo)
     analysis.refresh_discovery(document, discovery)
+    unchanged_proposals = json.loads(json.dumps(document["proposals"]))
+    for _ in range(2):
+        evidence_errors = analysis.refresh(document, repo)
+        pending_discovery = analysis.refresh_discovery(document, analysis.discover(repo))
+        results.check("[privacy-datamap] unchanged repeat scan reuses analysis without investigation",
+                      not evidence_errors and not pending_discovery
+                      and document["proposals"] == unchanged_proposals
+                      and all(row["status"] == "current" for row in document["evidence_state"].values()))
     independent = json.loads(json.dumps(document["proposals"][1]))
     (repo / "README.md").write_text('Changed only the README.\n')
     results.check("[privacy-datamap] unrelated documentation preserves scoped analysis and discovery state",
@@ -2731,13 +2739,13 @@ def test_datamap_connection_graph(results, tmp):
     (repo / "migrations/001.sql").write_text('CREATE TABLE accounts (\n  legacy_email TEXT\n);\n')
     manifest.write_text(workflow.to_yaml(document))
     _, migrated = datamap_scan(repo)
-    results.check("[privacy-datamap] explicit bindings retain linked migrations as history of the same store",
+    results.check("[privacy-datamap] explicit bindings use current schemas without migration fields",
                   [d["fides_key"] for d in migrated["datasets"]] == ["shared_store"]
                   and set(fields_of(migrated, "accounts")) == {"email"})
     (repo / "models/other.ts").write_text('export const events = pgTable("events", {\n  id: text("id"),\n});\n')
     _, incomplete = datamap_scan(repo)
-    results.check("[privacy-datamap] mixed migration connection bindings expose a coverage gap",
-                  any(g["format"] == "relationship_migrations" for g in incomplete["coverage"]["unparsed_candidates"]))
+    results.check("[privacy-datamap] excluded migrations do not require connection bindings",
+                  not any(g["format"] == "relationship_migrations" for g in incomplete["coverage"]["unparsed_candidates"]))
     graph["nodes"].append({"id": "second_destination", "kind": "datastore", "key": "another_store"})
     edge = dict(graph["edges"][-1], id="conflict", target="second_destination", dependencies=["conflict"])
     dependency = dict(specs[-1], id="conflict", targets=["relationship:conflict"])
@@ -3224,10 +3232,10 @@ def test_datamap_normalizes_logical_topology(results, tmp):
         {"datasets": dataset_keys, "references": referenced_keys},
     )
     results.check(
-        "[privacy-datamap] the raw observations retain canonical and migration evidence",
-        len(derived["observations"]) == 4
-        and {item["role"] for item in derived["observations"]} == {"canonical", "migration"}
-        and len(derived["migration_operations"]) == 2,
+        "[privacy-datamap] raw observations contain only current schema evidence",
+        len(derived["observations"]) == 2
+        and {item["role"] for item in derived["observations"]} == {"canonical"}
+        and derived["migration_operations"] == [],
         derived["observations"],
     )
     all_refs = [ref for dataset in derived["datasets"] for collection in dataset["collections"] for field in collection["fields"] for ref in field["refs"]]
@@ -3325,12 +3333,9 @@ def test_datamap_uses_drizzle_config_for_cross_directory_topology(results, tmp):
         or observation["path"].startswith("packages/persistence/src/schema/")
     }
     results.check(
-        "[privacy-datamap] linked migrations remain cited history under the canonical boundary",
+        "[privacy-datamap] configured migration output is excluded from observations",
         linked_observations
         == {
-            "apps/portal/generated-migrations/001.sql": (
-                "packages/persistence/src", "migration"
-            ),
             "packages/persistence/src/schema/accounts.ts": (
                 "packages/persistence/src", "canonical"
             ),
@@ -3368,11 +3373,9 @@ def test_datamap_canonical_schema_makes_migration_replay_non_blocking(results, t
         derived["coverage"],
     )
     results.check(
-        "[privacy-datamap] canonical-backed migrations remain auditable history",
-        any(
-            operation["ref"] == "db/migrations/002.sql:1"
-            for operation in derived["migration_operations"]
-        ),
+        "[privacy-datamap] canonical-backed migrations are not replayed",
+        derived["migration_operations"] == []
+        and len(derived["coverage"]["excluded_migrations"]) == 2,
         derived["migration_operations"],
     )
 
@@ -3428,112 +3431,188 @@ def test_datamap_runtime_discovery_ignores_test_files(results, tmp):
     )
 
 
-def test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, tmp):
-    supported, _repo = datamap_repo(
-        tmp,
-        "migration-current-state",
-        {
-            "db/migrations/001.sql": (
-                "CREATE TABLE people (\n  id INTEGER,\n  contact TEXT,\n  obsolete TEXT\n);\n"
-                "CREATE TABLE discarded (\n  id INTEGER\n);\n"
-            ),
-            "db/migrations/002.sql": (
-                "ALTER TABLE people ADD COLUMN email TEXT;\n"
-                "ALTER TABLE people RENAME COLUMN contact TO phone_number;\n"
-                "ALTER TABLE people DROP COLUMN obsolete;\n"
-                "ALTER TABLE people RENAME TO customers;\n"
-                "DROP TABLE discarded;\n"
-            ),
-        },
-    )
-    results.check(
-        "[privacy-datamap] ordered migration replay produces only the current table and fields",
-        [collection["name"] for collection in supported["datasets"][0]["collections"]] == ["customers"]
-        and set(fields_of(supported, "customers")) == {"id", "phone_number", "email"},
-        supported["datasets"],
-    )
-    results.check(
-        "[privacy-datamap] renamed fields preserve their creation and rename citations",
-        len(fields_of(supported, "customers")["phone_number"]["refs"]) == 2,
-        fields_of(supported, "customers")["phone_number"],
-    )
+def test_datamap_migration_support(results, tmp):
+    helper = 'export function report() { return "technical report"; }\n'
+    path = "src/migrations/report.ts"
+    repo = write_files(pathlib.Path(tmp) / "migration-support", {path: helper,
+        "db/schema.sql": SQL_FIXTURE})
+    _, before = datamap_scan(repo)
+    row = {"path": path, "sha256": hashlib.sha256(helper.encode()).hexdigest(),
+           "rationale": "Reviewed report helper; no persistent schema is defined here."}
+    manifest_path = repo / ".noru/privacy-datamap.yml"
+    original = manifest_path.read_text()
+    def declare(rows):
+        block = "\nmigration_support:\n" + "".join("  - path: " + json.dumps(r["path"]) + "\n    sha256: " + json.dumps(r["sha256"]) + "\n    rationale: " + json.dumps(r["rationale"]) + "\n" for r in rows)
+        manifest_path.write_text(original + block)
+    declare([row])
+    summary, derived = datamap_scan(repo)
+    results.check("[privacy-datamap] exact reviewed support paths remove only their false migration boundary",
+        bool(before["coverage"]["migration_gaps"]) and not derived["coverage"]["migration_gaps"]
+        and derived["migration_support"] == [row] and before["datasets"] == derived["datasets"], derived["coverage"])
+    results.check("[privacy-datamap] support files re-enter discovery and remain digest-bound",
+        path in derived["discovery"]["sources"] and path not in derived["coverage"]["excluded_migrations"])
+    sys.path.insert(0, str(PRIVACY_DATAMAP / "scripts"))
+    import reconcile as privacy_workflow
+    candidate = privacy_workflow.build_candidate(derived, summary, {}, None)
+    results.check("[privacy-datamap] bootstrap candidate preserves reviewed support declarations",
+        candidate.get("migration_support") == [row], candidate.get("migration_support"))
+    validator = privacy_workflow.VALIDATOR
+    altered = {**candidate, "migration_support": []}
+    report, _ = validator.validate(altered, validator.load_vocabulary(), observed=derived)
+    results.check("[privacy-datamap] validation rejects declarations changed after collection",
+        any("source-role declarations differ" in str(error) for error in report.errors), report.errors)
+    def scan_result():
+        return run(["node", str(PRIVACY_DATAMAP / "scripts/collect.mjs"), f"--repo={repo}", "--output=json"])
+    (repo / path).write_text(helper + "// changed\n")
+    stale = scan_result()
+    results.check("[privacy-datamap] changed support bytes fail closed pending renewed review",
+        stale.returncode != 0 and "evidence changed" in stale.stderr, stale.stderr)
+    (repo / path).write_text(helper)
+    declare([{**row, "rationale": "Reviewed updated explanation"}])
+    changed, _ = datamap_scan(repo)
+    results.check("[privacy-datamap] source-role review changes invalidate the structural digest",
+        changed["derived_digest"] != summary["derived_digest"])
+    for name, rows in [("duplicate", [row, row]), ("glob", [{**row, "path": "src/migrations/*.ts"}]),
+                       ("escape", [{**row, "path": "../outside.ts"}]),
+                       ("missing", [{**row, "path": "src/migrations/missing.ts"}])]:
+        declare(rows)
+        result = scan_result()
+        results.check(f"[privacy-datamap] invalid support {name} fails closed", result.returncode != 0, result.stderr)
+    for history in ("src/migrations/001_old.ts", "src/migrations/old.migration.ts", "src/migrations/old.sql"):
+        (repo / history).write_text(helper)
+        declare([{**row, "path": history}])
+        result = scan_result()
+        results.check("[privacy-datamap] explicit history cannot be reclassified as support: " + history,
+            result.returncode != 0 and "Cannot declare explicit migration history" in result.stderr, result.stderr)
+    (repo / "drizzle.config.ts").write_text('export default {schema: "./schema.ts", out: "./src/migrations"};\n')
+    (repo / "schema.ts").write_text('export const records = pgTable("records", {id: text("id")});\n')
+    declare([row])
+    result = scan_result()
+    results.check("[privacy-datamap] configured output cannot be reclassified as support",
+        result.returncode != 0 and "Cannot declare explicit migration history" in result.stderr, result.stderr)
 
-    constraints, _repo = datamap_repo(
-        tmp,
-        "migration-constraints",
-        {
-            "db/migrations/001.sql": (
-                "CREATE TABLE audit_events (\n"
-                "  operation TEXT,\n"
-                "  related_record_id TEXT,\n"
-                "  CHECK (\n"
-                "    operation = 'created'\n"
-                "    OR\n"
-                "    (operation = 'updated' AND related_record_id IS NOT NULL)\n"
-                "  )\n"
-                ");\n"
-                "--> statement-breakpoint\n"
-                "ALTER TABLE audit_events ADD CONSTRAINT audit_events_operation_fk\n"
-                "  FOREIGN KEY (related_record_id) REFERENCES records(id);\n"
-            ),
-        },
-    )
-    results.check(
-        "[privacy-datamap] migration delimiters and field-neutral constraints create no coverage gaps",
-        constraints["coverage"]["migration_gaps"] == [],
-        constraints["coverage"],
-    )
-    results.check(
-        "[privacy-datamap] multiline CHECK bodies do not become SQL columns",
-        set(fields_of(constraints, "audit_events")) == {"operation", "related_record_id"},
-        fields_of(constraints, "audit_events"),
-    )
 
-    unsafe, _repo = datamap_repo(
-        tmp,
-        "migration-gap",
-        {
-            "db/migrations/001.sql": "CREATE TABLE users (\n  id INTEGER,\n  email TEXT\n);\n",
-            "db/migrations/002.sql": "ALTER TABLE users ALTER COLUMN email TYPE VARCHAR(320);\n",
-        },
-    )
-    results.check(
-        "[privacy-datamap] unsupported structural migration syntax is visible and no partial dataset is guessed",
-        unsafe["datasets"] == []
-        and len(unsafe["coverage"]["migration_gaps"]) == 1
-        and unsafe["coverage"]["migration_gaps"][0]["ref"] == "db/migrations/002.sql:1",
-        unsafe["coverage"],
-    )
-    conflict, _repo = datamap_repo(
-        tmp,
-        "schema-conflict",
-        {
-            "db/schema/one.ts": 'export const users = pgTable("users", {\n  value: text("value"),\n})\n',
-            "db/schema/two.ts": 'export const users = pgTable("users", {\n  value: integer("value"),\n})\n',
-        },
-    )
-    results.check(
-        "[privacy-datamap] conflicting canonical field shapes are coverage, not a guessed merge",
-        conflict["datasets"] == []
-        and len(conflict["coverage"]["schema_conflicts"]) == 1,
-        conflict["coverage"],
-    )
+def test_datamap_scope_false_positives(results, tmp):
+    schema = 'export const records = pgTable("records", { email: text("email") });\n'
+    ignored = {
+        "src/schema.test.ts": schema,
+        "src/schema.spec.ts": schema,
+        "src/__tests__/migration.test.ts": schema,
+        "src/__fixtures__/schema.ts": schema,
+        "tests/migrations/001.sql": "CREATE TABLE fake (email TEXT);\n",
+        "examples/schema.ts": schema,
+    }
+    helpers = {
+        "docs/migration-notes.md": "# Migration notes\n",
+        "src/auth-migration-service.ts": "export function migrateAccount() {}\n",
+        "src/migration-report.ts": "export function report() {}\n",
+    }
+    derived, _ = datamap_repo(tmp, "scope-false-positives", {
+        "db/schema.ts": schema, **ignored, **helpers,
+    })
+    results.check("[privacy-datamap] migration mentions and test migrations create no missing-schema gaps",
+        not derived["coverage"]["migration_gaps"]
+        and not derived["coverage"]["excluded_migrations"], derived["coverage"])
+    results.check("[privacy-datamap] fixture schemas do not create datasets or unsupported-schema gaps",
+        [o["path"] for o in derived["observations"]] == ["db/schema.ts"]
+        and not derived["coverage"]["unparsed_candidates"]
+        and set(derived["coverage"]["excluded_non_runtime"]) == set(ignored), derived["coverage"])
+    results.check("[privacy-datamap] migration-named runtime helpers remain in source discovery",
+        "src/auth-migration-service.ts" in derived["discovery"]["sources"]
+        and "src/migration-report.ts" in derived["discovery"]["sources"], derived["discovery"])
 
-    duplicate, _repo = datamap_repo(
-        tmp,
-        "migration-duplicate-table",
-        {
-            "db/migrations/001.sql": "CREATE TABLE records (\n  id INTEGER\n);\n",
-            "db/migrations/002.sql": "CREATE TABLE records (\n  id INTEGER\n);\n",
-        },
-    )
-    results.check(
-        "[privacy-datamap] duplicate migration tables remain explicit coverage gaps",
-        duplicate["datasets"] == []
-        and [gap["reason"] for gap in duplicate["coverage"]["migration_gaps"]]
-        == ["table 'records' already exists during replay"],
-        duplicate["coverage"],
-    )
+
+def test_datamap_excludes_migrations(results, tmp):
+    obsolete = 'CREATE TABLE obsolete (\n  legacy_email TEXT\n);\n'
+    migration_files = {
+        "db/migrations/001.sql": obsolete,
+        "db/migrations/002.sql": 'ALTER TABLE obsolete RENAME TO discarded;\n',
+        "db/migration/old.ts": 'export const old = pgTable("old", { email: text("email") });\n',
+        "alembic/versions/abc_old.py": 'class Old(models.Model):\n    email = models.EmailField()\n',
+        "db/migrate/20200101_old.rb": 'create_table :old\n',
+        "db/changelog/001.xml": '<databaseChangeLog/>\n',
+        "drizzle/0001.sql": obsolete,
+        "updates/migration.sql": obsolete,
+        "updates/old.migration.ts": 'export const old = pgTable("old", { email: text("email") });\n',
+        "updates/V2__obsolete.sql": obsolete,
+        "updates/R__obsolete.sql": obsolete,
+        "changes/20200101000000_old.ts": 'app.listen(3000); export const old = pgTable("old", { id: text("id") });\n',
+        "db/data-migrations/old.py": 'class Old(models.Model):\n    email = models.EmailField()\n',
+    }
+    derived, repo = datamap_repo(tmp, "excluded-migrations", {
+        "db/schema.sql": 'CREATE TABLE current_records (\n id INTEGER\n);\n', **migration_files,
+    })
+    results.check("[privacy-datamap] migration conventions across languages never supply fields or runtimes",
+        set(derived["coverage"]["excluded_migrations"]) == set(migration_files)
+        and [c["name"] for d in derived["datasets"] for c in d["collections"]] == ["current_records"]
+        and derived["migration_operations"] == []
+        and all(o["path"] not in migration_files for o in derived["observations"])
+        and [s["name"] for s in derived["systems"]] == ["repository"], derived)
+    results.check("[privacy-datamap] migrations never enter source discovery or unsupported-schema warnings",
+        not (set(derived["discovery"]["sources"]) & set(migration_files))
+        and not derived["coverage"]["unparsed_candidates"], derived["coverage"])
+    before = derived["discovery"]
+    (repo / "db/migrations/001.sql").write_text('unparseable historical content\n')
+    _, after = datamap_scan(repo)
+    results.check("[privacy-datamap] editing obsolete migrations leaves structure and discovery unchanged",
+        derived["datasets"] == after["datasets"] and before == after["discovery"])
+    only, _ = datamap_repo(tmp, "migration-only-excluded", {"db/migrations/001.sql": obsolete})
+    results.check("[privacy-datamap] migration-only stores need a current schema rather than replay",
+        only["datasets"] == [] and only["counts"]["fields"] == 0
+        and only["coverage"]["migration_gaps"][0]["format"] == "excluded_migrations", only)
+    custom, _ = datamap_repo(tmp, "custom-migration-output", {
+        "drizzle.config.ts": 'export default {schema: "./models/schema.ts", out: "./history"};\n',
+        "models/schema.ts": 'export const current = pgTable("current", { id: text("id") });\n',
+        "history/old.ts": 'export const old = pgTable("old", { email: text("email") });\n',
+        "history/old.sql": obsolete,
+    })
+    results.check("[privacy-datamap] configured custom output excludes SQL and non-SQL migration files",
+        set(custom["coverage"]["excluded_migrations"]) == {"history/old.ts", "history/old.sql"}
+        and set(fields_of(custom, "current")) == {"id"}
+        and not custom["coverage"]["migration_gaps"], custom["coverage"])
+    missing, _ = datamap_repo(tmp, "custom-output-missing-schema", {
+        "drizzle.config.ts": 'export default {schema: "./missing.ts", out: "./history"};\n',
+        "history/old.sql": obsolete,
+    })
+    results.check("[privacy-datamap] missing configured schema cannot enable historical output as fallback",
+        missing["datasets"] == [] and missing["coverage"]["excluded_migrations"] == ["history/old.sql"]
+        and bool(missing["coverage"]["unparsed_candidates"]), missing["coverage"])
+    conflict, _ = datamap_repo(tmp, "current-schema-conflict", {
+        "db/schema/one.ts": 'export const users = pgTable("users", { value: text("value") });\n',
+        "db/schema/two.ts": 'export const users = pgTable("users", { value: integer("value") });\n',
+    })
+    results.check("[privacy-datamap] current schema conflicts remain blocking",
+        conflict["datasets"] == [] and len(conflict["coverage"]["schema_conflicts"]) == 1, conflict["coverage"])
+
+
+def test_datamap_contextual_examples(results, tmp):
+    examples = json.loads((PRIVACY_DATAMAP / "references/classification-examples.json").read_text())["examples"]
+    vocab = {r["fides_key"] for r in json.loads((PRIVACY_DATAMAP / "references/taxonomy/data_categories.json").read_text())}
+    by_id = {r["id"]: r for r in examples}
+    results.check("[privacy-datamap] contextual examples have supported taxonomy and explicit value meanings",
+        len(by_id) == len(examples) and all(r["context"] and set(r["categories"]) <= vocab for r in examples))
+    results.check("[privacy-datamap] examples distinguish people from product labels and record keys",
+        by_id["person-name"]["categories"] == ["user.name"]
+        and by_id["product-name"]["categories"] == []
+        and by_id["person-id"]["categories"] == ["user.unique_id"]
+        and by_id["product-id"]["categories"] == []
+        and by_id["order-person-reference"]["categories"] == ["user.unique_id"]
+        and by_id["order-product-reference"]["categories"] == []
+        and by_id["record-id-unresolved"]["unresolved"] is True)
+    results.check("[privacy-datamap] examples distinguish address scope, events and operational purposes",
+        by_id["personal-city"]["categories"] == ["user.contact.address.city"]
+        and by_id["catalog-city"]["categories"] == []
+        and by_id["login-event"]["categories"] == ["user.behavior"]
+        and by_id["scheduled-run-time"]["categories"] == []
+        and by_id["personal-email"]["categories"] == ["user.contact.email"])
+    derived, _ = datamap_repo(tmp, "contextual-example-boundary", {
+        "db/schema.sql": 'CREATE TABLE customers (\n id INTEGER,\n name TEXT\n);\nCREATE TABLE products (\n id INTEGER,\n name TEXT\n);\nCREATE TABLE orders (\n customer_id INTEGER,\n product_id INTEGER,\n time TIMESTAMP\n);\n',
+    })
+    results.check("[privacy-datamap] contextual examples are not global name rules: ambiguous identifiers and names still need review",
+        all(f["needs_review"] and f["data_categories"] == [] for d in derived["datasets"] for c in d["collections"] for f in c["fields"]))
+    guide = (PRIVACY_DATAMAP / "references/classification-guide.md").read_text()
+    results.check("[privacy-datamap] agent guidance links examples without promising semantic correctness",
+        "classification-examples.json" in guide and "tests cannot" in guide)
 
 
 def test_datamap_normalized_storage(results, tmp):
@@ -4583,7 +4662,10 @@ def main(argv):
             test_datamap_canonical_schema_makes_migration_replay_non_blocking(results, tmp)
             test_datamap_separates_datastores_and_falls_back_for_runtime(results, tmp)
             test_datamap_runtime_discovery_ignores_test_files(results, tmp)
-            test_datamap_replays_supported_migrations_and_reports_unsafe_ones(results, tmp)
+            test_datamap_migration_support(results, tmp)
+            test_datamap_scope_false_positives(results, tmp)
+            test_datamap_excludes_migrations(results, tmp)
+            test_datamap_contextual_examples(results, tmp)
             test_datamap_reads_evidence_backed_datasets(results, tmp)
             test_datamap_native_input_acceptance(results, tmp)
             test_datamap_normalized_storage(results, tmp)

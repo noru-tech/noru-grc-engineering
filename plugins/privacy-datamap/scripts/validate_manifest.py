@@ -388,7 +388,9 @@ FIDES_KEY_RE = re.compile(r"^[A-Za-z0-9_.<>-]+$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
-TOP_LEVEL_KEYS = {"version", "piece", "source", "dataset", "system", "evidence_dependencies", "relationship_graph"}
+import migration_support
+
+TOP_LEVEL_KEYS = {"migration_support", "version", "piece", "source", "dataset", "system", "evidence_dependencies", "relationship_graph"}
 SOURCE_KEYS = {"slug", "commit_sha", "branch", "generated_by", "derived_digest"}
 INTERPRETATION_KEYS = {"owner", "decided_at", "expires_at", "rationale", "refs"}
 DATASET_KEYS = {"fides_key", "name", "description", "collections", "meta"}
@@ -941,11 +943,15 @@ def validate(doc, vocab, as_of=None, observed=None, repo=None, allow_discovery_r
         rep.err("piece", f"expected '{PIECE}', found '{doc.get('piece')}'")
 
     check_source(rep, doc)
+    for error in migration_support.errors(doc.get("migration_support", [])):
+        rep.err("migration_support", error)
     for error in dataset_inputs.dependency_gaps(doc):
         rep.err("evidence_dependencies", error)
     dataset_keys = check_datasets(rep, doc, vocab, counts, as_of)
     check_systems(rep, doc, vocab, dataset_keys, counts, as_of)
     if isinstance(observed, dict):
+        if doc.get("migration_support", []) != observed.get("migration_support", []):
+            rep.err("migration_support", "source-role declarations differ from collected evidence; rerun collection")
         check_observed_structure(rep, doc, observed)
     if "relationship_graph" in doc:
         for error in relationships.validate(doc["relationship_graph"], doc.get("evidence_dependencies", [])):

@@ -6,6 +6,25 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Ask privacy-review questions only when answers change the exported map. Require a concrete mapped
+  property or inclusion decision in the impact, and retain non-impacting unknowns as local notes.
+
+- Support exact, fingerprinted migration-support declarations that reinclude helper source files
+  in collection and change discovery without overriding configured or explicit migration history.
+
+- Exclude test, fixture and example schemas from production privacy structure, with excluded paths
+  retained in coverage. Do not treat migration mentions in source filenames or documentation as
+  database migration boundaries; genuine migration-only stores still require a current schema.
+
+- Scope repeat privacy investigations to changed structure, supporting evidence, discovery and
+  unresolved decisions. Reuse unaffected analysis, bound searches at explicit missing facts, and
+  reserve broad manual audits for explicit requests while retaining automatic source discovery.
+
+- Exclude recognized database migrations from privacy structure, runtime and change discovery;
+  use current schemas and report migration-only boundaries as coverage gaps instead of replaying history.
+- Add contextual classification examples and agent guidance distinguishing person/record identifiers,
+  personal/product names, address components and individual events from operational metadata.
+
 - Clarify that deleting the privacy analysis cache loses unaccepted work, and that the committed
   lock includes a compact snapshot of accepted privacy meaning.
 

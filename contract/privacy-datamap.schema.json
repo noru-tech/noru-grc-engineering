@@ -184,6 +184,33 @@
           }
         }
       }
+    },
+    "migration_support": {
+      "type": "array",
+      "description": "Exact reviewed support sources caught by migration directory naming; re-included in collection and discovery, invalidated when bytes change.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sha256",
+          "rationale"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
     }
   },
   "$defs": {

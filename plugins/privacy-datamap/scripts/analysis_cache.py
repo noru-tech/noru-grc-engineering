@@ -5,6 +5,7 @@ import json
 import analysis_storage
 import pathlib
 import re
+import subprocess
 
 import dependencies
 
@@ -21,7 +22,14 @@ def method_for(path):
 def discover(repo):
     """Inventory code/configuration beyond registered evidence; never infer privacy meaning."""
     sources = {}
-    for path in dependencies.files(repo):
+    paths = dependencies.files(repo)
+    excluded = set(json.loads(subprocess.check_output(
+        ["node", str(pathlib.Path(__file__).with_name("migration_paths.mjs")), str(repo)],
+        input=json.dumps(paths), text=True,
+    )))
+    for path in paths:
+        if path in excluded:
+            continue
         full = repo / path
         if not full.is_file() or pathlib.PurePosixPath(path).suffix.lower() in DOC_SUFFIXES:
             continue

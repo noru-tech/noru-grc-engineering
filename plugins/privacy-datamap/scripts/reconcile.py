@@ -569,6 +569,7 @@ def build_candidate(derived, scan, manifest, lock):
         "source": {**provenance, "derived_digest": scan.get("derived_digest")},
         "dataset": datasets,
         "system": systems,
+        **({"migration_support": derived["migration_support"]} if derived.get("migration_support") else {}),
         **({"relationship_graph": manifest["relationship_graph"]} if manifest and "relationship_graph" in manifest else {}),
         **({"evidence_dependencies": derived["input_dependencies"]} if derived.get("input_dependencies") else {}),
     }

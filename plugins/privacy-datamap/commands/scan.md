@@ -21,7 +21,7 @@ and marks everything else `needs_review: true`.
 
 Tracked `drizzle.config.*` files link static `schema` paths to their static `out` directory after
 resolving both relative to the config. The canonical schema boundary supplies current structure;
-generated SQL remains migration history. Do not merge unlinked stores because their table names
+generated output is excluded from collection. Do not merge unlinked stores because their table names
 overlap.
 
 For object storage, queues, indexes and third-party records without supported schemas, propose
@@ -36,14 +36,12 @@ code in `structural_proposal.evidence_dependencies`. A provider label is not pro
 connection. Preview using `--candidate`, complete the normal enrichment queue, then apply only
 human-accepted definitions to the main manifest and seal.
 
-At one datastore boundary, declarative schemas take precedence over historical migrations.
-Migration-only stores replay lexical file order for `CREATE TABLE`, column add/drop/rename, and
-table drop/rename. Statement-breakpoint comments and inventory-neutral table constraints are
-ignored. Read `coverage.unparsed_candidates`, `coverage.migration_gaps` and
-`coverage.schema_conflicts`: unsupported or inconsistent migration structure is a blocking gap only
-for migration-only datastores, which are omitted instead of guessed. When a canonical schema exists,
-its migrations remain historical observations and replay limitations do not count as current
-coverage gaps.
+Use current ORM/declarative schemas and evidenced current payloads for field classification.
+Migration files are excluded from structure, runtime and change discovery; never reconstruct a
+current data map from migration history. Inspect `coverage.excluded_migrations` (paths only),
+`coverage.migration_gaps`, `coverage.schema_conflicts` and `identity_ambiguities`. A migration-only
+boundary needs a current schema, not replay or human acceptance of guessed fields. Custom migration
+layouts outside recognized conventions need investigation and must not supply current field evidence.
 
 A package manifest alone is not a system. Runtime evidence is a container/deployment definition,
 Kubernetes workload, server/worker entrypoint, or executable start/deploy script paired with an
@@ -136,8 +134,8 @@ separate dependencies. Unsupported syntax is an explicit parser gap, never a gue
 `json` compares parsed values,
 ignoring key order and layout. `text` preserves source contents apart from CRLF normalization: use
 it conservatively for other languages. A text edit is an investigation, never proof that processing
-meaning changed. Unregistered code is outside this dependency comparison; investigate broadly,
-register all relevant boundaries, and explicitly report any remaining monitoring gaps.
+meaning changed. Unregistered code is covered by the separate discovery queue; inspect queued
+changes, register relevant boundaries, and explicitly report remaining monitoring gaps.
 
 Fingerprints are proposals until the human accepts the associated decisions. Do not change an
 accepted fingerprint merely to make checks pass. The lock seals the reviewed observations;
@@ -162,6 +160,56 @@ change. An unchanged, valid accepted baseline renders an accepted review without
 the map still states the registered monitoring scope. CI blocks investigations and baseline maintenance as validation findings rather than
 mislabeling them confirmed schema drift. Noru diff and publication remain separate requests.
 
+## Investigation scope
+
+### Ask only questions that change the exported map
+
+Before asking a factual question, identify the affected dataset, field, system or processing
+activity and the concrete Fideslang property or inclusion decision that would change with the
+answer. State that difference in `decision_impact`; "more complete context" or "provider details
+remain unknown" is not sufficient. If plausible answers leave the mapped file unchanged, do not
+ask the question or keep it in the blocking question queue. Record any useful limitation in local
+review notes instead, without inventing an answer or treating it as a mapping blocker.
+
+Retention periods, hosting locations, backup deletion and provider-internal details are not a
+standard questionnaire. Ask about them only when the answer changes a property actually represented
+in this map, its data classification, modeled storage boundary, purpose, subjects or transfer.
+Do not add speculative output fields merely to justify a question. Trace payloads and other facts
+available in source code yourself; ask the human only for the remaining map-changing fact.
+
+Apply this rule to existing questions before asking the next one. Preserve prior answers. Move
+non-impacting uncertainties to local notes, but retain real structural, evidence and semantic
+blockers. Approval and accountable-owner attribution remain separate required decisions.
+
+
+First scan: establish the current data map from schemas and relevant runtime, storage and sharing
+boundaries. Investigate material classification ambiguities and register the supporting service,
+serializer, helper and configuration code as evidence dependencies. Record monitoring gaps explicitly.
+
+Repeat scan: run collection and reconciliation first. Limit agent investigation to structural
+proposals, `investigation_required`, targets marked by `evidence_state`, `discovery_required`,
+semantic/removal changes and unresolved questions. Reuse accepted decisions and current cached
+reasoning for unaffected scope. A changed serializer, helper, recipient or configuration can require
+review even when the ORM schema has not changed. Keep automatic repository-wide source discovery
+on every run; it identifies changed or new code without requiring a fresh manual audit of unchanged
+files. Inspect a queued change for privacy significance before expanding to its affected boundaries.
+
+Apply system, infrastructure and supplemental-store checks to new or affected scope. Reuse current
+investigation records; do not retrace unchanged systems or stores to rewrite their explanations.
+If reusable evidence is missing, rebuild only the records needed for the queued decision and report
+the coverage limitation. An accepted baseline is not proof that unmonitored processing is unchanged.
+
+Stop when the relevant schema, direct producers/consumers and supporting configuration either support
+a conclusion or identify a specific missing fact. Record the unknown, the evidence inspected, the
+needed answer and its decision impact. Present unresolved questions for review; do not keep searching
+unrelated code, invent certainty, repair application code or clear acceptance gates to finish a scan.
+On a repeat run, revisit an unresolved question when new evidence or a human answer is available;
+otherwise carry it forward without repeating the same search. Missing evidence can still block acceptance.
+
+A broader manual audit is opt-in: perform one only when the user explicitly requests it. If a queued
+change warrants wider investigation, explain the affected scope and expand only as far as needed to
+resolve that change. Report the scope actually checked; do not claim an exhaustive audit.
+
 ## Complete enrichment before requesting acceptance
 
 Populate every queued field in `privacy-datamap.analysis.json`. Record the investigation in
@@ -181,7 +229,8 @@ activities when evidenced; do not combine them into a generic service purpose or
 activities. Describe direction and destination in the relationship rationale, including provider
 sharing. Preserve unchanged accepted declarations.
 
-Investigate persistent stores outside supported schemas even when no supplement exists. Search
+On the first scan, investigate persistent stores outside supported schemas even when no supplement
+exists. On repeat scans, revisit only affected stores or unresolved gaps under the scope above. Search
 integration code, typed contracts, serializers and actual upload/download payloads. Derive supported
 structures into the supplemental input and rerun collection and reconciliation before enrichment,
 or record a specific gap. Populate `store_investigation` with `search_scope`, `rationale`, `refs`,
@@ -211,7 +260,7 @@ specific unresolved decisions. Do not present collector field inventories, looku
 (`exact lookup`, `operational`, `unclassified`), fingerprints or per-field validation diagnostics
 as the review. Keep those in machine-readable evidence, available only when requested.
 
-Complete the agent investigation before asking the human to classify unresolved fields. When
+Complete the bounded investigation above, then present specific unresolved questions. When
 analysis is incomplete, say so and summarize the remaining investigation by scope. Show supported
 privacy conclusions alongside actionable business questions; do not replace the missing analysis
 with a table of unclassified columns. Technical coverage is a count, and special-category findings
@@ -243,9 +292,9 @@ the short decision summary, not that full rationale, and lists the affected scop
 Non-personal fields remain in the evidence inventory and aggregate coverage counts; collection acceptance
 still covers them. Never hide uncertainty or special-category findings in technical coverage.
 
-Investigate thoroughly, but do not manufacture a question to demonstrate that investigation.
+Use the bounded investigation above; do not manufacture a question to demonstrate investigation.
 Evidence-backed processing activities can have no questions. Human acceptance is a separate step,
-not an uncertainty about what the code says. If a fact is missing, state `unresolved_question` (or
+not an uncertainty about what the code says. If a map-changing fact is missing, state `unresolved_question` (or
 `business_context_question` for an activity), `resolution_needed` (the answer/evidence needed), and
 `decision_impact` (which classification, purpose, subjects or flow changes with that answer).
 Questions can live in `decisions` and be inherited by member fields. Do not write “confirm intent”
@@ -430,7 +479,8 @@ semantic comparison. Do not claim historical semantic coverage where that baseli
 
 ### Review standard before adoption
 
-Apply these checks to the proposed map as a whole, using the accepted baseline where available:
+Apply these checks within the investigation scope above. On repeat scans, use the accepted baseline
+and current evidence for unaffected parts of the map; investigate new, changed or unresolved scope:
 
 1. Account for relevant sources, persistent stores, configurable integrations and external services.
 2. Trace the personal-data categories used by each purpose; a nonempty category list alone does not prove completeness.

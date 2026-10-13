@@ -706,8 +706,53 @@ export function fieldEntityId(datasetKey, collectionName, fieldName) {
 
 const BOUNDARY_DIRS = new Set(["migration", "migrations", "schema", "schemas", "model", "models"]);
 
-function isMigrationPath(rel) {
-  return rel.split("/").some((part) => /^(?:migration|migrations)$/i.test(part));
+// Match migration conventions across source languages, before parsing any file contents.
+export function isMigrationPath(rel) {
+  if (isNonRuntimePath(rel) || /\.(?:md|mdx|rst|txt)$/i.test(rel)) return false;
+  const parts = rel.split("/");
+  return parts.slice(0, -1).some((part) => /(?:^|[-_.])migrations?(?:$|[-_.])/i.test(part))
+    || /(?:^|[-_.])migrations?\.sql$/i.test(parts.at(-1))
+    || /\.migration\.[cm]?[jt]s$/i.test(parts.at(-1))
+    || /(?:^|\/)alembic\/versions\//i.test(rel)
+    || /(?:^|\/)db\/(?:migrate|changelog)\//i.test(rel)
+    || /(?:^|\/)drizzle\/.*\.sql$/i.test(rel)
+    || /(?:^|\/)(?:V[0-9][^/]*|R(?:[0-9][^/]*)?)__[^/]+\.sql$/i.test(rel)
+    || /(?:^|\/)[0-9]{8,}[_-][^/]+\.(?:sql|[cm]?[jt]s|py|rb|php|cs)$/i.test(rel);
+}
+
+function readMigrationSupport(repo, files) {
+  const rows = JSON.parse(execFileSync("python3", [join(HERE, "migration_support.py"), repo], {encoding: "utf8"}));
+  for (const row of rows) {
+    const path = join(repo, row.path);
+    if (!files.includes(row.path) || !isMigrationPath(row.path) || isNonRuntimePath(row.path)) {
+      throw new Error(`Migration support must name a scanned migration-like source file: ${row.path}`);
+    }
+    const resolved = relative(realpathSync(repo), realpathSync(path));
+    if (resolved === ".." || resolved.startsWith(`..${sep}`) || resolve(realpathSync(repo), resolved) !== realpathSync(path)) {
+      throw new Error(`Migration support escapes repository: ${row.path}`);
+    }
+    if (createHash("sha256").update(readFileSync(path)).digest("hex") !== row.sha256) {
+      throw new Error(`Migration support evidence changed; review and refresh declaration: ${row.path}`);
+    }
+  }
+  return rows;
+}
+
+export function migrationPaths(repo, files, topology = discoverDrizzleTopology(repo, files), support = readMigrationSupport(repo, files)) {
+  const allowed = new Set();
+  for (const row of support) {
+    // Reinclude only support sources caught by a directory name, never explicit history.
+    const withoutDirectory = basename(row.path);
+    if (topology.excludedPaths.has(row.path) || isMigrationPath(withoutDirectory)
+        || /^\d+[_-]/.test(withoutDirectory)
+        || /\.(?:sql|xml|ya?ml|json)$/i.test(row.path)
+        || /(?:^|\/)(?:alembic\/versions|db\/(?:migrate|changelog)|drizzle)\//i.test(row.path)) {
+      throw new Error(`Cannot declare explicit migration history as support code: ${row.path}`);
+    }
+    allowed.add(row.path);
+  }
+  return files.filter((path) => !isNonRuntimePath(path) && !allowed.has(path)
+    && (isMigrationPath(path) || topology.excludedPaths.has(path)));
 }
 
 export function datastoreBoundary(rel) {
@@ -878,11 +923,12 @@ function discoverDrizzleTopology(repo, files) {
   const gaps = [];
   const links = [];
   const parsedConfigs = [];
+  const excludedPaths = new Set();
   const addClaim = (path, claim) => {
     if (!claims.has(path)) claims.set(path, []);
     claims.get(path).push(claim);
   };
-  for (const configPath of files.filter((path) => DRIZZLE_CONFIG.test(path))) {
+  for (const configPath of files.filter((path) => DRIZZLE_CONFIG.test(path) && !isMigrationPath(path))) {
     const text = safeText(repo, configPath);
     if (text === null) {
       gaps.push({ format: "drizzle_config", ref: `${configPath}:1` });
@@ -901,8 +947,12 @@ function discoverDrizzleTopology(repo, files) {
       gaps.push({ format: "drizzle_config", ref: `${configPath}:${schema.ref}` });
       continue;
     }
+    // Recognize generated output even if its configured current schema is missing.
+    for (const path of files) {
+      if (path !== configPath && matchesOutputPath(path, outputPath)) excludedPaths.add(path);
+    }
     const schemaFiles = files.filter((path) =>
-      path !== configPath
+      path !== configPath && !isMigrationPath(path) && !excludedPaths.has(path)
       && /\.[cm]?[jt]sx?$/.test(path)
       && schemaPatterns.some((pattern) => matchesSchemaPattern(path, pattern))
     );
@@ -916,7 +966,7 @@ function discoverDrizzleTopology(repo, files) {
       continue;
     }
     const outputFiles = files.filter((path) =>
-      path !== configPath && path.endsWith(".sql") && matchesOutputPath(path, outputPath)
+      path !== configPath && matchesOutputPath(path, outputPath)
     );
     for (const path of schemaFiles) {
       addClaim(path, { boundary, role: "canonical", ref: `${configPath}:${schema.ref}` });
@@ -947,6 +997,7 @@ function discoverDrizzleTopology(repo, files) {
   }
   return {
     byPath,
+    excludedPaths,
     gaps: gaps.sort((a, b) => BY_PATH(a.ref, b.ref)),
     links: links.sort((a, b) => BY_PATH(a.config_ref, b.config_ref)),
     parsedConfigs: [...new Set(parsedConfigs)].sort(BY_PATH),
@@ -967,157 +1018,6 @@ function cloneCollections(collections, rel) {
       refs: refsFor(rel, field),
     })),
   }));
-}
-
-function splitSqlStatements(text) {
-  // Drizzle uses this exact comment as an out-of-band statement delimiter. Removing only the
-  // marker, while preserving its newline, keeps the next statement's citation on its real line.
-  text = text.replace(/^[ \t]*-->[ \t]*statement-breakpoint[ \t]*\r?$/gmi, "");
-  const out = [];
-  let start = 0;
-  let line = 1;
-  let startLine = 1;
-  let quote = null;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (quote !== null) {
-      if (ch === quote && text[i + 1] === quote) i += 1;
-      else if (ch === quote) quote = null;
-    } else if (ch === "'" || ch === '"' || ch === "`") {
-      quote = ch;
-    } else if (text.startsWith("--", i)) {
-      const end = text.indexOf("\n", i + 2);
-      i = end < 0 ? text.length : end - 1;
-    } else if (text.startsWith("/*", i)) {
-      const comment = text.indexOf("*/", i + 2);
-      const end = comment < 0 ? text.length : comment + 2;
-      line += text.slice(i, end).split("\n").length - 1;
-      i = end - 1;
-    } else if (ch === ";") {
-      const statement = text.slice(start, i + 1).trim();
-      if (statement) out.push({ text: statement, line: startLine });
-      start = i + 1;
-      startLine = line;
-    }
-    if (ch === "\n") {
-      line += 1;
-      if (text.slice(start, i + 1).trim() === "") startLine = line;
-    }
-  }
-  const tail = text.slice(start).trim();
-  if (tail) out.push({ text: tail, line: startLine });
-  return out;
-}
-
-function migrationOperation(statement, rel) {
-  const compact = statement.text.replace(/--.*$/gm, " ").replace(/\/\*[\s\S]*?\*\//g, " ").trim();
-  const ref = `${rel}:${statement.line}`;
-  if (/^create\s+table\b/i.test(compact)) {
-    const parsed = parseSqlDdl(statement.text).map((collection) => ({
-      name: collection.name,
-      refs: [`${rel}:${statement.line + collection.line - 1}`],
-      fields: collection.fields.map((field) => ({
-        name: field.name,
-        shape: field.shape ?? "",
-        refs: [`${rel}:${statement.line + field.line - 1}`],
-      })),
-    }));
-    return parsed.length === 1
-      ? { kind: "create_table", table: parsed[0], ref }
-      : { kind: "unsupported", ref };
-  }
-  if (/^alter\s+table\b/i.test(compact) && /,\s*(?:add|drop|rename|alter)\b/i.test(compact)) {
-    return { kind: "unsupported", ref };
-  }
-  // Table constraints change validation or relationships, not the field inventory this replay
-  // computes. Their referenced columns already came from CREATE TABLE / ADD COLUMN operations.
-  if (
-    /^alter\s+table\s+[\s\S]+?\s+add\s+(?:constraint\s+[`"[]?[A-Za-z_][A-Za-z0-9_]*[`"\]]?\s+)?(?:foreign\s+key|check|unique|primary\s+key)\b/i
-      .test(compact)
-  ) {
-    return { kind: "non_structural", ref };
-  }
-  let match = compact.match(
-    /^alter\s+table\s+(?:if\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+add\s+(?:column\s+)?(?:if\s+not\s+exists\s+)?(?!constraint\b)[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s+([\s\S]+?);?$/i,
-  );
-  if (match) {
-    return {
-      kind: "add_column",
-      table: match[1].split(".").pop(),
-      field: { name: match[2], shape: normalizeSqlShape(match[3]), refs: [ref] },
-      ref,
-    };
-  }
-  match = compact.match(/^alter\s+table\s+(?:if\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+drop\s+(?:column\s+)?(?:if\s+exists\s+)?[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s*;?$/i);
-  if (match) return { kind: "drop_column", table: match[1].split(".").pop(), field: match[2], ref };
-  match = compact.match(/^alter\s+table\s+[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+rename\s+column\s+[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s+to\s+[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s*;?$/i);
-  if (match) return { kind: "rename_column", table: match[1].split(".").pop(), from: match[2], to: match[3], ref };
-  match = compact.match(/^alter\s+table\s+[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s+rename\s+to\s+[`"[]?([A-Za-z_][A-Za-z0-9_]*)[`"\]]?\s*;?$/i);
-  if (match) return { kind: "rename_table", from: match[1].split(".").pop(), to: match[2], ref };
-  match = compact.match(/^drop\s+table\s+(?:if\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?(?:\s+(?:cascade|restrict))?\s*;?$/i);
-  if (match) return { kind: "drop_table", table: match[1].split(".").pop(), ref };
-  return /^(?:create|alter|drop)\s+(?:table|column)\b/i.test(compact)
-    ? { kind: "unsupported", ref }
-    : { kind: "non_structural", ref };
-}
-
-function replayMigrations(observations) {
-  const tables = new Map();
-  const operations = [];
-  const gaps = [];
-  for (const observation of observations.sort((a, b) => BY_PATH(a.path, b.path))) {
-    for (const statement of splitSqlStatements(observation.text)) {
-      const operation = migrationOperation(statement, observation.path);
-      operations.push(operation);
-      if (operation.kind === "unsupported") {
-        gaps.push({
-          format: "sql_migration",
-          ref: operation.ref,
-          reason: "unsupported structural migration statement",
-        });
-      }
-      else if (operation.kind === "create_table") {
-        if (tables.has(operation.table.name)) gaps.push({ format: "sql_migration", ref: operation.ref, reason: `table '${operation.table.name}' already exists during replay` });
-        else tables.set(operation.table.name, operation.table);
-      } else if (operation.kind === "add_column") {
-        const table = tables.get(operation.table);
-        if (!table || table.fields.some((field) => field.name === operation.field.name)) {
-          gaps.push({
-            format: "sql_migration", ref: operation.ref,
-            reason: "ADD COLUMN could not be applied to the observed state",
-          });
-        }
-        else table.fields.push(operation.field);
-      } else if (operation.kind === "drop_column") {
-        const table = tables.get(operation.table);
-        const index = table?.fields.findIndex((field) => field.name === operation.field) ?? -1;
-        if (!table || index < 0) gaps.push({ format: "sql_migration", ref: operation.ref, reason: "DROP COLUMN could not be applied to the observed state" });
-        else table.fields.splice(index, 1);
-      } else if (operation.kind === "rename_column") {
-        const table = tables.get(operation.table);
-        const field = table?.fields.find((item) => item.name === operation.from);
-        if (!field || table.fields.some((item) => item.name === operation.to)) {
-          gaps.push({
-            format: "sql_migration", ref: operation.ref,
-            reason: "RENAME COLUMN could not be applied to the observed state",
-          });
-        }
-        else { field.name = operation.to; field.refs.push(operation.ref); }
-      } else if (operation.kind === "rename_table") {
-        const table = tables.get(operation.from);
-        if (!table || tables.has(operation.to)) gaps.push({ format: "sql_migration", ref: operation.ref, reason: "RENAME TABLE could not be applied to the observed state" });
-        else {
-          tables.delete(operation.from);
-          table.name = operation.to;
-          table.refs.push(operation.ref);
-          tables.set(operation.to, table);
-        }
-      } else if (operation.kind === "drop_table") {
-        if (!tables.delete(operation.table)) gaps.push({ format: "sql_migration", ref: operation.ref, reason: "DROP TABLE could not be applied to the observed state" });
-      }
-    }
-  }
-  return { collections: gaps.length === 0 ? [...tables.values()] : [], operations, gaps };
 }
 
 function mergeCanonical(observations) {
@@ -1320,11 +1220,16 @@ export function collectFacts(repo, { candidate = false } = {}) {
   const listing = listFiles(repo);
   const inputs = JSON.parse(execFileSync("python3", [join(HERE, "dataset_inputs.py"), `--repo=${repo}`, ...(candidate ? ["--candidate"] : [])], {encoding: "utf8"}));
   const supplementalDatasets = inputs.datasets;
-  const files = listing.files;
+  const excludedNonRuntime = listing.files.filter(isNonRuntimePath);
+  const productionFiles = listing.files.filter((path) => !isNonRuntimePath(path));
+  const drizzleTopology = discoverDrizzleTopology(repo, productionFiles);
+  const migrationSupport = readMigrationSupport(repo, productionFiles);
+  const excludedMigrations = migrationPaths(repo, productionFiles, drizzleTopology, migrationSupport);
+  const excludedPaths = new Set(excludedMigrations);
+  const files = productionFiles.filter((path) => !excludedPaths.has(path));
   const enumeratedBy = listing.enumeratedBy;
   const discovery = JSON.parse(execFileSync("python3", [join(HERE, "dependencies.py"), "--discover", `--repo=${repo}`],
     { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
-  const drizzleTopology = discoverDrizzleTopology(repo, files);
   const manifestPath = join(repo, ".noru", "privacy-datamap.yml");
   const relationships = candidate
     ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), "--candidate", repo], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }))
@@ -1349,38 +1254,18 @@ export function collectFacts(repo, { candidate = false } = {}) {
     }
     const parsed = parser.parse(text);
     const topology = drizzleTopology.byPath.get(rel);
-    const migrationOnly = parser.kind === "sql_ddl"
-      && (topology?.role === "migration" || isMigrationPath(rel));
-    const hasMigrationDdl = migrationOnly && splitSqlStatements(text).some(
-      (statement) => migrationOperation(statement, rel).kind !== "non_structural"
-    );
-    if (parsed.length === 0 && !hasMigrationDdl) continue;
+    if (parsed.length === 0) continue;
     parsedFiles.add(rel);
     parsedByKind[parser.kind] = (parsedByKind[parser.kind] ?? 0) + 1;
-    let bindings = relationships.bindings[rel];
-    if (!bindings && topology?.role === "migration") {
-      const configPath = topology.ref.slice(0, topology.ref.lastIndexOf(":"));
-      const canonicalPaths = [...drizzleTopology.byPath].filter(([, claim]) =>
-        claim.role === "canonical" && claim.ref.slice(0, claim.ref.lastIndexOf(":")) === configPath).map(([path]) => path);
-      const mapped = canonicalPaths.map((path) => relationships.bindings[path]);
-      if (mapped.some(Boolean)) {
-        if (!mapped.every((value) => value && JSON.stringify(value) === JSON.stringify(mapped[0]))) {
-          sourceReadGaps.push({ format: "relationship_migrations", ref: topology.ref,
-            reason: "Linked schemas have different or incomplete connection bindings; resolve migration ownership." });
-          continue;
-        }
-        bindings = mapped[0];
-      }
-    }
+    const bindings = relationships.bindings[rel];
     for (const boundary of bindings ?? [topology?.boundary ?? datastoreBoundary(rel)]) observations.push({
       path: rel,
       boundary,
       ...(bindings ? { relationship_bound: true } : {}),
       kind: parser.kind,
-      role: topology?.role === "canonical" || !migrationOnly ? "canonical" : "migration",
+      role: "canonical",
       collections: cloneCollections(parsed, rel),
       ...(topology ? { topology_ref: topology.ref } : {}),
-      ...(migrationOnly ? { text } : {}),
     });
   }
 
@@ -1400,22 +1285,8 @@ export function collectFacts(repo, { candidate = false } = {}) {
   const specialRefs = [];
   for (const [, group] of [...groups.entries()].sort(([a], [b]) => BY_PATH(a, b))) {
     const boundary = group[0].boundary;
-    const canonical = group.filter((item) => item.role === "canonical");
-    const migration = group.filter((item) => item.role === "migration");
-    const result = canonical.length > 0 ? mergeCanonical(canonical) : replayMigrations(migration);
-    schemaConflicts.push(...(canonical.length > 0 ? result.gaps : []));
-    if (migration.length > 0) {
-      const replay = replayMigrations(migration);
-      // Migration replay is structural coverage only when migrations are the current-state
-      // authority. With a canonical schema, migrations remain auditable history but an operation
-      // outside the safe replay subset cannot make the authoritative schema incomplete.
-      if (canonical.length === 0) migrationGaps.push(...replay.gaps);
-      migrationOperations.push(...replay.operations.map((operation) => ({
-        boundary,
-        ...operation,
-      })));
-      for (const observation of migration) delete observation.text;
-    }
+    const result = mergeCanonical(group);
+    schemaConflicts.push(...result.gaps);
     if (result.collections.length === 0) continue;
     const sourceKinds = [...new Set(group.map((item) => item.kind))].sort(BY_PATH);
     const normalized = normalizedDataset(boundary, result.collections, sourceKinds,
@@ -1425,6 +1296,19 @@ export function collectFacts(repo, { candidate = false } = {}) {
     classified += normalized.counts.classified;
     needsReview += normalized.counts.needsReview;
     specialRefs.push(...normalized.specialRefs);
+  }
+  const migrationBoundaries = new Map();
+  for (const path of excludedMigrations) {
+    const topology = drizzleTopology.byPath.get(path);
+    const boundary = topology?.boundary ?? datastoreBoundary(path);
+    if (!migrationBoundaries.has(boundary)) migrationBoundaries.set(boundary, path);
+  }
+  for (const [boundary, path] of migrationBoundaries) {
+    if (!observations.some((item) => item.boundary === boundary
+      || (drizzleTopology.byPath.get(item.path)?.boundary ?? datastoreBoundary(item.path)) === boundary)) {
+      migrationGaps.push({format: "excluded_migrations", ref: `${path}:1`,
+        reason: "Migration files are excluded; supply a current ORM or declarative schema for this boundary."});
+    }
   }
   for (const store of supplementalDatasets) {
     parsedFiles.add(MANIFEST_INPUT_PATH);
@@ -1537,6 +1421,7 @@ export function collectFacts(repo, { candidate = false } = {}) {
     // What this scan could and could not read. Consumed by scripts/ci_check.py, which fails a
     // build where nothing was parsed and something was found that should have been — an empty map
     // must never be reportable as a clean one.
+    ...(migrationSupport.length ? {migration_support: migrationSupport} : {}),
     coverage: {
       // Which files this scan could even see. A `walk` means the file list is whatever is on disk
       // rather than whatever is committed, so a scan here and a scan in CI can legitimately
@@ -1545,6 +1430,8 @@ export function collectFacts(repo, { candidate = false } = {}) {
       // It sits under `coverage` so it is out of the digest: the same file set enumerated two
       // different ways is the same repository, and must not read as drift.
       enumerated_by: enumeratedBy,
+      excluded_migrations: excludedMigrations,
+      excluded_non_runtime: excludedNonRuntime,
       files_parsed: parsedFiles.size,
       parsed_by_kind: Object.fromEntries(Object.entries(parsedByKind).sort()),
       unparsed_candidates: [...new Map([
@@ -1632,6 +1519,7 @@ export function previousDigestOf(derived) {
 /** Structural identity excludes citations, classification lookups and discovery counters. */
 export function digestOf(derived) {
   return canonicalDigest({
+    ...(derived.migration_support?.length ? {migration_support: derived.migration_support} : {}),
     datasets: (derived.datasets ?? []).map((dataset) => ({
       key: dataset.fides_key,
       collections: (dataset.collections ?? []).map((collection) => ({

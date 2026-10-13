@@ -138,7 +138,7 @@
     "source": [
       {
         "kind": "repository",
-        "note": "The schemas, models, migrations and API contracts the repository actually contains. This half of the queue is repo-resident truth: no server-side integration can see which columns exist on a branch that has not merged, and no API key can read a migration."
+        "note": "The current schemas, models and API contracts the repository actually contains. Migration history is excluded. This half of the queue is repo-resident truth: no server-side integration can see which columns exist on a branch that has not merged."
       },
       {
         "kind": "mcp_tool",
