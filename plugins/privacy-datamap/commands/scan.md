@@ -247,6 +247,11 @@ activities when evidenced; do not combine them into a generic service purpose or
 activities. Describe direction and destination in the relationship rationale, including provider
 sharing. Preserve unchanged accepted declarations.
 
+When proposing related field corrections, compare their evidenced meaning across collections and
+check each affected activity's categories. Apply the classification guide's consistency examples
+for billing events, mixed individual/company values and unconstrained content. Preserve supported
+subjects, purposes and system relationships; add transfers only with evidence of the actual flow.
+
 On the first scan, investigate persistent stores outside supported schemas even when no supplement
 exists. On repeat scans, revisit only affected stores or unresolved gaps under the scope above. Search
 integration code, typed contracts, serializers and actual upload/download payloads. Derive supported

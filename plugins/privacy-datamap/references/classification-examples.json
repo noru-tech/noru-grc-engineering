@@ -97,6 +97,68 @@
       "categories": [
         "user.contact.email"
       ]
+    },
+    {
+      "id": "invoice-reference",
+      "collection": "invoices",
+      "field": "invoice_id",
+      "context": "Lookup resolves this reference to an individual customer invoice and its amount; the value identifies their financial record, not the person directly.",
+      "categories": [
+        "user.financial"
+      ]
+    },
+    {
+      "id": "invoice-event-reference",
+      "collection": "events",
+      "field": "event_id",
+      "context": "The invoice writer forwards the same individual invoice reference to analytics; analytics correlates it with that customer billing record.",
+      "categories": [
+        "user.financial"
+      ]
+    },
+    {
+      "id": "invoice-event-outcome",
+      "collection": "events",
+      "field": "event_type",
+      "context": "The invoice writer emits invoice_issued for the individual customer invoice. This is a billing outcome, not evidence of an action performed by the customer.",
+      "categories": [
+        "user.financial"
+      ]
+    },
+    {
+      "id": "mixed-payer-name",
+      "collection": "invoices",
+      "field": "name",
+      "context": "payer_kind selects an individual name or a corporate legal-entity name. Both branches exist; user.name covers the individual branch, not every value.",
+      "categories": [
+        "user.name"
+      ],
+      "personal_data": "mixed"
+    },
+    {
+      "id": "company-only-name",
+      "collection": "companies",
+      "field": "name",
+      "context": "Registered corporate legal-entity name, with no sole trader, individual contact or person attribution in the inspected writers and consumers.",
+      "categories": []
+    },
+    {
+      "id": "personal-record-status",
+      "collection": "cases",
+      "field": "status",
+      "context": "Fixed open state on a customer support case. Investigation establishes personal association but no narrower category for this system outcome.",
+      "categories": [
+        "user"
+      ]
+    },
+    {
+      "id": "unconstrained-personal-content",
+      "collection": "documents",
+      "field": "body",
+      "context": "Free text on an individual-owned document. Sensitive submissions are possible, but no content contract establishes a sensitive subtype or enforced public/private audience.",
+      "categories": [
+        "user.content"
+      ]
     }
   ]
 }
