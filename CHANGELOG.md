@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.12.0 — 2026-10-13
+
 - Resolve every wildcard in static workspace package export targets, preserve literal dollar
   sequences in module substitutions, and report unsupported multi-wildcard TypeScript paths.
 
