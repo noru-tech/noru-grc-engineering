@@ -11,6 +11,32 @@ import field_review
 
 HINTS = json.loads((pathlib.Path(__file__).resolve().parent.parent / "references/classification.json").read_text())
 
+
+def record_feedback(document, entries):
+    """Record user statements as review input, never as source evidence or acceptance."""
+    if not isinstance(entries, list):
+        raise ValueError('Feedback must be a JSON list.')
+    updated = copy.deepcopy(document)
+    contract = updated['classification_review']
+    rows = {row['entity_id']: row for row in field_review.all_rows(contract['fields'])}
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get('entity_id') not in rows:
+            raise ValueError('Feedback must target an existing field entity_id.')
+        if any(not isinstance(entry.get(key), str) or not entry[key].strip() for key in ('statement', 'interpretation')):
+            raise ValueError('Feedback requires the user statement and its classification interpretation.')
+        row = rows[entry['entity_id']]
+        feedback = {key: entry[key] for key in ('statement', 'interpretation')}
+        previous = row.get('user_feedback') or []
+        if feedback in previous:
+            continue
+        row['user_feedback'] = previous + [feedback]
+        row.update(status='needs_investigation', uncertainty='user_feedback', resolution_owner='agent',
+                   evidence_strength='unresolved')
+        row['decision_binding'] = field_review.decision_binding(row, contract)
+    field_review.aggregate_members(contract)
+    contract['counts'] = field_review.counts(contract)
+    return updated
+
 def category_candidates(row, facts):
     """Vocabulary retrieval only: a candidate is never a classification verdict."""
     keys = set(row.get("categories", []))
@@ -45,6 +71,7 @@ def prepare_batch(document, limit):
             'facts': selected_facts,
             'evidence': {key: evidence[key] for key in evidence_ids if key in evidence},
             'semantic_review_questions': field_review.SEMANTIC_REVIEW_QUESTIONS,
+            'user_feedback': row.get('user_feedback') or [],
             'investigation_steps': [
                 'Read the cited declaration, resolved type and nested members.',
                 'Trace each writer, consumer, identity target and alternative branch from the extracted facts; inspect imported helpers when meaning depends on them.',
@@ -72,6 +99,7 @@ def main(argv=None):
     parser.add_argument('--decisions', type=pathlib.Path, help='JSON list of investigated decisions; use - for stdin')
     parser.add_argument('--shapes', type=pathlib.Path, help='JSON list of source-evidenced nested-member or scalar-array refinements')
     parser.add_argument('--gaps', type=pathlib.Path, help='JSON list of investigated extraction-gap resolutions')
+    parser.add_argument('--feedback', type=pathlib.Path, help='JSON list of user corrections: entity_id, statement, interpretation')
     args = parser.parse_args(argv)
     if not 1 <= args.limit <= 200:
         parser.error('--limit must be between 1 and 200')
@@ -89,6 +117,8 @@ def main(argv=None):
             if errors:
                 raise ValueError('; '.join(errors))
         original = document
+        if args.feedback:
+            document = record_feedback(document, json.loads(args.feedback.read_text(encoding='utf-8')))
         if args.shapes:
             import shape_investigation
             updated = copy.deepcopy(document)

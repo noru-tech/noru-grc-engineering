@@ -6,6 +6,10 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Separate privacy scan progress into collection, agent investigation, missing source facts,
+  human approval and publication. Show known JSON members and extraction limitations, record
+  user corrections for reconsideration, and support explicit local-code routing scope.
+
 ## 0.12.1 — 2026-10-13
 
 - Clarify privacy classification guidance for invoice events, mixed individual/company values,

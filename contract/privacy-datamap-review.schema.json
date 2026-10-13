@@ -12,7 +12,8 @@
     "data_map",
     "review_queue",
     "evidence_record",
-    "collection_mode"
+    "collection_mode",
+    "progress"
   ],
   "properties": {
     "version": {
@@ -238,6 +239,58 @@
         "candidate"
       ],
       "description": "Whether reviewed observations use manifest bindings or a separately validated proposed graph."
+    },
+    "progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "collection",
+        "agent_investigation",
+        "agent_pending_fields",
+        "extraction_gaps",
+        "source_information",
+        "missing_facts",
+        "human_approval",
+        "publication",
+        "next_actions"
+      ],
+      "properties": {
+        "collection": {
+          "type": "string"
+        },
+        "agent_investigation": {
+          "type": "string"
+        },
+        "source_information": {
+          "type": "string"
+        },
+        "human_approval": {
+          "type": "string"
+        },
+        "publication": {
+          "type": "string"
+        },
+        "agent_pending_fields": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "extraction_gaps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing_facts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "next_actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

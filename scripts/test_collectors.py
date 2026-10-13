@@ -2223,7 +2223,7 @@ def test_datamap_enrichment_gate(results, tmp):
                   and groups[0]["data_categories"] == ["user.unique_id"]
                   and set(groups[0]["field_ids"]) == {row["entity_id"] for row in document["proposals"]}
                   and len(evidence["evidence_record"]["fields"]) == observed_count
-                  and len(review.split()) <= 250, f"{len(review.split())} words; {precise.stderr or precise.stdout}")
+                  and len(review.split()) <= 300, f"{len(review.split())} words; {precise.stderr or precise.stdout}")
     results.check("[privacy-datamap] different field reasoning groups by decision and stays out of the review",
                   review.count("Treat account identifiers as personal data.") == 1
                   and "Field-specific explanation" not in review and "Detailed processing explanation" not in review

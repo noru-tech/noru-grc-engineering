@@ -291,6 +291,43 @@ def effective_proposal(row, document):
     return {**group, **decision, **{k: v for k, v in row.items() if v not in (None, "", {})}}
 
 
+def scan_progress(document, result, derived, errors, blockers):
+    contract = document.get("classification_review", {})
+    pending = [row for row in field_review.all_rows(contract.get("fields", []))
+               if row.get("status") != "proposed"]
+    human = [row for row in pending if row.get("resolution_owner") == "human"]
+    agent = [row for row in pending if row.get("resolution_owner") != "human"]
+    gaps = [gap for gap in contract.get("gaps", []) if gap.get("status") != "resolved"]
+    questions = []
+    for row in human + document.get("system_proposals", []) + document.get("removal_proposals", []):
+        for item in [row] + row.get("processing_activities", []):
+            question_text = item.get("business_context_question") or item.get("unresolved_question")
+            if question_text:
+                questions.append(question_text)
+    questions.extend(row.get("unresolved_question", "Destination unknown") for row in
+                     (derived.get("relationship_mapping") or {}).get("questions", []))
+    questions.extend(row.get("unresolved_question", "Store contract unavailable") for row in
+                     document.get("store_investigation", {}).get("findings", []) if row.get("status") == "gap")
+    questions = list(dict.fromkeys(questions))
+    incomplete = bool(agent or gaps or errors or blockers or document.get("discovery_required"))
+    accepted = bool(result.get("accepted_current") and not document.get("relationship_proposal")
+                    and not incomplete and not questions and not human)
+    actions = []
+    if incomplete:
+        actions.append("Agent: finish source investigation and resolve extraction or validation issues; approval cannot resolve these.")
+    if questions or human:
+        actions.append("User: answer the specific missing-fact questions below; supported proposals remain available for review.")
+    if not accepted and not incomplete and not questions and not human:
+        actions.append("User: Accept or amend proposals; name the accountable owner.")
+    return {"collection": "complete", "agent_investigation": "incomplete" if incomplete else "complete",
+            "agent_pending_fields": len(agent), "extraction_gaps": len(gaps),
+            "source_information": "missing" if questions or human else "no open questions",
+            "missing_facts": questions,
+            "human_approval": "recorded" if accepted else "deferred" if incomplete or questions or human else "pending",
+            "publication": "eligible for validation" if accepted else "blocked",
+            "next_actions": actions}
+
+
 def build_outputs(document, result, derived, candidate, errors):
     blockers = structural_blockers(document, result, derived)
     status = "enrichment incomplete" if errors or blockers else "accepted" if result.get("accepted_current") and not document.get("relationship_proposal") else "ready for human review"
@@ -377,7 +414,9 @@ def build_outputs(document, result, derived, candidate, errors):
         group["collections"] = sorted(set(group["collections"]) | {collection})
         group["proposal_kinds"] = sorted(set(group["proposal_kinds"]) | {proposal.get("proposal_kind") or "requested"})
         group["data_categories"] = sorted(set(group["data_categories"]) | set(field["classification"]))
-    return {"version": "1.0.0", "status": status, "observation_digest": result["observation_digest"],
+    return {"version": "1.0.0", "status": status,
+            "progress": scan_progress(document, result, derived, errors, blockers),
+            "observation_digest": result["observation_digest"],
             "collection_mode": "candidate" if result.get("candidate_context") else "manifest",
             "data_map": {"system_flows": [{"system": s["fides_key"], "direction": k, "resources": s[k]} for s in candidate.get("system", []) for k in ("ingress", "egress") if s.get(k)], "stores": stores, "processing_activities": activities, "monitoring_scope": result.get("monitoring_scope", {}), "connection_questions": (derived.get("relationship_mapping") or {}).get("questions", []), "relationship_proposal": document.get("relationship_proposal")},
             "review_queue": {"structural_blockers": blockers, "analysis_errors": errors,
@@ -398,6 +437,9 @@ def question(lines, row):
     for unknown in unknowns:
         lines.append(f"  Unknown: {unknown}")
     if unknowns:
+        proposal = row.get("decision_summary") or row.get("summary")
+        if proposal and proposal != "Analysis required":
+            lines.append(f"  Current proposal (not an answer or approval): {proposal}")
         for resolution in (row.get("resolution_needed") or "Specify the evidence or answer required.").splitlines():
             lines.append(f"  To resolve: {resolution}")
         for impact in (row.get("decision_impact") or "").splitlines():
@@ -414,6 +456,15 @@ def review_scope(values):
 def render_outputs(outputs):
     status = outputs["status"]
     data_map = ["# Privacy review", "", f"Status: **{status}**." + (" Proposed meanings require human acceptance." if status != "accepted" else " No changes within the monitored scope."), ""]
+    progress = outputs.get("progress")
+    if progress:
+        data_map[2] = f"Collection complete; {status}."
+        for key, label in (("agent_investigation", "Agent investigation"), ("source_information", "Source information"),
+                           ("human_approval", "Human approval"), ("publication", "Publication")):
+            data_map.append(f"- {label}: **{progress[key]}**.")
+        data_map.extend(["", "Approval pending is not scan failure.", ""])
+        data_map.extend(f"- {action}" for action in progress["next_actions"])
+        data_map.append("")
     if outputs["evidence_record"]["reconciliation"].get("candidate_context"):
         data_map.extend(["Candidate collection: stores and fields below use the proposed relationship graph. Accepted files are unchanged.", ""])
     if status == "enrichment incomplete":
@@ -443,6 +494,30 @@ def render_outputs(outputs):
     discovery = outputs["evidence_record"]["agent_analysis"].get("discovery_required", [])
     review = ["# Privacy decisions", "",
               "[Analysis and evidence](privacy-datamap.analysis.json)", ""]
+    feedback_rows = [item for item in outputs["evidence_record"]["fields"] if item.get("canonical_decision", {}).get("user_feedback")]
+    if feedback_rows:
+        review.extend(["## Recorded user corrections", ""])
+    for item in feedback_rows:
+        review.append(f"- **{item['entity_id']}** ({item['decision_state']})")
+        for feedback in item["canonical_decision"]["user_feedback"]:
+            review.extend([f"  User: {feedback['statement']}", f"  Classification interpretation: {feedback['interpretation']}"])
+    composite_rows = [item["canonical_decision"] for item in outputs["evidence_record"]["fields"]
+                      if item.get("canonical_decision", {}).get("composite") or item.get("canonical_decision", {}).get("open_content")]
+    if composite_rows:
+        review.extend(["## JSON and nested content", ""])
+    for row in composite_rows:
+        children = row.get("nested_members", [])
+        known = ", ".join(child["name"] for child in children) or "none extracted"
+        review.append(f"- **{row['entity_id']}** — known members: {known}.")
+        review.append("  Additional content: " + ("open or unresolved; known members remain separately classified." if row.get("open_content") else "closed in the recorded shape evidence."))
+        if row.get("status") != "proposed":
+            review.append("  Blocker: " + ("missing source/business contract; answer the recorded fact question." if row.get("resolution_owner") == "human"
+                          else "agent investigation or extraction limitation; inspect the contract and writers before asking the user."))
+        if row.get("open_content_resolution"):
+            review.append(f"  Content assessment: {row['open_content_resolution']}")
+    for gap in outputs["evidence_record"]["agent_analysis"].get("classification_review", {}).get("gaps", []):
+        if gap.get("status") != "resolved":
+            review.append(f"- Extraction limitation **{gap.get('subject') or gap.get('kind')}**: {gap.get('message', 'Inspect extraction evidence')}")
     for change in outputs["evidence_record"]["reconciliation"].get("semantic_changes", []):
         if change["kind"] != "personal_to_non_personal_or_removed":
             review.append(f"- **{change['kind'].replace('_', ' ')}**: {change['entity_id'].removeprefix('semantic:')}")
@@ -475,7 +550,7 @@ def render_outputs(outputs):
             if group["data_categories"]:
                 review.append(f"  Categories: {', '.join(group['data_categories'])}")
             question(review, group)
-        if queue["collection_decisions"] or queue["processing_decisions"]:
+        if not progress and (queue["collection_decisions"] or queue["processing_decisions"]):
             review.extend(["", "Accept or amend the proposals and record the accountable owner once for the affected scope."])
         if queue["collection_decisions"]:
             review.append(f"Acceptance scope: {review_scope(queue['collection_decisions'])}.")
@@ -566,7 +641,7 @@ def main(argv):
             print(json.dumps(outputs))
             return 1 if outputs["status"] == "enrichment incomplete" else 0
         (cache / "privacy-datamap.review.md").write_text(report, encoding="utf-8")
-        output = {"status": outputs["status"], "errors": errors,
+        output = {"status": outputs["status"], "progress": outputs["progress"], "errors": errors,
                   "structural_blockers": outputs["review_queue"]["structural_blockers"]}
         print(json.dumps(output) if opts["json"] else report)
         return 1 if outputs["status"] == "enrichment incomplete" else 0

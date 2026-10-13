@@ -438,6 +438,11 @@ A graph does not create payload fields: unsupported structures still require sup
 
 ### Privacy review
 
+The review reports collection, agent investigation, missing source facts, human approval and
+publication separately. Known JSON members remain visible alongside an open-content assessment
+and extraction limitations. User corrections can be recorded with `investigate.py --feedback`;
+they queue evidence-based reconsideration and do not grant acceptance or publication.
+
 The report leads with personal-data categories, data subjects, purposes, systems and sharing,
 then meaningful changes and actionable decisions. Raw field inventories and collector lookup labels
 stay in the evidence view. Missing field analysis is summarized as agent work; it cannot establish

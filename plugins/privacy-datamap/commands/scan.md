@@ -336,6 +336,26 @@ a known incorrect structure cannot be accepted away.
 
 Report completion precisely:
 
+Lead with the review output's `progress`: collection, agent investigation, missing source facts,
+human approval and publication are separate states. An approval-only wait is a completed scan
+awaiting a decision, not an application failure. Keep unresolved extraction and source questions
+visible and complete independent agent work before asking for acceptance. The legacy `status`
+and exit codes remain completeness signals for automation, not a diagnosis of broken user code.
+
+For JSON, report the known members and their classifications separately from additional open
+content. State whether more investigation is agent-owned, a contract is unavailable, or the
+extractor cannot represent supplied evidence. Do not ask the user to repair valid application
+code merely to satisfy extraction. For a factual question, state the current supported proposal,
+the exact missing fact and how alternative answers change the map; never invent a default answer.
+
+Record user classification corrections through `investigate.py --feedback=<json-file>` with
+`entity_id`, the user's `statement`, and its `interpretation`. This queues agent reconsideration
+without treating the statement as source evidence or human acceptance. Preserve the correction in
+subsequent decisions. Explain once that “not directly identifying” and “not personal data” differ:
+a record can relate to a person without naming them. Ask which interpretation the user intends
+only when that changes the map. Investigate the correction, revise the proposal or record the
+specific contrary evidence; do not repeatedly reopen an unchanged resolved discussion.
+
 - `structure collected`: extraction and reconciliation finished; enrichment is still required.
 - `enrichment incomplete`: required analysis remains. If blocked, identify missing evidence or
   capability and complete all independent analysis. Do not stop at the skeleton otherwise.

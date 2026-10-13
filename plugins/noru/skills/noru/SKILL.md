@@ -56,6 +56,12 @@ Cite the file and line for every repository-derived recommendation. Keep live No
 and recommendations visibly separate. Routing signals select a tool; they are not compliance
 findings and do not establish that a control is effective or ineffective.
 
+Explicit user scope takes precedence over routing keywords. A named privacy scan runs that piece
+only. For a local-code review, use `review.mjs --scope=local-code`; application terms such as
+reviewer, review outcome or approval do not authorize forge-history or human-sign-off workflows.
+Use `--pieces=privacy-datamap` when that is the requested piece; do not expand a scan into a broad
+GRC review because the application's domain happens to contain review records.
+
 The routing catalogue also declares optional utilities. Route requests to enforce the workflow,
 configure merge blockers, manage ratcheted debt, or detect GitHub ruleset drift to the independently
 installed `repo-enforcement:repo-enforcement` skill. Do not grant the read-only hub GitHub

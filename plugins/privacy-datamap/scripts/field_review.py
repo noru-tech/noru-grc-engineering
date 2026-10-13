@@ -380,6 +380,8 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
         row["observation_digest"] = digest({"definition": {"entity_id": identity, "shape": shape, "type": type_info}, "facts": fact_ids,
                                              "members": [child["observation_digest"] for child in row["nested_members"]]})
         prior_row = old_rows.get(identity)
+        if prior_row and prior_row.get("user_feedback"):
+            row["user_feedback"] = copy.deepcopy(prior_row["user_feedback"])
         if prior.get("version") == VERSION and prior.get("binding", {}).get("taxonomy_digest") == taxonomy_digest() and prior.get("binding", {}).get("source_inventory") == contract["binding"]["source_inventory"] and prior_row and prior_row.get("observation_digest") == row["observation_digest"]:
             used = prior_row.get("evidence_ids", [])
             if all(key in prior.get("evidence", {}) and not evidence_errors(prior["evidence"][key], repo) for key in used):
@@ -441,7 +443,7 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
 
 DECISION_KEYS = {"meaning", "personal_data", "categories", "identification_basis", "person_association", "category_fit", "security_sensitivity",
                  "rationale", "investigation", "semantic_review", "evidence_ids", "supporting_fact_ids", "status", "uncertainty", "resolution_owner", "confidence",
-                 "evidence_strength", "decision_origin", "decision_binding", "business_context_question", "resolution_needed", "decision_impact", "open_content_resolution", "decision_id", "decision_summary"}
+                 "evidence_strength", "decision_origin", "decision_binding", "business_context_question", "resolution_needed", "decision_impact", "open_content_resolution", "decision_id", "decision_summary", "user_feedback"}
 
 
 def decision_binding(row, contract):
@@ -489,6 +491,11 @@ def row_errors(row, contract, structural_only=False):
         return ["Classification field must be an object."]
     errors = []
     identity = row.get("entity_id", "?")
+    feedback = row.get("user_feedback")
+    if feedback is not None and (not isinstance(feedback, list) or any(not isinstance(item, dict)
+            or any(not isinstance(item.get(key), str) or not item[key].strip() for key in ("statement", "interpretation"))
+            for item in feedback)):
+        errors.append(str(identity) + ": user_feedback must contain statements and classification interpretations")
     for key in ("categories", "evidence_ids", "supporting_fact_ids", "category_fit", "investigation", "nested_members"):
         if not isinstance(row.get(key), list):
             errors.append(str(identity) + ": " + key + " must be a list")
@@ -676,6 +683,9 @@ def apply_decisions(document, decisions, repo):
             continue
         seen.add(identity)
         row = rows[identity]
+        if any(item not in (decision.get("user_feedback") or []) for item in row.get("user_feedback") or []) and "user_feedback" in decision:
+            errors.append(identity + ": preserve recorded user feedback when submitting a revised decision")
+            continue
         if decision.get("observation_digest") != row["observation_digest"]:
             errors.append(identity + ": decision evidence is stale")
             continue

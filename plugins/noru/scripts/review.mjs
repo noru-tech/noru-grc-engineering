@@ -13,7 +13,7 @@ const ROUTING_PATH = join(ROOT, "references", "routing.json");
 const SIGNALS_PATH = join(ROOT, "references", "review-signals.json");
 const USAGE =
   "usage: review.mjs [--repo=<path>] [--base-ref=<ref>] [--pieces=a,b] " +
-  "[--available-pieces=a,b] [--include-untracked] [--with-diff|--run-diff] " +
+  "[--available-pieces=a,b] [--scope=all|local-code] [--include-untracked] [--with-diff|--run-diff] " +
   "[--output=json|text] [--quiet]\n";
 
 function parseArgs(argv) {
@@ -26,10 +26,15 @@ function parseArgs(argv) {
     withDiff: false,
     json: false,
     quiet: false,
+    scope: "all",
   };
   for (const arg of argv) {
     if (arg.startsWith("--repo=")) opts.repo = arg.slice(7);
     else if (arg.startsWith("--base-ref=")) opts.baseRef = arg.slice(11);
+    else if (arg.startsWith("--scope=")) {
+      opts.scope = arg.slice(8);
+      if (!["all", "local-code"].includes(opts.scope)) return { error: "scope must be all or local-code" };
+    }
     else if (arg.startsWith("--pieces=")) {
       opts.explicit = arg.slice(9).split(",").map((value) => value.trim()).filter(Boolean);
     } else if (arg.startsWith("--available-pieces=")) {
@@ -152,9 +157,17 @@ export function reviewRepository(opts) {
     throw new Error(`unknown available piece(s): ${unknownAvailable.join(", ")}`);
   }
   const available = opts.available == null ? null : new Set(opts.available);
+  const localPieces = new Set(["ai-inventory", "iac-scan", "privacy-datamap"]);
+  if (opts.scope === "local-code" && (opts.explicit ?? []).some((name) => !localPieces.has(name))) {
+    throw new Error("explicit pieces conflict with local-code scope; select local code pieces or change --scope");
+  }
 
   const pieces = catalogue.map((piece) => {
     const installed = available === null ? null : available.has(piece.name);
+    if (opts.scope === "local-code" && !localPieces.has(piece.name)) {
+      return { name: piece.name, disposition: "skipped", reasons: ["outside the requested local-code scope"],
+        installed, run_state: "not_selected", availability_reason: "not required for this scope" };
+    }
     if (opts.explicit !== null) {
       const selected = opts.explicit.includes(piece.name);
       return {
