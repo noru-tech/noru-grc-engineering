@@ -6,6 +6,10 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Explain recursive member coverage in privacy reviews without assigning child categories to
+  containers. Reject resolved demographic classifications that contradict declared delivery or
+  queue-state meaning; retain uncertainty rather than guessing a replacement category.
+
 - Separate privacy scan progress into collection, agent investigation, missing source facts,
   human approval and publication. Show known JSON members and extraction limitations, record
   user corrections for reconsideration, and support explicit local-code routing scope.

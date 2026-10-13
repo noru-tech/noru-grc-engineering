@@ -441,6 +441,53 @@ class InvestigationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r'db/records/payload\.details: canonical field has no matching observed field'):
             review.build_outputs(document, result, derived, {'dataset': [], 'system': []}, [])
 
+    def test_recursive_container_coverage_is_explicit_and_keeps_unknown_members(self):
+        import review
+        child = {'entity_id': 'db/records/preferences.theme', 'status': 'proposed',
+                 'personal_data': 'yes', 'categories': ['user.account.settings']}
+        parent = {'entity_id': 'db/records/preferences', 'composite': True, 'status': 'proposed',
+                  'categories': [], 'nested_members': [child]}
+        before = copy.deepcopy(parent)
+        self.assertEqual(review.member_coverage(parent)['state'], 'reviewed members')
+        self.assertEqual(review.member_coverage(parent)['categories'], ['user.account.settings'])
+        self.assertEqual(parent, before)
+        metadata = dict(parent, nested_members=[
+            dict(child, entity_id='db/records/metadata.uploader_name', categories=['user.name']),
+            dict(child, entity_id='db/records/metadata.uploaded_at', categories=['user.behavior'])])
+        self.assertEqual(review.member_coverage(metadata)['categories'], ['user.behavior', 'user.name'])
+        self.assertEqual(review.member_coverage(metadata)['state'], 'reviewed members')
+        parent['nested_members'] = [dict(parent, entity_id='db/records/preferences.interface')]
+        self.assertEqual(review.member_coverage(parent)['state'], 'reviewed members')
+        child['status'] = 'needs_investigation'
+        self.assertEqual(review.member_coverage(parent)['pending_members'], [child['entity_id']])
+        self.assertEqual(review.member_coverage(parent)['state'], 'member review incomplete')
+        child['status'] = 'proposed'
+        child.update(open_content=True, open_content_resolution={'rationale': 'Not a resolution.'})
+        self.assertEqual(review.member_coverage(parent)['pending_members'], [child['entity_id']])
+        child['open_content'] = False
+        parent.update(open_content=True)
+        self.assertEqual(review.member_coverage(parent)['state'], 'member review incomplete')
+        parent.update(nested_members=[], open_content=False)
+        self.assertEqual(review.member_coverage(parent)['state'], 'member review incomplete')
+
+    def test_rendered_review_explains_container_categories(self):
+        import review
+        root = self.document['classification_review']['fields'][0]
+        root.update(composite=True, status='proposed', personal_data='yes', categories=[], open_content=False,
+                    nested_members=[dict(root, entity_id=root['entity_id']+'.theme', composite=False,
+                        status='proposed', personal_data='yes', categories=['user.account.settings'], nested_members=[])])
+        result = {'actions': [], 'collection_review_required': [], 'observation_digest': 'fixture'}
+        output = review.build_outputs(self.document, result, self.derived, {'dataset': [], 'system': []}, [])
+        rendered, _ = review.render_outputs(output)
+        self.assertIn('Nested field coverage', rendered)
+        self.assertIn('reviewed members (1 members)', rendered)
+        self.assertIn('Member categories: user.account.settings', rendered)
+        self.assertEqual(output['evidence_record']['fields'][0]['classification'], [])
+        root['nested_members'][0]['status'] = 'needs_investigation'
+        output = review.build_outputs(self.document, result, self.derived, {'dataset': [], 'system': []}, [])
+        self.assertIn('member review incomplete', review.render_outputs(output)[0])
+        self.assertIn('Pending members:', review.render_outputs(output)[0])
+
     def test_grouped_review_retains_each_question_resolution_and_impact(self):
         import review
         for row, question, answer, impact in zip(self.document['classification_review']['fields'],

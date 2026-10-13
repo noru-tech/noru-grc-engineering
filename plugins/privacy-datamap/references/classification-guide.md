@@ -281,3 +281,16 @@ establish whether a digest represents a file, a person-derived identifier, a bio
 Complete the API's six `semantic_review` findings with current evidence for each field decision.
 Maintain explicit unknowns: what is known, what evidence is absent, and which conclusion depends
 on it. No broad category or approval substitutes for missing evidence.
+
+## Containers and contradictory category claims
+
+An empty category list on an object is not an uncategorized-value finding when its reviewed
+members carry the classifications. Review all nested members and unresolved/open content before
+calling the container covered. Keep categories on the members in the Fideslang export.
+
+A declared delivery or queue state does not establish demographic information. The consistency
+gate rejects a resolved demographic category when the decision's meaning explicitly describes
+such a state. Revisit the producer and consumers, correct the meaning/category with evidence, or
+record unresolved category fit while preserving any established personal association. It does not
+infer a replacement category or treat a field name as evidence. This narrow check is not a general
+semantic classifier: other category/meaning mismatches still require agent review.

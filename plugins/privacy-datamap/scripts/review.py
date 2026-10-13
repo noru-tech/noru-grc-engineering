@@ -328,6 +328,26 @@ def scan_progress(document, result, derived, errors, blockers):
             "next_actions": actions}
 
 
+def member_coverage(row):
+    """Describe member coverage without copying child categories onto their container."""
+    if not row.get("composite"):
+        return None
+    members = list(field_review.all_rows(row.get("nested_members", [])))
+    def content_pending(item):
+        resolution = item.get("open_content_resolution") or {}
+        return item.get("open_content") and resolution.get("outcome") not in {
+            "closed_by_runtime_validation", "bounded_content_contract", "accepted_certificate"}
+    pending = [child["entity_id"] for child in members
+               if child.get("status") != "proposed" or child.get("personal_data") == "unknown" or content_pending(child)
+               or (child.get("personal_data") in {"yes", "mixed"}
+                   and not child.get("composite") and not child.get("categories"))]
+    complete = (bool(members) and not pending and row.get("status") == "proposed"
+                and not content_pending(row))
+    return {"state": "reviewed members" if complete else "member review incomplete",
+            "categories": sorted({c for child in members for c in child.get("categories", [])}),
+            "pending_members": pending, "member_count": len(members)}
+
+
 def build_outputs(document, result, derived, candidate, errors):
     blockers = structural_blockers(document, result, derived)
     status = "enrichment incomplete" if errors or blockers else "accepted" if result.get("accepted_current") and not document.get("relationship_proposal") else "ready for human review"
@@ -363,7 +383,7 @@ def build_outputs(document, result, derived, candidate, errors):
                     "rationale": row["rationale"], "refs": row["evidence"]}
         inventory.append({**observed, "entity_id": identity, "classification": row["categories"], "personal_data": row["personal_data"],
                           "decision_state": row["status"], "proposal": proposal, "candidate_decision": candidate_fields.get(identity, {}),
-                          "canonical_decision": row})
+                          "canonical_decision": row, "member_coverage": member_coverage(row)})
     activities = []
     proposed_systems = {row["entity_id"] for row in document.get("system_proposals", [])}
     for system in document.get("system_proposals", []):
@@ -473,6 +493,17 @@ def render_outputs(outputs):
     for store in outputs["data_map"]["stores"]:
         data_map.extend([f"## {store['name']}", "", f"Scope: {len(store['collections'])} collections",
                          f"Categories: {', '.join(store['data_categories']) or 'None established'}", ""])
+    containers = [row for row in outputs["evidence_record"]["fields"] if row.get("member_coverage")]
+    if containers:
+        data_map.extend(["## Nested field coverage", "",
+                         "Containers keep categories on their members; an empty parent category list does not mean uncategorized content.", ""])
+        for row in containers:
+            coverage = row["member_coverage"]
+            data_map.append(f"- **{row['entity_id']}**: {coverage['state']} ({coverage['member_count']} members). "
+                            f"Member categories: {', '.join(coverage['categories']) or 'None established'}.")
+            if coverage["pending_members"]:
+                data_map.append("  Pending members: " + ", ".join(coverage["pending_members"]))
+        data_map.append("")
     data_map.extend(["## Processing and flows", ""])
     for activity in outputs["data_map"]["processing_activities"]:
         data_map.extend([f"- **{activity['system']}: {activity.get('purpose')}** ({activity['decision_state']})",

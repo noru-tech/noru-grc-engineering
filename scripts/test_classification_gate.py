@@ -114,6 +114,28 @@ class ClassificationGateTests(unittest.TestCase):
         self.assertTrue(any('boolean state' in error for error in errors))
         self.assertEqual(self.document, before)
 
+    def test_delivery_state_demographic_conflict_is_atomic_and_has_no_default(self):
+        for meaning in ['Queued audience membership state.', 'Email delivery status.', 'Queue state.']:
+            decision = self.decision('email', 'yes', ['user.demographic.profile'])
+            decision['meaning'] = meaning
+            before = copy.deepcopy(self.document)
+            errors = field_review.apply_decisions(self.document, [decision], self.repo)
+            self.assertTrue(any('category/meaning mismatch' in error for error in errors), errors)
+            self.assertEqual(self.document, before)
+        decision.update(categories=[], category_fit=[], uncertainty='Which category describes the delivery state?', resolution_owner='agent')
+        self.assertEqual(field_review.apply_decisions(self.document, [decision], self.repo), [])
+        self.assertEqual(self.row('email')['personal_data'], 'yes')
+        self.assertEqual(self.row('email')['status'], 'needs_investigation')
+
+    def test_demographic_guard_does_not_classify_names_or_reject_profiles(self):
+        decision = self.decision('email', 'yes', ['user.demographic.profile'])
+        decision['meaning'] = 'An audience profile derived from individual demographic attributes.'
+        self.assertEqual(field_review.apply_decisions(self.document, [decision], self.repo), [])
+        row = dict(self.row('email'), name='delivery_status', meaning='An individual demographic profile.')
+        self.assertEqual(field_review.category_meaning_errors(row), [])
+        for meaning in ['An individual profile, not a delivery status.', 'A profile rather than queue state.']:
+            self.assertEqual(field_review.category_meaning_errors(dict(row, meaning=meaning)), [])
+
     def test_organization_or_service_is_not_person_by_secrecy(self):
         for association in ['organization', 'service']:
             errors = field_review.apply_decisions(self.document, [self.decision('email', 'yes', ['user.contact.email'], association)], self.repo)
