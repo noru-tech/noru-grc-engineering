@@ -61,6 +61,56 @@ throw new Exception("target must not run");
         self.put('src/Program.cs',self.files['src/Program.cs'].replace('"Secondary"','"Primary"'))
         self.assertEqual(len({r['boundary'] for r in self.scan()['observations']}),1)
 
+    def test_global_ef_imports_bind_contexts_with_evidence(self):
+        self.fixture()
+        self.put('src/Entities.cs', self.files['src/Entities.cs'].replace('using Microsoft.EntityFrameworkCore;', ''))
+        self.assertEqual(self.scan()['relationships'], [])
+        for namespace in ('Microsoft.EntityFrameworkCore', 'global::Microsoft.EntityFrameworkCore', 'System.Data.Entity'):
+            self.put('src/ZGlobalUsings.cs', '// compilation imports\nglobal using ' + namespace + ';')
+            report = self.scan()
+            self.assertEqual(len(report['relationships']), 2)
+            self.assertEqual(report['gaps'], [])
+            for edge in report['relationships']:
+                self.assertIn('src/ZGlobalUsings.cs:2', edge['refs'])
+            for observation in report['observations']:
+                self.assertIn('src/ZGlobalUsings.cs:2', observation['binding_refs'])
+                self.assertEqual([f['name'] for f in observation['collections'][0]['fields']], ['Id', 'contact'])
+        self.put('src/ZGlobalUsings.cs', '')
+        self.assertEqual(self.scan()['relationships'], [])
+
+    def test_global_import_does_not_bind_foreign_qualified_context(self):
+        self.fixture()
+        self.put('src/Entities.cs', self.files['src/Entities.cs'].replace('using Microsoft.EntityFrameworkCore;', '').replace(': DbContext', ': Other.DbContext'))
+        self.put('src/GlobalUsings.cs', 'global using Microsoft.EntityFrameworkCore;')
+        self.assertEqual(self.scan()['relationships'], [])
+
+    def test_global_imports_do_not_cross_project_boundaries(self):
+        self.fixture()
+        self.put('src/Entities.cs', self.files['src/Entities.cs'].replace('using Microsoft.EntityFrameworkCore;', ''))
+        self.put('shared/Shared.csproj', '<Project />')
+        self.put('shared/GlobalUsings.cs', 'global using Microsoft.EntityFrameworkCore;')
+        self.put('src/App.csproj', '<Project><ItemGroup><ProjectReference Include="../shared/Shared.csproj" /></ItemGroup></Project>')
+        self.assertEqual(self.scan()['relationships'], [])
+        self.put('src/Other.csproj', '<Project />')
+        self.put('src/GlobalUsings.cs', 'global using Microsoft.EntityFrameworkCore;')
+        self.assertEqual(self.scan()['relationships'], [])
+
+    def test_global_imports_reject_non_imports_and_conditional_sources(self):
+        self.fixture()
+        self.put('src/Entities.cs', self.files['src/Entities.cs'].replace('using Microsoft.EntityFrameworkCore;', ''))
+        for source in (
+            'using Microsoft.EntityFrameworkCore;',
+            '// global using Microsoft.EntityFrameworkCore;',
+            'string text = "global using Microsoft.EntityFrameworkCore;";',
+            'global using EF = Microsoft.EntityFrameworkCore;',
+            'global using static Microsoft.EntityFrameworkCore;',
+            '#if FEATURE\nglobal using Microsoft.EntityFrameworkCore;\n#endif',
+            'namespace Other { global using Microsoft.EntityFrameworkCore; }',
+        ):
+            with self.subTest(source=source):
+                self.put('src/GlobalUsings.cs', source)
+                self.assertEqual(self.scan()['relationships'], [])
+
     def test_mongo_nested_members_and_receiver_scopes(self):
         self.put('App.csproj','<Project />')
         self.put('Models.cs','''using MongoDB.Driver;
@@ -320,6 +370,8 @@ using Alias = Example.Other;
 
     def test_collector_and_canonical_review_preserve_evidence(self):
         self.fixture()
+        self.put('src/Entities.cs', self.files['src/Entities.cs'].replace('using Microsoft.EntityFrameworkCore;', ''))
+        self.put('src/GlobalUsings.cs', 'global using Microsoft.EntityFrameworkCore;')
         subprocess.run(['git','init','-q',str(self.repo)],check=True)
         subprocess.run(['git','-C',str(self.repo),'add','.'],check=True)
         result=subprocess.run(['node',str(SCRIPTS/'collect.mjs'),f'--repo={self.repo}','--output=json'],capture_output=True,text=True)
@@ -333,7 +385,11 @@ using Alias = Example.Other;
         self.assertEqual(contract['fields'][1]['type']['name'],'string?')
         self.assertIn('src/Entities.cs',contract['binding']['source_inventory'])
         self.assertTrue(all(row['status']=='needs_investigation' for row in contract['fields']))
+        self.assertIn('src/GlobalUsings.cs', contract['binding']['source_inventory'])
         previous=copy.deepcopy(contract['binding'])
+        self.put('src/GlobalUsings.cs', '')
+        self.assertNotEqual(previous['source_inventory'], field_review.source_inventory(self.repo))
+        self.put('src/GlobalUsings.cs', 'global using Microsoft.EntityFrameworkCore;')
         self.put('src/Entities.cs',self.files['src/Entities.cs'].replace('string? Email','string Email'))
         current=field_review.source_inventory(self.repo)
         self.assertNotEqual(previous['source_inventory'],current)

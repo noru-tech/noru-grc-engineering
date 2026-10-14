@@ -6,6 +6,9 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Resolve Entity Framework global namespace imports from separate C# files within the same
+  project, retaining import evidence on extracted datastore relationships.
+
 - Discover .NET projects and relevant dependencies, extract bounded C# persisted model fields,
   and trace modeled Entity Framework, MongoDB, DynamoDB and literal typed SQL relationships.
   Report unresolved configuration and extraction gaps with source evidence; preserve nested

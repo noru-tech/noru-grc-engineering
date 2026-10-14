@@ -378,11 +378,40 @@ class Reader:
                                      'fields':[{'name':f['name'],'shape':f['shape'],'refs':[f"{model['path']}:{f['line']}"]} for f in fields]}]})
             self.tables.append({'name':table,'dataset':key,'schema_path':model['path'],'fields':fields})
 
+    def global_ef_imports(self):
+        imports = {}
+        for path, source in self.sources.items():
+            project = source['project']
+            if project not in self.projects: continue
+            tokens = source['tokens']; i = 0
+            # Global imports belong to the compilation, never to referenced projects.
+            while i < len(tokens):
+                token = tokens[i]
+                if token.kind != 'code': i += 1; continue
+                if token.value in {'namespace', 'class', 'record', 'struct', 'interface', 'enum'}: break
+                if token.value == '{': i = close(tokens, i) + 1; continue
+                if token.value == 'global' and values(tokens[i+1:i+2]) == 'using':
+                    end = i + 2
+                    while end < len(tokens) and tokens[end].value != ';': end += 1
+                    name = ''.join(t.value for t in tokens[i+2:end])
+                    if end < len(tokens) and all(t.kind == 'code' for t in tokens[i+2:end]) and name in {
+                        'Microsoft.EntityFrameworkCore', 'System.Data.Entity',
+                        'global::Microsoft.EntityFrameworkCore', 'global::System.Data.Entity',
+                    }:
+                        imports.setdefault(project, []).append(f'{path}:{token.line}')
+                    i = end + 1
+                else: i += 1
+        return imports
+
     def relationships_from_source(self):
+        global_imports = self.global_ef_imports()
         for model in self.models:
             src=self.sources[model['path']]; code=values(src['tokens']); header=values(model['header'])
             if model['project'] is None: continue
-            context=bool(re.search(r'\bDbContext\b',header)) and ('EntityFrameworkCore' in code or 'System . Data . Entity' in code)
+            import_refs = global_imports.get(model['project'], [])
+            local_ef = 'EntityFrameworkCore' in code or 'System . Data . Entity' in code
+            global_ef = bool(import_refs) and bool(re.search(r'(?<!:):\s*DbContext\b', header))
+            context = bool(re.search(r'\bDbContext\b', header)) and (local_ef or global_ef)
             if context:
                 store=['context',model['qualified'],model['path']]
                 # A common configuration key in one project is evidence of a shared logical target.
@@ -423,8 +452,8 @@ class Reader:
                     before=len(self.observations)
                     self.bind(model,target,table,store,'sql',prop['line'],'context_entity_table')
                     if len(self.observations)>before:
-                        self.observations[-1]['binding_refs']+= [f'{p}:{l}' for _,p,l in keys]
-                        self.relationships[-1]['refs'] = sorted(set(self.relationships[-1]['refs'] + [f'{p}:{l}' for _,p,l in keys]))
+                        self.observations[-1]['binding_refs']+= import_refs + [f'{p}:{l}' for _,p,l in keys]
+                        self.relationships[-1]['refs'] = sorted(set(self.relationships[-1]['refs'] + import_refs + [f'{p}:{l}' for _,p,l in keys]))
                 if any(t.value in {'OnModelCreating','OnModelCreatingPartial'} for t in model['body']):
                     self.gap(model['path'],model['line'],'Fluent model configuration may override conventions/attributes; investigate mappings before accepting')
             table=attr(model['attributes'],'DynamoDBTable')
