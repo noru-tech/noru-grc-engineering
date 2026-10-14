@@ -111,6 +111,44 @@ throw new Exception("target must not run");
                 self.put('src/GlobalUsings.cs', source)
                 self.assertEqual(self.scan()['relationships'], [])
 
+    def test_interpolated_and_raw_messages_preserve_enum_declarations(self):
+        self.fixture()
+        self.put('src/Types.cs', 'namespace Example; public enum WebhookType : byte { Created, Updated }')
+        original = self.files['src/Entities.cs'].replace('public int Id', 'public WebhookType Kind { get; set; } public int Id')
+        messages = [
+            '$"Transaction {transaction.Id} is not current"',
+            '$"Nested {Call("inner", new { X = 1 })} {{escaped}}"',
+            '$@"line one\n{Call(@"nested ""quote""")} line two"',
+            '@$"{Call($"{value}")}"',
+            '"""raw text with "quotes" and {braces}"""',
+            '$$"""raw {{Call("nested")}} {literal}"""',
+        ]
+        for message in messages:
+            with self.subTest(message=message):
+                self.put('src/Entities.cs', original + '\nclass Diagnostic { void Fail() { throw new Exception('+message+'); } }')
+                report = self.scan()
+                self.assertEqual(len(report['relationships']), 2)
+                kind = report['tables'][0]['fields'][0]
+                self.assertEqual(kind['type']['kind'], 'scalar')
+                self.assertEqual(kind['shape'], 'WebhookType')
+                self.assertNotIn('Transaction', json.dumps(report))
+                self.assertEqual(report['gaps'], [])
+        self.put('src/Entities.cs', original + '\nstring broken = $"{Call("inner")};')
+        self.assertEqual(self.scan()['relationships'], [])
+        self.assertTrue(any('Unterminated' in g['reason'] for g in self.scan()['gaps']))
+
+    def test_dynamic_mapping_and_ambiguous_enum_remain_gaps(self):
+        self.fixture()
+        self.put('src/Entities.cs', self.files['src/Entities.cs'].replace('"records"', '$"{table}"'))
+        self.assertEqual(self.scan()['relationships'], [])
+        self.assertTrue(any('literal' in g['reason'] for g in self.scan()['gaps']))
+        self.fixture()
+        self.put('src/Entities.cs', self.files['src/Entities.cs'].replace('public int Id', 'public WebhookType Kind { get; set; } public int Id'))
+        self.put('src/Types.cs', 'namespace One { enum WebhookType { A } } namespace Two { enum WebhookType { B } }')
+        self.assertTrue(any('ambiguous' in g['reason'] for g in self.scan()['gaps']))
+        self.put('src/Types.cs', '#if FEATURE\nenum WebhookType { A }\n#endif')
+        self.assertTrue(any('preprocessor' in g['reason'] for g in self.scan()['gaps']))
+
     def test_mongo_nested_members_and_receiver_scopes(self):
         self.put('App.csproj','<Project />')
         self.put('Models.cs','''using MongoDB.Driver;
@@ -329,8 +367,7 @@ using Alias = Example.Other;
             self.assertIn(expected,reasons)
         self.assertNotIn('PRIVATE',json.dumps(report))
         self.put('Data.cs','using Amazon.DynamoDBv2.DataModel; [DynamoDBTable("items")] public class Item { public string Name { get; set; } } string s = $"{value}";')
-        self.assertEqual(self.scan()['observations'],[])
-        self.assertTrue(self.scan()['gaps'])
+        self.assertEqual(len(self.scan()['observations']),1)
         for body in ['[Broken public string Name { get; set; }', 'public string this[int i] { get; set; }']:
             self.put('Data.cs','using Amazon.DynamoDBv2.DataModel; [DynamoDBTable("items")] public class Item { '+body+' }')
             malformed=self.scan()

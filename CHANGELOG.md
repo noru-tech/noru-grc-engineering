@@ -6,6 +6,9 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Keep C# declarations when diagnostic strings use interpolation or raw literals; resolve
+  source-declared enums while retaining gaps for malformed literals and ambiguous types.
+
 - Resolve Entity Framework global namespace imports from separate C# files within the same
   project, retaining import evidence on extracted datastore relationships.
 

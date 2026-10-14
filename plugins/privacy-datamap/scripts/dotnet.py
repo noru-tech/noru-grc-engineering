@@ -28,6 +28,49 @@ class Token:
     kind: str = "code"
 
 
+def string_end(text, start, depth=0):
+    """Skip literals and interpolation holes without treating their contents as declarations."""
+    if depth > 64: raise ValueError('String nesting exceeds inspection limit')
+    match = re.match(r'(\$+)?(@)?("{3,}|"|\')|(@\$)(")', text[start:])
+    if not match: return None
+    prefix = match.group(); interpolated = '$' in prefix; verbatim = '@' in prefix
+    quote = "'" if prefix.endswith("'") else '"'
+    width = len(prefix) - len(prefix.rstrip('"')) if quote == '"' else 1
+    raw = width >= 3; dollars = prefix.count('$'); pos = start + len(prefix)
+    while pos < len(text):
+        if raw and text.startswith('"' * width, pos): return pos + width
+        if not raw and text[pos] == quote:
+            if verbatim and text.startswith('""', pos): pos += 2; continue
+            return pos + 1
+        if not raw and not verbatim and text[pos] == '\\': pos += 2; continue
+        if interpolated and text[pos] == '{':
+            if not raw and text.startswith('{{', pos): pos += 2; continue
+            count = len(text[pos:]) - len(text[pos:].lstrip('{'))
+            opening = dollars if raw else 1
+            if count < opening: pos += count; continue
+            pos += count; nesting = 1
+            while pos < len(text):
+                if text.startswith('//', pos):
+                    end = text.find('\n', pos); pos = len(text) if end < 0 else end; continue
+                if text.startswith('/*', pos):
+                    end = text.find('*/', pos + 2)
+                    if end < 0: raise ValueError('Unterminated interpolation comment')
+                    pos = end + 2; continue
+                nested = string_end(text, pos, depth + 1)
+                if nested is not None: pos = nested; continue
+                if text[pos] == '{': nesting += 1
+                if text[pos] == '}':
+                    nesting -= 1
+                    if nesting == 0:
+                        if not text.startswith('}' * opening, pos): raise ValueError('Unbalanced interpolation')
+                        pos += opening; break
+                pos += 1
+            else: raise ValueError('Unterminated interpolation')
+            continue
+        pos += 1
+    raise ValueError('Unterminated string')
+
+
 def lex(text):
     tokens, pos, line = [], 0, 1
     while pos < len(text):
@@ -40,12 +83,15 @@ def lex(text):
             end = text.find('*/', pos + 2)
             if end < 0: raise ValueError('Unterminated comment')
             line += text[pos:end + 2].count('\n'); pos = end + 2; continue
-        if ch == '#' and text[pos:pos+9] != '#nullable':
+        if ch == '#' and not re.match(r'#(?:nullable\b|pragma\s+warning\b|region\b|endregion\b)', text[pos:]):
             raise ValueError('Conditional or preprocessor source requires investigation')
         if ch == '#':
             end = text.find('\n', pos); pos = len(text) if end < 0 else end; continue
         if ch == '$' or text.startswith('@$', pos) or text.startswith('"""', pos):
-            raise ValueError('Interpolated or raw strings require investigation')
+            end = string_end(text, pos)
+            if end is None: raise ValueError('Unsupported string prefix')
+            tokens.append(Token('', line, 'computed_string'))
+            line += text[pos:end].count('\n'); pos = end; continue
         start = line
         verbatim = text.startswith('@"', pos)
         if ch in '\"\'' or verbatim:
@@ -232,7 +278,7 @@ class Reader:
                     else:
                         stop = close(tokens,j); declarations(j+1,stop,name); i=stop+1
                     pending, modifiers = [], []; continue
-                if t.value in {'class','record','struct'}:
+                if t.value in {'class','record','struct','enum','interface'}:
                     j = i+1
                     if t.value == 'record' and j < end and tokens[j].value in {'class','struct'}: j += 1
                     name = tokens[j].value; j += 1
@@ -348,7 +394,12 @@ class Reader:
                     self.gap(model['path'],prop['line'],'Dynamic or dictionary content has unknown additional members; supply a content contract')
                 else:
                     child=self.resolve(target,model)
-                    if dialect in {'sql','query'}:
+                    if child and child['kind'] == 'enum':
+                        enum_base = values(child['header']).removeprefix(':').strip() or 'int'
+                        if enum_base not in {'byte','sbyte','short','ushort','int','uint','long','ulong'}:
+                            self.gap(child['path'],child['line'],'Unsupported enum underlying type requires investigation')
+                        info={'kind':'scalar','name':shape,'optional':optional}
+                    elif dialect in {'sql','query'}:
                         self.gap(model['path'],prop['line'],'Navigation, owned or converted property needs an explicit relational mapping')
                         info={'kind':'unknown_object','name':shape,'open':True}
                     else:

@@ -15,8 +15,10 @@ and explicit Compile configuration require investigation. Project references all
 models in an explicitly referenced in-repository project; ambiguous model names are not selected.
 
 The normal tracked-file, test-fixture and migration filters apply. `bin` and `obj` are excluded.
-Comments and literal strings are not model declarations. Unsupported preprocessor source,
-interpolated/raw strings or malformed declarations produce coverage gaps rather than empty success.
+Comments and strings are not model declarations. Interpolated/raw strings are opaque and cannot
+supply literal storage names. Nullable, warning and region directives are skipped; conditional or
+unsupported preprocessor source and malformed literals/declarations produce coverage gaps.
+Source-declared enums resolve as scalar fields; missing or ambiguous enum types remain gaps.
 
 ## Fields and relationships
 
