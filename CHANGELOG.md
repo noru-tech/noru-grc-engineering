@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.12.2 — 2026-10-14
+
 - Explain recursive member coverage in privacy reviews without assigning child categories to
   containers. Reject resolved demographic classifications that contradict declared delivery or
   queue-state meaning; retain uncertainty rather than guessing a replacement category.
