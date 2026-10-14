@@ -102,6 +102,24 @@ given one here. Time is checked once, in the expiry step, so one stale claim can
 findings with two different exit codes. Validation stays a question about the file; expiry is the
 question about the day.
 
+### An agent's renewal is judged against the base revision
+
+A piece whose `piece.json` declares `interpretation.agent_owners` (today, `privacy-datamap`) lets an
+agent renew a claim a person signed, under `.noru/interpretation-policy.yml`
+([requirement 8](../contract/README.md#on-requirement-8-and-why-it-is-worth-the-friction)). Whether
+the claim is unchanged since the person signed it is a question about history, so the validate step
+reads two files from the base revision and passes them to the validator:
+
+- with `--base-ref`, the merge base, as the policy step uses;
+- without it, `HEAD` when the working tree changes the manifest, otherwise `HEAD`'s first parent,
+  which on a push to a protected branch is the branch as it stood before the merge.
+
+The policy comes from the same revision, so a pull request that widens it is judged by the policy
+it would replace. A file absent there counts as absent. When CI cannot read the base revision at all,
+for example a depth-1 clone with no parent, every agent-owned claim is `invalid` rather than
+trusted: check out with `fetch-depth: 2` or more, or `0` with `--base-ref`. The report's validate
+step names the commit it judged against as `renewal_base`.
+
 ## 3. Personal data nobody agreed to
 
 Drift asks whether anybody *looked*. It does not ask whether the answer was allowed to be yes.
@@ -694,6 +712,15 @@ Written down here rather than discovered later.
   a piece declares for itself — a cadence in `review-signoff`, the day the configuration was observed
   in `iac-scan`, the end of the audit window in `audit-pack` — which is why such a field is worth
   having in more pieces.
+- **An agent's renewal is judged against one parent.** Without `--base-ref`, a push is compared with
+  `HEAD`'s first parent. A push of several commits at once, rather than one merge, is judged on its
+  last commit only, so a renewal added in an earlier commit of the same push reads as carried
+  forward. Gate the pull request with `--base-ref`, where the whole range is judged, and merge
+  rather than push to the protected branch.
+- **A team alias is caught by its usual shapes, not by knowing your teams.** An operator that
+  starts with `@`, contains `/`, or names a group ("Privacy Team", "platform-admins") is refused.
+  Anything else is taken as a person's name. The control is that the policy lists its operators by
+  name and sits behind CODEOWNERS.
 
 ## A note on Action outputs
 

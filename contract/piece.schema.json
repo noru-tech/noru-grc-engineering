@@ -177,6 +177,15 @@
                   "expect_message": {
                     "description": "Substring the contract test requires to appear in the validator's output, so an invalid fixture proves a useful message and not just a non-zero exit.",
                     "type": "string"
+                  },
+                  "args": {
+                    "description": "Further validator arguments, such as --base and --interpretation-policy for an agent's renewal. Relative paths resolve from the piece directory.",
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "agent_case": {
+                    "description": "The agent-ownership rule this fixture proves. A piece that declares interpretation.agent_owners must ship one invalid fixture for each.",
+                    "enum": ["no_operator", "team_alias_operator", "outside_policy", "above_agent_ceiling", "structure_changed", "new_claim"]
                   }
                 }
               }
@@ -374,6 +383,17 @@
         "unattributed": {
           "description": "Must be 'error'. An unattributed claim fails the validator; it is never a warning.",
           "const": "error"
+        },
+        "agent_owners": {
+          "description": "Present only when the piece lets an agent own a claim, with a named person as operator, under the repository's committed interpretation policy. Only renewals of a claim anchored to an unchanged structure qualify. The validator must accept --base=<manifest> (empty: a base was required and could not be read) and --interpretation-policy=<path> (empty file: none at the base revision), and CI mode passes both from the base revision. change-control, audit-pack and review-signoff never declare it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["claims", "anchor", "policy"],
+          "properties": {
+            "claims": { "const": ["renewal"] },
+            "anchor": { "const": "structure_digest" },
+            "policy": { "const": ".noru/interpretation-policy.yml" }
+          }
         }
       }
     },

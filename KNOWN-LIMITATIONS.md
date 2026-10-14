@@ -76,6 +76,11 @@ From [docs/ci-mode.md, "Where this is weaker than it looks"](./docs/ci-mode.md#w
 - **A partial data map is reported, not gated, by default.** Gate on it with `--fail-on=coverage`.
 - **Expiry is only as good as the dates people write.** `--max-age-days` is the ceiling.
 - **Composite action outputs are empty when the action fails the job.** Read the JSON report.
+- **An agent's renewal is judged against one parent on a push.** Without `--base-ref`, a push of
+  several commits is compared with its last commit's parent only. Gate the pull request with
+  `--base-ref`. A team alias as operator is caught by its usual shapes, not by knowing your teams;
+  the policy's named list of operators, behind CODEOWNERS, is the control. See
+  [docs/ci-mode.md](docs/ci-mode.md#where-this-is-weaker-than-it-looks).
 
 ## Repository enforcement
 

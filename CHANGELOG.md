@@ -30,6 +30,18 @@ one version number; the release workflow fails if they disagree.
   MCP client in CI and reads the key at the point of use, as the REST path already does.
 - Fix `change-control`'s `:push`, which dropped `depends_on` from the call list, so a
   `linkEvidenceToControl` call carried a null `evidenceId` with no instruction to fill it in.
+- Let an agent renew a `privacy-datamap` collection a person signed, and nothing else. The
+  interpretation block gains `owner_kind`, `operator` (a named person), `policy_ref` and `renews`;
+  the grant comes from a committed `.noru/interpretation-policy.yml` (new
+  `contract/interpretation-policy.schema.json`). The validator refuses an agent's claim on a new or
+  changed collection, on a privacy declaration, or on a collection an agent renewed last, and caps it
+  at 90 days (45 for special-category data) or the grant's shorter `max_days`. A policy that grants
+  anything but renewals, or grants anything in `change-control`, `audit-pack` or `review-signoff`,
+  is invalid. CI mode reads the base manifest and the policy from the base revision and passes them
+  as `--base` and `--interpretation-policy`; a base it cannot read refuses every agent's claim.
+- Contract requirement 8 now reads "someone who can be asked": a person, or an agent with a named
+  person as operator where a piece declares `interpretation.agent_owners`. Invalid fixtures may
+  carry validator `args`, and a piece that admits agents must ship one for each refusal.
 
 ## 0.12.2 — 2026-10-14
 

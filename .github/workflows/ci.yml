@@ -145,6 +145,8 @@ jobs:
         run: python3 scripts/test_mcp_exec.py
       - name: a merge publishes exactly the plan its pull request reviewed
         run: python3 scripts/test_reviewed_plan.py
+      - name: an agent may renew a person's unchanged claim and nothing else
+        run: python3 scripts/test_agent_renewals.py
       - name: portable privacy gate and REST publisher
         run: python3 scripts/test_privacy_ci.py
       - name: consolidated PR review routes pieces and cannot publish
