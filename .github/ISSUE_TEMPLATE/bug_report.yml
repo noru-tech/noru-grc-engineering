@@ -21,6 +21,7 @@ body:
         - audit-pack
         - privacy-datamap
         - iac-scan
+        - findings-ingest
         - change-control
         - repo-enforcement
         - noru-ci action

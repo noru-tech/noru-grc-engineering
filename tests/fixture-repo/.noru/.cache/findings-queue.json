@@ -1,0 +1,30 @@
+{
+  "_comment": "Fixture queue for the findings-ingest collector determinism test. In real use this file is written by the skill from getSecurityFindings + getOrganizationAssets + getOrganizationRisks, with due dates from getRiskTreatments. Everything below is synthetic: the ids belong to no organization.",
+  "fetched_at": "2026-08-27T09:14:00Z",
+  "via": ["getSecurityFindings", "getOrganizationAssets", "getOrganizationRisks", "getRiskTreatments"],
+  "source": "findings-ingest",
+  "open_findings": [
+    {
+      "external_id": "example-org/example-app:example-sast.example.weak-hash.0123456789ab",
+      "check_name": "example.weak-hash",
+      "title": "Weak hash function used for a security purpose",
+      "severity": "medium",
+      "status": "open",
+      "category": "vulnerability"
+    }
+  ],
+  "assets": [
+    {
+      "id": "EXAMPLE-ASSET-ID",
+      "external_id": "example-org/example-app",
+      "name": "Example application repository"
+    }
+  ],
+  "risks": [
+    {
+      "id": "EXAMPLE-RISK-ID",
+      "title": "Example risk: exploitable flaws in shipped code",
+      "due_on": "2026-12-31"
+    }
+  ]
+}

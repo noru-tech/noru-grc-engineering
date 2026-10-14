@@ -500,6 +500,7 @@
         "getOrganizationFrameworks",
         "getOrganizationControls",
         "getOrganizationRisks",
+        "getRiskTreatments",
         "getSecurityFindings",
         "getPendingControls",
         "getControlStatus",

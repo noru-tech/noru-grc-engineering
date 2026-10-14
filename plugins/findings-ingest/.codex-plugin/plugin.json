@@ -1,0 +1,45 @@
+{
+  "name": "findings-ingest",
+  "version": "0.12.2",
+  "description": "Ingest the SARIF and OSV-Scanner results that never reach a forge alert store, decide with the user what each one means here, and land them in Noru as security findings filed against risks the organization already carries — closing the ones no longer reported.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech",
+    "url": "https://noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "sarif",
+    "osv",
+    "sast",
+    "dependencies",
+    "security-findings",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Noru Findings Ingest",
+    "shortDescription": "Turn scanner results nothing else imports into reviewed security findings.",
+    "longDescription": "Reads the SARIF and OSV-Scanner reports your CI writes and does not upload to a forge alert store, asks Noru which findings this piece already has open and which risks and assets the organization carries, and proposes a finding for each result with a citation instead of a copy of what matched. A person decides whether each one is real here, how bad it is here and until when that stands; the result lands as security findings through an upsert keyed on source and external id, filed against risks already in the register, and the findings no input reports any more are closed by the same call.",
+    "developerName": "Noru",
+    "category": "Productivity",
+    "capabilities": [
+      "Local read: committed inputs file and the scanner reports it names",
+      "Local write: .noru/findings-ingest.yml and machine-only cache files",
+      "Noru read: organization, assets, risks, treatment due dates and existing findings",
+      "Noru write: security findings only after diff and confirmation",
+      "SARIF 2.1.0 and OSV-Scanner JSON",
+      "Refuses any report that also reaches a forge alert store",
+      "Findings keyed on rule, file and location, never on the line number",
+      "Citations rather than copies of what a scanner matched",
+      "Closes findings no input reports any more"
+    ],
+    "websiteURL": "https://noru.tech",
+    "defaultPrompt": "Read my scanner reports and show me what changed since the last ingest. Do not push or write to Noru."
+  }
+}

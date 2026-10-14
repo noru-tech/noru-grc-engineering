@@ -51,6 +51,7 @@ the plugins you want.
 /plugin install review-signoff@noru-grc-engineering
 /plugin install audit-pack@noru-grc-engineering
 /plugin install iac-scan@noru-grc-engineering
+/plugin install findings-ingest@noru-grc-engineering
 /plugin install privacy-datamap@noru-grc-engineering
 /plugin install change-control@noru-grc-engineering
 /plugin install compliance-assistant@noru-grc-engineering
@@ -69,6 +70,7 @@ codex plugin add governance-records@noru-grc-engineering
 codex plugin add review-signoff@noru-grc-engineering
 codex plugin add audit-pack@noru-grc-engineering
 codex plugin add iac-scan@noru-grc-engineering
+codex plugin add findings-ingest@noru-grc-engineering
 codex plugin add privacy-datamap@noru-grc-engineering
 codex plugin add change-control@noru-grc-engineering
 codex plugin add compliance-assistant@noru-grc-engineering
@@ -104,6 +106,7 @@ publication boundary, follow [developer onboarding](./docs/developer-onboarding.
 | [`audit-pack`](./plugins/audit-pack/) | the local artifacts, the sampling and the workpapers for one framework over one audit window | the tested conclusion for each control, as evidence |
 | [`privacy-datamap`](./plugins/privacy-datamap/) | the schemas a repository holds — current ORM models, SQL DDL, protobuf, GraphQL — and the personal data in them | a Fides privacy data map (`read/write:datamaps`) |
 | [`iac-scan`](./plugins/iac-scan/) | compliance-relevant misconfiguration in Terraform, CloudFormation, Kubernetes and pipeline configuration | security findings, keyed and closed by the same call |
+| [`findings-ingest`](./plugins/findings-ingest/) | SARIF and OSV-Scanner results a repository's CI produces and never uploads to a forge alert store | security findings filed against risks the organization already carries, keyed and closed by the same call |
 | [`change-control`](./plugins/change-control/) | who wrote, approved, merged and deployed each change over one window, and the branch protection that was supposed to keep those apart | a finding per separation that did not hold, plus the window as evidence |
 | [`noru`](./plugins/noru/) | repository signals and shared provenance | the hub: route, `connect`, `doctor`, `context` |
 | [`repo-enforcement`](./plugins/repo-enforcement/) | all configured GRC manifests, exact legacy-debt acceptances, CODEOWNERS, and effective GitHub rules | no Noru record; this optional utility makes the offline checks and review rules mandatory |
@@ -160,8 +163,13 @@ one of them mostly assembles rather than discovers.
   who approved it is the person who ran the agent.
 - `iac-scan` targets **infrastructure and pipeline configuration**: the module that has not been
   applied yet, the workflow that runs with the repository's own token, the literal somebody left in
-  a variable block. It is the only piece whose every write is a documented server-side upsert, so
+  a variable block. It was the first piece whose every write is a documented server-side upsert, so
   filing a finding and closing one are the same call.
+- `findings-ingest` targets **scanner results nothing else imports**: the SARIF a SAST run keeps as a
+  build artifact, the OSV-Scanner report over a lockfile. Every input declares that it does not reach
+  a forge alert store, because a result something else already imports would be filed twice. A
+  finding is filed against a risk the organization already carries, and carries no deadline of its
+  own: that is the risk treatment's, in Noru.
 
 ## What it is not
 
@@ -320,6 +328,9 @@ Use least-privilege scopes:
 | `iac-scan:scan` | `read:risks`, `read:assets` |
 | `iac-scan:diff` | adds `read:organization` to bind the plan |
 | `iac-scan:push` | adds `write:risks` |
+| `findings-ingest:scan` | `read:risks`, `read:assets` |
+| `findings-ingest:diff` | adds `read:organization` to bind the plan |
+| `findings-ingest:push` | adds `write:risks` |
 | `privacy-datamap:scan` | `read:datamaps` |
 | `privacy-datamap:diff` | adds `read:organization` to bind the plan |
 | `privacy-datamap:push` | adds `write:datamaps` |
@@ -375,6 +386,7 @@ noru-grc-engineering/
 │   ├── review-signoff/                 # :scan :diff :push  (MCP)
 │   ├── audit-pack/                     # :scan :diff :push  (MCP)
 │   ├── iac-scan/                       # :scan :diff :push  (MCP)
+│   ├── findings-ingest/                # :scan :diff :push  (MCP)
 │   ├── privacy-datamap/                # :scan :diff :push  (MCP)
 │   ├── repo-enforcement/                # optional merge-boundary utility; no Noru write
 │   └── change-control/                 # :scan :diff :push  (MCP) + credentialed forge exporters

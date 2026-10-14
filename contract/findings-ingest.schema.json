@@ -1,0 +1,500 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/findings-ingest.schema.json",
+  "title": "Noru scanner findings ingest manifest (.noru/findings-ingest.yml)",
+  "description": "Results from SARIF and OSV-Scanner reports that never reach a forge alert store, reviewed by a person and landed in Noru as security findings. The scanners propose; the manifest is where somebody says whether each result is real here, how bad it is here, and until when that judgement stands. No result message or snippet is ever recorded, because a secret scanner's message can hold the secret, and no finding carries a due date: a deadline is the treatment of the linked risk in Noru. Enforced by plugins/findings-ingest/scripts/validate_manifest.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "piece",
+    "source",
+    "inputs",
+    "queue_snapshot",
+    "findings"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "piece": {
+      "const": "findings-ingest"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "inputs": {
+      "description": "The reports this manifest was built from, as .noru/findings-ingest.inputs.json declares them. Every one states that its results do not reach a forge alert store: a report that does is already visible to whatever imports that store, and ingesting it here as well would file every result twice.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/input"
+      }
+    },
+    "links": {
+      "description": "Defaults a finding inherits unless it names its own: an asset, and a risk per class. Every value has to be one the queue snapshot returned; this piece never creates an asset and never opens a risk.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "asset_external_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "risk_by_class": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1
+            },
+            "dependency": {
+              "type": "string",
+              "minLength": 1
+            },
+            "container": {
+              "type": "string",
+              "minLength": 1
+            },
+            "secret": {
+              "type": "string",
+              "minLength": 1
+            },
+            "configuration": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "queue_snapshot": {
+      "description": "What Noru already held at the moment :scan ran: the findings this piece has open, the organization's assets, its risk register and the due dates of those risks' treatments. Written from MCP output by the client; never invented by this plugin. Requirement 9.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fetched_at",
+        "via",
+        "source",
+        "open_findings",
+        "assets",
+        "risks"
+      ],
+      "properties": {
+        "fetched_at": {
+          "type": "string",
+          "minLength": 10
+        },
+        "via": {
+          "description": "The MCP tools the snapshot came from.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "getSecurityFindings",
+              "getOrganizationAssets",
+              "getOrganizationRisks",
+              "getRiskTreatments"
+            ]
+          }
+        },
+        "source": {
+          "description": "The finding `source` the snapshot was filtered on. It has to be this piece's own source string, or closing against the open set would close records this piece never wrote.",
+          "const": "findings-ingest"
+        },
+        "open_findings": {
+          "description": "Every finding Noru currently holds for this source, with the fields a close would have to send back.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/openFinding"
+          }
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/queueAsset"
+          }
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/queueRisk"
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "commit_sha",
+        "branch",
+        "generated_by"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit_sha": {
+          "type": "string",
+          "minLength": 7
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generated_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "derived_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "format",
+        "class",
+        "reaches_forge_alert_store"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "format": {
+          "enum": [
+            "sarif",
+            "osv"
+          ]
+        },
+        "class": {
+          "enum": [
+            "code",
+            "dependency",
+            "container",
+            "secret",
+            "configuration"
+          ]
+        },
+        "reaches_forge_alert_store": {
+          "description": "Must be false. Ingest only what nothing else brings into Noru.",
+          "const": false
+        }
+      }
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[^:\\s][^:]*(?::[0-9]+)?$"
+    },
+    "interpretation": {
+      "description": "Contract requirement 8. Who decided this result is real (or is not), when, until when, and why. `expires_at` is required and is measured from `observed_on`, not from `decided_at`. It says when the judgement has to be looked at again; it is not a remediation deadline.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "decided_at",
+        "expires_at",
+        "rationale"
+      ],
+      "properties": {
+        "owner": {
+          "type": "string",
+          "minLength": 3
+        },
+        "decided_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "expires_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 10
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        }
+      }
+    },
+    "openFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "external_id",
+        "check_name",
+        "title",
+        "severity",
+        "status",
+        "category"
+      ],
+      "properties": {
+        "external_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "check_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "status": {
+          "enum": [
+            "open",
+            "in_progress",
+            "resolved",
+            "accepted",
+            "false_positive"
+          ]
+        },
+        "category": {
+          "enum": [
+            "identity_access",
+            "vulnerability",
+            "configuration",
+            "compliance",
+            "endpoint_posture"
+          ]
+        }
+      }
+    },
+    "queueAsset": {
+      "description": "An asset the organization already has.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "external_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "queueRisk": {
+      "description": "A risk the organization already carries, with the earliest due date among its open treatments when it has one. The due date is copied from Noru as it was read; absent means the organization has set none.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "due_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "ecosystem": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "input",
+        "tool",
+        "rule",
+        "class",
+        "severity",
+        "category",
+        "status",
+        "title",
+        "file",
+        "observed_on",
+        "refs",
+        "interpretation"
+      ],
+      "properties": {
+        "key": {
+          "description": "Stable identity across re-scans: the input id, the rule, and a digest of the file and logical location (SARIF) or the lockfile and package (OSV). Never a line number and never a content fingerprint. Combined with the repository slug it becomes the externalId the upsert is keyed on.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "input": {
+          "description": "The declared input this result came from.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "tool": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rule": {
+          "description": "The scanner's rule id, or the advisory id for a dependency result. Lands as checkName.",
+          "type": "string",
+          "minLength": 1
+        },
+        "class": {
+          "enum": [
+            "code",
+            "dependency",
+            "container",
+            "secret",
+            "configuration"
+          ]
+        },
+        "severity": {
+          "description": "How bad this is HERE. The scanner proposes; the reviewer owns the value that lands.",
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "category": {
+          "enum": [
+            "identity_access",
+            "vulnerability",
+            "configuration",
+            "compliance",
+            "endpoint_posture"
+          ]
+        },
+        "status": {
+          "enum": [
+            "open",
+            "in_progress",
+            "resolved",
+            "accepted",
+            "false_positive"
+          ]
+        },
+        "title": {
+          "description": "From the rule's own description or the advisory's summary — never from a result message.",
+          "type": "string",
+          "minLength": 1
+        },
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "package": {
+          "$ref": "#/$defs/package"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "observed_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        },
+        "refs_total": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "suppressed_in_source": {
+          "type": "boolean"
+        },
+        "asset_external_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "risk_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner_email": {
+          "type": "string",
+          "minLength": 3
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        },
+        "needs_review": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

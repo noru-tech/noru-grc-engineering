@@ -86,8 +86,19 @@ description built from the pack key, the workpaper key and a digest of the rende
 
 `createSecurityFinding` is a documented server-side upsert on `source + externalId`, so filing a
 finding and closing one are the same call, and running the same call twice lands the same record.
-This is the only piece where that holds — do not generalize it to the others, and stop for a human
-on a failure you do not understand even here.
+This holds for `iac-scan` and `findings-ingest` only — do not generalize it to the others, and stop
+for a human on a failure you do not understand even here.
+
+### findings-ingest
+
+| Phase | Tools | Scopes |
+|---|---|---|
+| `:scan` (read) | `getSecurityFindings` with `source: "findings-ingest"`, `getOrganizationAssets`, `getOrganizationRisks`, `getRiskTreatments` (due dates only) | `read:risks`, `read:assets` |
+| `:diff` (read) | `getSecurityFindings` with `source: "findings-ingest"`, plus `findOrganization` for the plan binding | `read:risks`, adds `read:organization` |
+| `:push` (write) | `createSecurityFinding` | `write:risks` |
+
+The same documented upsert as `iac-scan`. No call carries a due date: a finding's deadline is the
+treatment of the risk it is filed against, and stays in Noru.
 
 ### privacy-datamap
 

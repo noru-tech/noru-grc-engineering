@@ -1,0 +1,87 @@
+{
+  "_comment": [
+    "Bundled vocabulary for the findings-ingest validator (contract requirement 3).",
+    "Kept in sync with contract/findings-ingest.schema.json by scripts/check_repo.py.",
+    "",
+    "These are the SHAPES an ingested result can take — the report formats this piece reads, the",
+    "classes of scanner it accepts, and the severity/status/category values Noru's own API publishes",
+    "for a security finding. They are not framework content: no control text, no remediation window,",
+    "no deadline. What is already open, which assets and risks exist and when a risk's treatment is",
+    "due all come from the customer's organization at scan time, never from this file. See",
+    "contract/README.md, requirement 9.",
+    "",
+    "severity, status and category are the published enums for a Noru security finding. Their source",
+    "is the 'Security Findings' entry in the Canonical Values Reference of",
+    "https://api.noru.tech/llms.txt. Do not extend them here: a value this piece invents is a value",
+    "the API rejects at push time, which is the worst moment to find out."
+  ],
+  "format": ["sarif", "osv"],
+  "class": ["code", "dependency", "container", "secret", "configuration"],
+  "_class_category_comment": [
+    "The category a finding of each class is filed under by default. A person may file one under",
+    "another category in the manifest; this is only what the skeleton proposes."
+  ],
+  "class_category": {
+    "code": "vulnerability",
+    "dependency": "vulnerability",
+    "container": "vulnerability",
+    "secret": "identity_access",
+    "configuration": "configuration"
+  },
+  "severity": ["critical", "high", "medium", "low"],
+  "finding_status": ["open", "in_progress", "resolved", "accepted", "false_positive"],
+  "category": [
+    "identity_access",
+    "vulnerability",
+    "configuration",
+    "compliance",
+    "endpoint_posture"
+  ],
+  "_scanner_severity_comment": [
+    "How a scanner's own rating becomes the severity the skeleton proposes. A numeric score is read",
+    "on the CVSS v3 qualitative scale (critical from 9.0, high from 7.0, medium from 4.0, low above",
+    "0); a SARIF level is read as below. The result is a proposal, as it is in every other piece:",
+    "how bad a finding is HERE is the person's call, written into the manifest."
+  ],
+  "score_bands": [
+    { "from": 9.0, "severity": "critical" },
+    { "from": 7.0, "severity": "high" },
+    { "from": 4.0, "severity": "medium" },
+    { "from": 0.1, "severity": "low" }
+  ],
+  "sarif_level": {
+    "error": "high",
+    "warning": "medium",
+    "note": "low"
+  },
+  "advisory_severity": {
+    "CRITICAL": "critical",
+    "HIGH": "high",
+    "MODERATE": "medium",
+    "MEDIUM": "medium",
+    "LOW": "low"
+  },
+  "_status_horizon_days_comment": [
+    "How long an interpretation of a finding may stand, counted in days from the day the result was",
+    "observed. This is not a remediation deadline and must never be read as one: it says when",
+    "somebody has to look at the judgement again. A deadline is whatever the treatment of the linked",
+    "risk says in Noru, and this piece sets none.",
+    "",
+    "An open or in-progress finding is a live observation that the next scan refreshes, so the",
+    "window is short. Accepting a finding, or calling it a false positive, is a human decision to",
+    "leave the code as it is — it gets a longer window, but never an unbounded one."
+  ],
+  "status_horizon_days": {
+    "open": 120,
+    "in_progress": 120,
+    "resolved": 120,
+    "accepted": 400,
+    "false_positive": 400
+  },
+  "queue_tools": [
+    "getSecurityFindings",
+    "getOrganizationAssets",
+    "getOrganizationRisks",
+    "getRiskTreatments"
+  ]
+}

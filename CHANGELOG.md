@@ -6,6 +6,18 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- New piece, `findings-ingest`: SARIF 2.1.0 and OSV-Scanner JSON reports your CI writes and does
+  not upload anywhere become reviewed security findings, through the same `createSecurityFinding`
+  upsert as `iac-scan`, and findings no input reports any more are closed. The committed
+  `.noru/findings-ingest.inputs.json` names each report, its format and class, and declares
+  `reaches_forge_alert_store: false`; the collector and validator refuse anything else, because a
+  result something else already imports would be filed twice. A missing report stops the run rather
+  than closing everything. Findings are keyed on the input, rule, file and logical location (or the
+  advisory and package), never on a line number or a content fingerprint, and no result message or
+  snippet is ever recorded. A class or a finding may only be filed against a risk in the queue
+  snapshot, and no finding carries a due date: the queue records the due date of the linked risk's
+  treatment as Noru holds it (new queue tool `getRiskTreatments`), and `--as-of` reports an open
+  finding past it.
 - `change-control` can take its change history from an agent-change-control manifest instead of its
   own exporter: `scripts/export/acc.mjs --manifest=acc-manifest.json [--forge-export=…]` writes the
   same `.noru/.cache/change-events.json`, offline, with acc's verdict on each change. ACC002, ACC003

@@ -1,0 +1,46 @@
+{
+  "results": [
+    {
+      "source": { "path": "/home/runner/work/example-app/example-app/store/requirements.txt", "type": "lockfile" },
+      "packages": [
+        {
+          "package": { "name": "jinja2", "version": "2.10.1", "ecosystem": "PyPI" },
+          "vulnerabilities": [
+            {
+              "id": "GHSA-0000-example-0001",
+              "aliases": ["CVE-0000-00001"],
+              "summary": "Example sandbox escape in template rendering",
+              "database_specific": { "severity": "HIGH" }
+            },
+            {
+              "id": "PYSEC-0000-example-2",
+              "aliases": ["GHSA-0000-example-0001", "CVE-0000-00001"],
+              "summary": "Example sandbox escape in template rendering"
+            }
+          ],
+          "groups": [
+            {
+              "ids": ["GHSA-0000-example-0001", "PYSEC-0000-example-2"],
+              "aliases": ["CVE-0000-00001", "GHSA-0000-example-0001", "PYSEC-0000-example-2"],
+              "max_severity": "7.5"
+            }
+          ]
+        },
+        {
+          "package": { "name": "requests", "version": "2.19.0", "ecosystem": "PyPI" },
+          "vulnerabilities": [
+            {
+              "id": "GHSA-0000-example-0003",
+              "aliases": [],
+              "summary": "Example credential leak on redirect",
+              "database_specific": { "severity": "MODERATE" }
+            }
+          ],
+          "groups": [
+            { "ids": ["GHSA-0000-example-0003"], "aliases": ["GHSA-0000-example-0003"], "max_severity": "" }
+          ]
+        }
+      ]
+    }
+  ]
+}

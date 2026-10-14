@@ -20,7 +20,7 @@ default mode needs no network and no credential, so it runs on a pull request fr
 | **unpermitted personal data** | the data map processes a category, purpose or subject the committed privacy baseline does not permit | `7` |
 | **nothing parsed** | a collector found no input in a repository that visibly has one: a tooling failure, never a pass | `6` |
 
-Pieces you can run: `ai-inventory`, `privacy-datamap`, `iac-scan`, `change-control`,
+Pieces you can run: `ai-inventory`, `privacy-datamap`, `iac-scan`, `findings-ingest`, `change-control`,
 `evidence-push`, `governance-records`, `review-signoff`, `audit-pack`. What each one collects is in
 the [toolkit README](../../../README.md#pieces).
 
