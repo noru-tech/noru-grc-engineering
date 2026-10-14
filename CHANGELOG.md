@@ -6,6 +6,10 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Apply bounded, explicitly registered EF configurations for stored names, exclusions, backing
+  and typed shadow fields, simple owned-object columns and enum-to-string conversions. Keep
+  conditional mappings, custom converters and unsupported configuration as review gaps.
+
 - Recover source-defined inherited fields with origin evidence and Identity custom user fields;
   leave unavailable framework definitions and ambiguous inheritance as explicit gaps.
 

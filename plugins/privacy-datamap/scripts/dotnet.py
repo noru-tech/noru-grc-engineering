@@ -173,6 +173,7 @@ class Reader:
         self.gaps, self.technologies, self.observations, self.relationships = [], [], [], []
         self.tables = []
         self.solutions = []
+        self.inspected_configurations = set()
 
     def gap(self, path, line, reason):
         row = {'format': 'dotnet', 'ref': f'{path}:{line}', 'reason': reason}
@@ -361,6 +362,135 @@ class Reader:
                 i+=1
         return props
 
+    def method_body(self, model, name):
+        tokens = model['body']; matches = []
+        for i,t in enumerate(tokens):
+            if t.kind != 'code' or t.value != name or values(tokens[i+1:i+2]) != '(': continue
+            end = close(tokens, i+1, '(', ')')
+            if values(tokens[end+1:end+2]) == '{': matches.append(tokens[end+2:close(tokens,end+1)])
+        if len(matches) == 1: return matches[0]
+        return []
+
+    def fluent_chain(self, statement):
+        if not statement or statement[0].kind != 'code': return None
+        receiver = statement[0].value; calls = []; i = 1
+        while i < len(statement):
+            if values(statement[i:i+1]) != '.' or i+2 >= len(statement): return None
+            method = statement[i+1]; i += 2; generic = []
+            if statement[i].value == '<':
+                end = close(statement, i, '<', '>'); generic = statement[i+1:end]; i = end+1
+            if i >= len(statement) or statement[i].value != '(': return None
+            end = close(statement, i, '(', ')')
+            calls.append((method.value, generic, statement[i+1:end], method.line)); i = end+1
+        return (receiver, calls) if calls else None
+
+    def member_selector(self, args):
+        literal = literal_arg(args)
+        if literal: return literal
+        if len(args) == 5 and values(args[1:3]) == '=> '+args[0].value and args[3].value == '.' and IDENT.fullmatch(args[4].value):
+            return args[4].value
+        return None
+
+    def fluent_mapping(self, context, model):
+        try:
+            return self._fluent_mapping(context, model)
+        except (ValueError, IndexError, RecursionError):
+            self.gap(context['path'],context['line'],'Malformed or unsupported fluent configuration requires investigation')
+            return {'properties':{},'ignore':set(),'navigation':set(),'owned':set(),'refs':[],'table':None,'schema':None}
+
+    def _fluent_mapping(self, context, model):
+        mapping = {'properties': {}, 'ignore': set(), 'navigation': set(), 'owned': set(), 'refs': [], 'table': None, 'schema': None}
+        body = self.method_body(context, 'OnModelCreating')
+        configurations = []
+        for statement in split(body, ';'):
+            if not statement: continue
+            chain = self.fluent_chain(statement)
+            if not chain:
+                self.gap(context['path'],statement[0].line,'Conditional or unsupported model-builder statement requires investigation'); continue
+            _, calls = chain
+            if len(calls) == 1 and calls[0][0] == 'HasDefaultSchema':
+                name = literal_arg(calls[0][2])
+                if name: mapping['schema'] = name; mapping['refs'].append(f"{context['path']}:{calls[0][3]}")
+                else: self.gap(context['path'],calls[0][3],'Dynamic default schema requires investigation')
+            elif len(calls) == 1 and calls[0][0] == 'ApplyConfiguration':
+                args = calls[0][2]
+                if values(args[:1]) == 'new' and values(args[-2:]) == '( )':
+                    config = self.resolve(''.join(t.value for t in args[1:-2]), context)
+                    if config:
+                        match = re.search(r'IEntityTypeConfiguration\s*<\s*([\w.]+)\s*>', values(config['header']))
+                        target = self.resolve(match[1], config) if match else None
+                        if target and target['qualified'] == model['qualified'] and target['project'] == model['project']:
+                            configurations.append(config)
+                            mapping['refs'].append(f"{context['path']}:{calls[0][3]}")
+                else: self.gap(context['path'],calls[0][3],'Dynamic configuration application requires investigation')
+            elif calls[0][0] != 'OnModelCreating':
+                self.gap(context['path'],calls[0][3],'Unsupported model-builder call may change storage; investigate mapping')
+        if len(configurations) > 1:
+            self.gap(context['path'],context['line'],'Multiple configurations target one entity; mapping precedence requires investigation')
+            return mapping
+        for config in configurations:
+            self.inspected_configurations.add((config['path'],config['qualified']))
+            body = self.method_body(config, 'Configure')
+            parameter = re.search(r'Configure \( EntityTypeBuilder < [\w .]+ > (\w+) \)', values(config['body']))
+            if not parameter:
+                self.gap(config['path'],config['line'],'Configuration builder parameter is unresolved'); continue
+            for statement in split(body, ';'):
+                if not statement: continue
+                chain = self.fluent_chain(statement)
+                if not chain or chain[0] != parameter[1]:
+                    self.gap(config['path'],statement[0].line,'Conditional, reassigned or unsupported fluent builder requires investigation'); continue
+                _, calls = chain; method, generic, args, line = calls[0]
+                ref = f"{config['path']}:{line}"; mapping['refs'].append(ref)
+                if method == 'ToTable' and len(calls) == 1:
+                    parts = split(args); names = [literal_arg(p) for p in parts]
+                    if 1 <= len(names) <= 2 and all(names) and mapping['table'] is None:
+                        mapping['table'] = names[0]
+                        if len(names) == 2: mapping['schema'] = names[1]
+                    else: self.gap(config['path'],line,'Dynamic or conflicting table mapping requires investigation')
+                    continue
+                member = self.member_selector(args)
+                if method == 'Ignore' and member and len(calls) == 1: mapping['ignore'].add(member); continue
+                if method == 'OwnsOne' and member and len(calls) == 1: mapping['owned'].add(member); continue
+                if method in {'HasOne','HasMany'}:
+                    if member: mapping['navigation'].add(member)
+                    self.gap(config['path'],line,'Relationship foreign-key and navigation mapping requires review beyond scalar fields')
+                    continue
+                if method in {'HasKey','HasIndex'}:
+                    self.gap(config['path'],line,'Key/index configuration requires review beyond scalar field mapping'); continue
+                if method != 'Property' or not member:
+                    self.gap(config['path'],line,'Unsupported fluent mapping or selector requires investigation'); continue
+                if member in mapping['properties']:
+                    self.gap(config['path'],line,'Repeated property configuration requires precedence investigation'); continue
+                prop = {'refs': [ref], 'declared_type': ''.join(t.value for t in generic) or None}
+                for operation, type_args, arguments, operation_line in calls[1:]:
+                    if operation in {'HasColumnName','HasField'}:
+                        name = literal_arg(arguments)
+                        if name: prop[operation] = name
+                        else: self.gap(config['path'],operation_line,'Dynamic column or backing-field mapping requires investigation')
+                    elif operation == 'HasConversion':
+                        converted = ''.join(t.value for t in type_args)
+                        if converted == 'string' and not arguments: prop['conversion'] = converted
+                        else: self.gap(config['path'],operation_line,'Custom conversion requires explicit stored-type investigation')
+                    elif operation not in {'HasMaxLength','IsRequired','UseHiLo','ValueGeneratedNever','ValueGeneratedOnAdd','HasPrecision'}:
+                        self.gap(config['path'],operation_line,'Unsupported property configuration may change stored shape')
+                mapping['properties'][member] = prop
+        return mapping
+
+    def declared_backing_fields(self, model):
+        fields = {}; tokens = model['body']; i = 0
+        while i < len(tokens):
+            attributes, i = attrs(tokens, i); start = i
+            while i < len(tokens) and tokens[i].value not in {';', '{', '=>'}: i += 1
+            if i == len(tokens): break
+            if tokens[i].value == '{': i = close(tokens, i)+1; continue
+            head = tokens[start:i]; i += 1
+            if any(t.value in {'(', '=>', ','} for t in head): continue
+            head = head[:next((j for j,t in enumerate(head) if t.value == '='),len(head))]
+            words = [t for t in head if t.value not in {'public','private','protected','internal','readonly','volatile'}]
+            if len(words) < 2 or not IDENT.fullmatch(words[-1].value) or any(t.value == 'static' for t in words): continue
+            fields[words[-1].value] = {'name':words[-1].value,'type':''.join(t.value for t in words[:-1]),'line':words[-1].line,'attributes':attributes,'owner':model}
+        return fields
+
     def inherited_properties(self, model, seen=()):
         identity = (model['project'], model['qualified'])
         if identity in seen or len(seen) >= 16:
@@ -385,13 +515,26 @@ class Reader:
                 else: props.append(prop)
         return props
 
-    def fields(self, model, dialect, seen=()):
+    def fields(self, model, dialect, seen=(), mapping=None):
         if model['qualified'] in seen or len(seen)>=8:
             self.gap(model['path'],model['line'],'Recursive or deep nested model requires shape investigation'); return []
         if 'partial' in model['modifiers'] or any(t.value == '<' for t in model['header']):
             self.gap(model['path'],model['line'],'Partial or generic model requires investigation beyond declared members')
         out=[]
-        for prop in self.inherited_properties(model):
+        props = self.inherited_properties(model)
+        if mapping:
+            backing = self.declared_backing_fields(model)
+            for name, config in mapping['properties'].items():
+                if not any(p['name'] == name for p in props):
+                    field = backing.get(config.get('HasField', name))
+                    if field: props.append(dict(field, name=name))
+                    elif config['declared_type']:
+                        props.append({'name':name,'type':config['declared_type'],'line':model['line'],'attributes':[],'owner':model})
+                    else: self.gap(model['path'],model['line'],'Configured property has no resolved declaration or explicit type')
+        for prop in props:
+            if mapping and prop['name'] in mapping['ignore'] | mapping['navigation']: continue
+            config = mapping['properties'].get(prop['name'], {}) if mapping else {}
+
             origin = prop['owner']
             attributes=prop['attributes']
             ignored={'sql':'NotMapped','mongo':'BsonIgnore','dynamo':'DynamoDBIgnore','query':'__none__'}[dialect]
@@ -409,8 +552,23 @@ class Reader:
             known={ignored,rename,'Key','Required','MaxLength','StringLength','BsonId','BsonIgnoreIfNull','BsonIgnoreIfDefault','DynamoDBHashKey','DynamoDBRangeKey','DynamoDBVersion'}
             if any(key.split('.')[-1] not in known for key,_ in attributes):
                 self.gap(model['path'],prop['line'],'Unsupported member attribute may change stored shape; investigate serializer/converter semantics')
+            if config.get('HasColumnName'): name = config['HasColumnName']
             shape=prop['type']; base=shape.rstrip('?'); optional=shape.endswith('?')
-            members=[]
+            if mapping and prop['name'] in mapping['owned']:
+                child = self.resolve(base, origin)
+                nested = self.fields(child, dialect, (*seen,model['qualified'])) if child else []
+                for field in nested:
+                    field['name'] = prop['name'] + '_' + field['name']
+                    field['evidence'].append(self.span(origin, prop['line']))
+                    for ref in mapping['refs']:
+                        path, line = ref.rsplit(':', 1)
+                        field['evidence'].append(self.span({'path':path}, int(line)))
+                    if any(f['name'] == field['name'] for f in out):
+                        self.gap(model['path'],prop['line'],'Owned member conflicts with another stored column; resolve mapping')
+                    else: out.append(field)
+                continue
+
+            members=[]; enum_evidence=[]
             match=re.fullmatch(r'(?:System\.Collections\.Generic\.)?(?:List|IList|ICollection|IEnumerable|HashSet|IReadOnlyList)<(.+)>|(.+)\[\]',base)
             item=next((x for x in match.groups() if x),None) if match else None
             target=item or base
@@ -423,6 +581,7 @@ class Reader:
                 else:
                     child=self.resolve(target,origin)
                     if child and child['kind'] == 'enum':
+                        enum_evidence.append(self.span(child,child['line']))
                         enum_base = values(child['header']).removeprefix(':').strip() or 'int'
                         if enum_base not in {'byte','sbyte','short','ushort','int','uint','long','ulong'}:
                             self.gap(child['path'],child['line'],'Unsupported enum underlying type requires investigation')
@@ -433,22 +592,31 @@ class Reader:
                     else:
                         members=self.fields(child,dialect,(*seen,model['qualified'])) if child else []
                         info={'kind':'object','name':shape,'open':not bool(members)}
+            if config.get('conversion'):
+                child = self.resolve(base, origin) if base.removeprefix('System.') not in SCALARS else None
+                if child and child['kind'] == 'enum':
+                    shape = config['conversion']; info = {'kind':'scalar','name':shape,'optional':optional}
+                else: self.gap(model['path'],prop['line'],'String conversion source is not a resolved enum; stored representation requires investigation')
             if item: info={'kind':'array','name':shape,'items':[info], 'open':info.get('open',False)}
             if members: info['members']=[{'name':member['name']} for member in members]
             field={'name':name,'line':prop['line'],'shape':shape,'type':info,'optional':optional,
-                   'evidence':[self.span(origin,prop['line'])], 'members':members}
+                   'evidence':[self.span(origin,prop['line']), *enum_evidence], 'members':members}
+            if mapping:
+                for ref in mapping['refs']:
+                    path, line = ref.rsplit(':', 1)
+                    field['evidence'].append(self.span({'path':path}, int(line)))
             if any(f['name']==name for f in out): self.gap(model['path'],prop['line'],'Multiple properties map to the same stored name')
             else: out.append(field)
         if not out: self.gap(model['path'],model['line'],'Mapped model has no extracted persisted fields')
         return out
 
-    def bind(self, owner, model, table, store, dialect, line, kind):
+    def bind(self, owner, model, table, store, dialect, line, kind, mapping=None):
         if not model or not RESOURCE.fullmatch(table):
             self.gap(owner['path'],line,'Table/collection name is dynamic or unsupported'); return
         identity=json.dumps([owner.get('binding_scope', owner['project']),dialect,store],sort_keys=True)
         key='dotnet_'+dialect+'_'+hashlib.sha256(identity.encode()).hexdigest()[:16]
-        fields=self.fields(model,dialect)
-        refs=sorted({f"{owner['path']}:{line}",f"{model['path']}:{model['line']}"})
+        fields=self.fields(model,dialect,mapping=mapping)
+        refs=sorted({f"{owner['path']}:{line}",f"{model['path']}:{model['line']}", *(mapping['refs'] if mapping else [])})
         self.relationships.append({'dataset':key,'collection':table,'model':model['qualified'],'kind':kind,
                                    'schema_path':model['path'],'identity_basis':'modeled_reference','physical_identity':'unverified','refs':refs})
         if fields:
@@ -615,12 +783,15 @@ class Reader:
                             if len(parts)==2 and values(parts[1][:2])=='Schema =' and literal_arg(parts[1][2:]): table=literal_arg(parts[1][2:])+'.'+table
                             else: self.gap(target['path'],target['line'],'Unsupported table attribute arguments')
                     if attr(target['attributes'],'NotMapped') is not None: continue
+                    mapping = self.fluent_mapping(model, target)
+                    if mapping['table']: table = mapping['table']
+                    if mapping['schema'] and '.' not in table: table = mapping['schema'] + '.' + table
                     before=len(self.observations)
-                    self.bind(owner,target,table,store,'sql',prop['line'],'context_entity_table')
+                    self.bind(owner,target,table,store,'sql',prop['line'],'context_entity_table',mapping=mapping)
                     if len(self.observations)>before:
                         self.observations[-1]['binding_refs']+= import_refs + connection_refs
                         self.relationships[-1]['refs'] = sorted(set(self.relationships[-1]['refs'] + import_refs + connection_refs))
-                if any(t.value in {'OnModelCreating','OnModelCreatingPartial'} for t in model['body']):
+                if any(t.value == 'OnModelCreatingPartial' for t in model['body']):
                     self.gap(model['path'],model['line'],'Fluent model configuration may override conventions/attributes; investigate mappings before accepting')
             table=attr(model['attributes'],'DynamoDBTable')
             if table is not None:
@@ -681,7 +852,9 @@ class Reader:
                         self.sql_queries(path,src)
                     if tech in {'mongodb','dynamodb','entity_framework'} and not any(path==o['path'] or any(ref.startswith(path+':') for ref in o['binding_refs']) for o in self.observations):
                         self.gap(path,hit.line,'Persistence usage has no extracted binding; inspect its models, serializer and resource configuration')
-            if words & {'BsonClassMap','ConventionRegistry','IEntityTypeConfiguration','HasConversion','ToTable','TableNamePrefix','TableNameOverride','RegisterTableDefinition'}:
+            inspected = [m for m in self.models if m['path'] == path]
+            fully_inspected = bool(inspected) and all((path,m['qualified']) in self.inspected_configurations for m in inspected)
+            if words & {'BsonClassMap','ConventionRegistry','TableNamePrefix','TableNameOverride','RegisterTableDefinition'} or (not fully_inspected and words & {'IEntityTypeConfiguration','HasConversion','ToTable'}):
                 self.gap(path,1,'Custom mapping, convention or table override requires investigation; declared model names may differ from runtime storage')
 
     def sql_queries(self,path,src):

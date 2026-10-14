@@ -41,8 +41,14 @@ Source-defined base members retain their origin evidence. Simple field-backed ge
 are supported. Identity contexts expose custom user fields provisionally under their model name;
 framework fields and physical table names require source/schema evidence and are not synthesized.
 Partial/generic models, ambiguous or external inheritance, other custom accessors, unsupported attributes, converters, aliases,
-shadowed framework symbols, fluent mappings and custom serialization/convention configuration
-produce gaps. Declared fields can still appear as provisional observations, but a gap is not closed
+shadowed framework symbols and custom serialization/convention configuration produce gaps.
+Explicit `ApplyConfiguration(new T())` registrations support one `IEntityTypeConfiguration<T>`
+per entity: literal `ToTable`/`HasDefaultSchema`/`HasColumnName`, `Ignore`, declared backing fields
+selected by `Property`/`HasField`, explicitly typed shadow properties, simple `OwnsOne` using
+`Navigation_Property` columns, and resolved enum `HasConversion<string>()`. Mapping evidence is
+retained on fields and relationships. Unapplied configurations do not supply mappings. Conditional
+builder statements, multiple configurations, owned callbacks, custom converters and unsupported
+operations remain gaps; relationship/key/index configuration still needs investigation. Declared fields can still appear as provisional observations, but a gap is not closed
 by approving those fields. Investigate the source and extend supported extraction where necessary;
 do not describe unsupported mappings as complete.
 
@@ -65,3 +71,7 @@ handling is outside this feature.
 - [EF Core entity properties](https://learn.microsoft.com/en-us/ef/core/modeling/entity-properties)
 - [MongoDB POCO mappings](https://www.mongodb.com/docs/drivers/csharp/current/serialization/poco/)
 - [DynamoDB .NET mapping attributes](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DeclarativeTagsList.html)
+
+Extraction is only the first validation stage. Fields still need classification, processing-purpose
+and data-flow review, resolution of actual uncertainties, and named-owner acceptance. Successful
+extraction does not validate preserved draft manifests, and acceptance does not close extraction gaps.

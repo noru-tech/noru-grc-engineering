@@ -203,6 +203,79 @@ throw new Exception("target must not run");
         self.put('More.cs', 'class Customer { public string Other { get; set; } }')
         self.assertEqual(self.scan()['relationships'], [])
 
+    def fluent_fixture(self):
+        self.fixture()
+        self.put('src/Entities.cs', self.files['src/Entities.cs'].replace('public int Id', 'private string _token; public Address Address { get; set; } public Status Status { get; set; } public int Id').replace('public DbSet<Item> Items { get; set; }', 'public DbSet<Item> Items { get; set; } protected override void OnModelCreating(ModelBuilder b) { b.HasDefaultSchema("sales"); b.ApplyConfiguration(new ItemConfiguration()); }'))
+        self.put('src/Types.cs', 'namespace Example; public enum Status { Pending, Done } public class Address { public string Street { get; set; } public string City { get; set; } }')
+        self.put('src/Mapping.cs', '''namespace Example;
+class ItemConfiguration : IEntityTypeConfiguration<Item> {
+ public void Configure(EntityTypeBuilder<Item> b) {
+ b.ToTable("items", "sales");
+ b.Ignore(x => x.Id);
+ b.Property(x => x.Email).HasColumnName("email_address");
+ b.Property("_token").HasColumnName("token");
+ b.Property<int>("ParentId");
+ b.OwnsOne(x => x.Address);
+ b.Property(x => x.Status).HasConversion<string>();
+ }
+}''')
+
+    def test_applied_fluent_mapping_resolves_storage_shape_and_evidence(self):
+        self.fluent_fixture()
+        report = self.scan()
+        self.assertEqual(report['gaps'], [])
+        for table in report['tables']:
+            self.assertEqual(table['name'], 'sales.items')
+            fields = {f['name']: f for f in table['fields']}
+            self.assertEqual(set(fields), {'Address_Street','Address_City','Status','email_address','token','ParentId'})
+            self.assertEqual(fields['Status']['type']['name'], 'string')
+            self.assertTrue(any(e['path'] == 'src/Mapping.cs' for e in fields['Status']['evidence']))
+            self.assertEqual(fields['token']['type']['name'], 'string')
+            self.assertEqual(fields['ParentId']['type']['name'], 'int')
+        self.assertTrue(all(any(ref.startswith('src/Mapping.cs:') for ref in r['refs']) for r in report['relationships']))
+        self.put('src/Unused.cs', 'namespace Example; class Unused : IEntityTypeConfiguration<Item> { public void Configure(EntityTypeBuilder<Item> b) { b.ToTable("wrong"); } }')
+        self.assertTrue(all(t['name'] == 'sales.items' for t in self.scan()['tables']))
+
+    def test_fluent_dynamic_conditional_and_custom_conversion_stay_gaps(self):
+        self.fluent_fixture()
+        mapping = self.files['src/Mapping.cs']
+        self.put('src/Mapping.cs', mapping.replace('b.ToTable("items", "sales");','if (flag) { b.ToTable("conditional"); }').replace('.HasConversion<string>()','.HasConversion(new CustomConverter())'))
+        report = self.scan()
+        self.assertFalse(any(t['name'] == 'conditional' for t in report['tables']))
+        self.assertTrue(any('Conditional' in g['reason'] for g in report['gaps']))
+        self.assertTrue(any('Custom conversion' in g['reason'] for g in report['gaps']))
+        self.put('src/Mapping.cs', mapping.replace('b.OwnsOne(x => x.Address);', 'b.OwnsOne(x => x.Address, a => { a.ToTable("addresses"); });'))
+        report = self.scan()
+        self.assertFalse(any(f['name']=='Address_Street' for t in report['tables'] for f in t['fields']))
+        self.assertTrue(any('Unsupported fluent' in g['reason'] for g in report['gaps']))
+        self.put('src/Mapping.cs', mapping.replace('b.Property(x => x.Email)', 'b.Property(x => x.Email'))
+        self.assertTrue(any('Malformed or unsupported fluent' in g['reason'] for g in self.scan()['gaps']))
+
+    def test_fluent_multiple_configurations_do_not_choose_precedence(self):
+        self.fluent_fixture()
+        self.put('src/Entities.cs', self.files['src/Entities.cs'].replace('b.ApplyConfiguration(new ItemConfiguration());', 'b.ApplyConfiguration(new ItemConfiguration()); b.ApplyConfiguration(new OtherConfiguration());'))
+        self.put('src/Other.cs', 'namespace Example; class OtherConfiguration : IEntityTypeConfiguration<Item> { public void Configure(EntityTypeBuilder<Item> b) { b.ToTable("other"); } }')
+        report = self.scan()
+        self.assertTrue(any('Multiple configurations' in g['reason'] for g in report['gaps']))
+        self.assertFalse(any(t['name'] in {'sales.items','sales.other'} for t in report['tables']))
+
+    def test_fluent_fields_reach_canonical_review_without_becoming_accepted(self):
+        self.fluent_fixture()
+        subprocess.run(['git','init','-q',str(self.repo)],check=True)
+        subprocess.run(['git','-C',str(self.repo),'add','.'],check=True)
+        result=subprocess.run(['node',str(SCRIPTS/'collect.mjs'),f'--repo={self.repo}','--output=json'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        derived=json.loads((self.repo/'.noru/.cache/privacy-datamap.derived.json').read_text())
+        import field_review
+        contract=field_review.build_contract({'observation_digest':'fixture'},self.repo,compiler_report={'tables':[],'gaps':[]},derived=derived)
+        rows={row['name']:row for row in contract['fields']}
+        self.assertEqual(set(rows), {'Address_Street','Address_City','Status','email_address','token','ParentId'})
+        self.assertEqual(rows['Status']['type']['name'], 'string')
+        self.assertTrue(all(r['status']=='needs_investigation' for r in contract['fields']))
+        previous = field_review.source_inventory(self.repo)
+        self.put('src/Mapping.cs', self.files['src/Mapping.cs'].replace('email_address','email'))
+        self.assertNotEqual(previous, field_review.source_inventory(self.repo))
+
     def test_mongo_nested_members_and_receiver_scopes(self):
         self.put('App.csproj','<Project />')
         self.put('Models.cs','''using MongoDB.Driver;
