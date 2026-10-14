@@ -103,7 +103,60 @@ function approversOf(change) {
  * Returns [{ rule, detail }]. The collector proposes these; a person dispositions them; the
  * validator refuses a manifest where one is present and nobody owns it.
  */
+/** acc rule -> this piece's rule, for the separations acc decides (export/acc.mjs). */
+export const ACC_RULES = [
+  ["ACC002", "approver_is_author"],
+  ["ACC003", "merged_without_independent_approval"],
+  ["ACC001", "agent_change_without_independent_human"],
+  ["ACC005", "bypass_used"],
+];
+
+/**
+ * The separations acc decided for one change. A `fail` is a violation; an `unknown` is one too,
+ * because acc could not establish that the separation held and a person has to say whether it
+ * did. A rule acc did not assess is decided here, as before.
+ */
+function accViolations(change) {
+  const verdicts = change.acc?.verdicts ?? {};
+  const out = [];
+  for (const [code, rule] of ACC_RULES) {
+    const status = verdicts[code];
+    if (status === "fail") {
+      out.push({ rule, detail: `acc ${code} failed for ${change.acc.change_id}` });
+    } else if (status === "unknown") {
+      out.push({
+        rule,
+        detail: `acc could not establish ${code} for ${change.acc.change_id}; say whether it held`,
+      });
+    }
+  }
+  return out;
+}
+
 export function violationsOf(change) {
+  if (change.acc) {
+    const decided = new Set(
+      ACC_RULES.filter(([code]) => change.acc.verdicts?.[code] !== undefined).map(([, r]) => r),
+    );
+    // deployer_is_author is never acc's to decide; any other rule acc did not assess (its policy
+    // disabled it) is decided here, as before.
+    const own = ownViolationsOf(change).filter((v) => !decided.has(v.rule));
+    const order = [
+      "approver_is_author",
+      "merged_without_independent_approval",
+      "deployer_is_author",
+      "agent_change_without_independent_human",
+      "bypass_used",
+    ];
+    return [...accViolations(change), ...own].sort(
+      (a, b) => order.indexOf(a.rule) - order.indexOf(b.rule),
+    );
+  }
+  return ownViolationsOf(change);
+}
+
+/** This piece's own arithmetic, for a change acc did not decide. */
+function ownViolationsOf(change) {
   const out = [];
   const author = normalizePerson(change.authored_by);
   const operator = normalizePerson(change.agent_operator);
@@ -208,6 +261,7 @@ export function collectFacts(repo) {
       ...(change.deployed_on ? { deployed_on: change.deployed_on } : {}),
       ...(change.artifact_digest ? { artifact_digest: change.artifact_digest } : {}),
       ...(change.bypass ? { bypass: change.bypass } : {}),
+      ...(change.acc ? { acc: change.acc } : {}),
       violations: violationsOf(change),
       ref,
     };
@@ -220,6 +274,11 @@ export function collectFacts(repo) {
     piece: PIECE,
     generated_by: GENERATED_BY,
     forge: events.forge ?? "other",
+    // Recorded only for an acc-sourced history, so manifests built from a forge export keep the
+    // derived digest they were signed against.
+    ...(events.source?.input === "agent-change-control"
+      ? { input: events.source.input, acc_manifest_sha256: events.source.manifest_sha256 }
+      : {}),
     window: events.window ?? null,
     settings: events.settings ?? null,
     settings_ref: `${EVENTS_REL}:1`,
@@ -296,6 +355,9 @@ export function buildSkeleton(derived, provenance) {
     source: {
       ...provenance,
       forge: derived.forge,
+      ...(derived.input
+        ? { input: derived.input, acc_manifest_sha256: derived.acc_manifest_sha256 }
+        : {}),
       derived_digest: digestOf(derived),
     },
     window: {
@@ -357,6 +419,7 @@ export function buildSkeleton(derived, provenance) {
       "deployed_on",
       "artifact_digest",
       "bypass",
+      "acc",
     ]),
     ...(change.violations.length > 0
       ? {

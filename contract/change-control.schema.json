@@ -118,6 +118,18 @@
         "derived_digest": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
+        },
+        "input": {
+          "description": "Where the change history came from: the forge exporter, or an agent-change-control manifest (scripts/export/acc.mjs), whose verdicts then decide the separations acc assesses.",
+          "enum": [
+            "forge-export",
+            "agent-change-control"
+          ]
+        },
+        "acc_manifest_sha256": {
+          "description": "SHA-256 of the acc manifest the history came from, so drift detection covers the evidence underneath.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
         }
       }
     },
@@ -334,6 +346,59 @@
         },
         "needs_review": {
           "type": "boolean"
+        },
+        "acc": {
+          "description": "acc's verdicts on this change for the rules it decides here: ACC002 approver_is_author, ACC003 merged_without_independent_approval, ACC001 agent_change_without_independent_human, ACC005 bypass_used. A fail or unknown is a violation.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "change_id",
+            "verdicts"
+          ],
+          "properties": {
+            "change_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "verdicts": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "ACC001": {
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "unknown",
+                    "not_applicable"
+                  ]
+                },
+                "ACC002": {
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "unknown",
+                    "not_applicable"
+                  ]
+                },
+                "ACC003": {
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "unknown",
+                    "not_applicable"
+                  ]
+                },
+                "ACC005": {
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "unknown",
+                    "not_applicable"
+                  ]
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -380,7 +445,8 @@
             "force_push",
             "branch_protection_disabled",
             "required_checks_skipped",
-            "environment_approval_skipped"
+            "environment_approval_skipped",
+            "ruleset_bypass"
           ]
         },
         "by": {
