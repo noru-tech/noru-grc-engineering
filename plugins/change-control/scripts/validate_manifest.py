@@ -373,7 +373,10 @@ QUEUE_KEYS = {"fetched_at", "via", "controls"}
 QUEUE_CONTROL_KEYS = {"control_id", "display_id", "name", "unmet_evidence_items"}
 EVIDENCE_ITEM_KEYS = {"id", "title", "type"}
 MAPPING_KEYS = {"control_id", "evidence_item_ids"}
-SOURCE_KEYS = {"slug", "commit_sha", "branch", "generated_by", "forge", "derived_digest"}
+SOURCE_KEYS = {
+    "slug", "commit_sha", "branch", "generated_by", "forge", "input", "acc_manifest_sha256",
+    "derived_digest",
+}
 WINDOW_KEYS = {"opens_on", "closes_on", "complete"}
 CONTROLS_KEYS = {
     "default_branch", "observed_on", "protected", "required_approvals", "dismiss_stale_reviews",
@@ -384,7 +387,7 @@ ENVIRONMENT_KEYS = {"name", "required_reviewers", "prevent_self_review"}
 CHANGE_KEYS = {
     "key", "kind", "title", "authored_by", "author_kind", "agent_operator", "opened_on",
     "approvals", "merged_by", "merged_on", "deployed_by", "deployed_on", "artifact_digest",
-    "bypass", "exceptions", "refs", "interpretation", "needs_review",
+    "bypass", "exceptions", "refs", "interpretation", "needs_review", "acc",
 }
 APPROVAL_KEYS = {"by", "state", "reviewed_on"}
 BYPASS_KEYS = {"used", "kind", "by", "reason"}
@@ -605,6 +608,15 @@ def check_source(rep, doc, vocab):
         rep.err("source", "missing required `source` block")
         return
     check_unknown_keys(rep, "source", src, SOURCE_KEYS)
+    if src.get("input") not in (None, "forge-export", "agent-change-control"):
+        rep.err("source.input", f"'{src.get('input')}' is not forge-export or agent-change-control")
+    if src.get("input") == "agent-change-control" and not re.fullmatch(
+        r"[0-9a-f]{64}", str(src.get("acc_manifest_sha256", ""))
+    ):
+        rep.err(
+            "source.acc_manifest_sha256",
+            "missing — a manifest built from acc records which acc manifest, so drift covers it",
+        )
     for field in ("slug", "commit_sha", "branch", "generated_by"):
         if not src.get(field) or not isinstance(src.get(field), str):
             rep.err(
@@ -717,8 +729,51 @@ def _person(value):
     return value.strip().lower() if isinstance(value, str) else None
 
 
+# acc rule -> this piece's rule, for the separations acc decides (scripts/export/acc.mjs).
+ACC_RULES = [
+    ("ACC002", "approver_is_author"),
+    ("ACC003", "merged_without_independent_approval"),
+    ("ACC001", "agent_change_without_independent_human"),
+    ("ACC005", "bypass_used"),
+]
+ACC_STATUSES = {"pass", "fail", "unknown", "not_applicable"}
+RULE_ORDER = [
+    "approver_is_author",
+    "merged_without_independent_approval",
+    "deployer_is_author",
+    "agent_change_without_independent_human",
+    "bypass_used",
+]
+
+
 def violations_of(change):
-    """Every separation that did not hold for one change, in a fixed order."""
+    """Every separation that did not hold for one change, in a fixed order.
+
+    A change carrying acc's verdicts (`acc`) takes the rules acc assessed from them: a `fail` or
+    an `unknown` is a violation, because acc could not establish that the separation held. The
+    rest, and always deployer_is_author, are this piece's own arithmetic. Mirrors collect.mjs.
+    """
+    acc = change.get("acc")
+    if not isinstance(acc, dict):
+        return _own_violations_of(change)
+    verdicts = acc.get("verdicts") if isinstance(acc.get("verdicts"), dict) else {}
+    decided = {rule for code, rule in ACC_RULES if code in verdicts}
+    out = []
+    for code, rule in ACC_RULES:
+        status = verdicts.get(code)
+        if status == "fail":
+            out.append((rule, f"acc {code} failed for {acc.get('change_id')}"))
+        elif status == "unknown":
+            out.append((
+                rule,
+                f"acc could not establish {code} for {acc.get('change_id')}; say whether it held",
+            ))
+    out.extend(v for v in _own_violations_of(change) if v[0] not in decided)
+    return sorted(out, key=lambda v: RULE_ORDER.index(v[0]))
+
+
+def _own_violations_of(change):
+    """This piece's own arithmetic, for a change acc did not decide."""
     out = []
     author = _person(change.get("authored_by"))
     operator = _person(change.get("agent_operator"))
@@ -939,6 +994,22 @@ def check_changes(rep, doc, vocab, window_close, counts):
                 f"{opened} falls outside the window, which closed on {window_close}",
             )
 
+        acc = change.get("acc")
+        if acc is not None:
+            if not isinstance(acc, dict) or set(acc) - {"change_id", "verdicts"}:
+                rep.err(f"{path}.acc", "must be a mapping of change_id and verdicts")
+            else:
+                if not isinstance(acc.get("change_id"), str) or not acc.get("change_id"):
+                    rep.err(f"{path}.acc.change_id", "missing — name the acc change these verdicts are for")
+                verdicts = acc.get("verdicts")
+                if not isinstance(verdicts, dict):
+                    rep.err(f"{path}.acc.verdicts", "must be a mapping of acc rule to status")
+                else:
+                    for code, status in verdicts.items():
+                        if code not in dict(ACC_RULES):
+                            rep.err(f"{path}.acc.verdicts.{code}", f"'{code}' is not a rule this piece reads from acc")
+                        elif status not in ACC_STATUSES:
+                            rep.err(f"{path}.acc.verdicts.{code}", f"'{status}' is not an acc status")
         bypass = change.get("bypass")
         if bypass is not None:
             if not isinstance(bypass, dict):

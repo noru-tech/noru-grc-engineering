@@ -4478,6 +4478,106 @@ def test_scaffold_template_scans_what_ci_checks_out(results, tmp):
         )
 
 
+def test_change_control_reads_acc(results, tmp):
+    """An acc manifest can stand in for the forge exporter, and decides what acc decides.
+
+    The fixture repository's acc manifest was written by acc itself, from the same five changes as
+    its forge export. Both paths must find the same violations, except one acc is right to be
+    stricter about: an agent's change approved only by the person who ran the agent is a
+    self-approval with no independent approval, not just an agent change without a human.
+    """
+    piece = PLUGINS / "change-control"
+    export = piece / "scripts" / "export" / "acc.mjs"
+    fixture = ROOT / "tests" / "fixture-repo"
+    manifest = fixture / ".noru" / ".cache" / "acc-manifest.json"
+
+    def facts(repo):
+        script = (
+            f"import {{ collectFacts }} from {json.dumps(str(piece / 'scripts' / 'collect.mjs'))};\n"
+            f"console.log(JSON.stringify(collectFacts({json.dumps(str(repo))})));\n"
+        )
+        done = subprocess.run(
+            ["node", "--input-type=module", "-e", script], capture_output=True, text=True, check=False
+        )
+        return json.loads(done.stdout) if done.returncode == 0 else None
+
+    def rules(f):
+        return {c["key"]: [v["rule"] for v in c["violations"]] for c in f["changes"]}
+
+    for label, with_forge in (("with the forge export", True), ("from acc alone", False)):
+        repo = pathlib.Path(tmp) / f"acc-{int(with_forge)}"
+        shutil.copytree(fixture, repo)
+        out = repo / ".noru" / ".cache" / "change-events.json"
+        args = ["node", str(export), f"--manifest={manifest}", f"--out={out}", "--output=json", "--quiet"]
+        if with_forge:
+            args.append(f"--forge-export={fixture / '.noru' / '.cache' / 'change-events.json'}")
+        else:
+            out.unlink()
+        done = subprocess.run(args, capture_output=True, text=True, check=False)
+        if not results.check(f"[change-control] acc export runs {label}", done.returncode == 0, done.stderr[:300]):
+            continue
+        got = facts(repo)
+        results.check(
+            f"[change-control] an acc-sourced history records its manifest {label}",
+            got["input"] == "agent-change-control"
+            and got["acc_manifest_sha256"] == hashlib.sha256(manifest.read_bytes()).hexdigest(),
+            {k: got.get(k) for k in ("input", "acc_manifest_sha256")},
+        )
+        expected = {
+            "pr-1041": [],
+            "pr-1042": ["approver_is_author", "merged_without_independent_approval"]
+            + (["deployer_is_author"] if with_forge else []),
+            "pr-1043": ["merged_without_independent_approval"]
+            + (["deployer_is_author"] if with_forge else []) + ["bypass_used"],
+            "pr-1044": [
+                "approver_is_author", "merged_without_independent_approval",
+                "agent_change_without_independent_human",
+            ],
+            "pr-1045": [],
+        }
+        results.check(
+            f"[change-control] acc decides the separations it assesses {label}",
+            rules(got) == expected,
+            rules(got),
+        )
+        if not with_forge:
+            results.check(
+                "[change-control] without a forge export, nothing claims a deployment",
+                all("deployed_by" not in c for c in got["changes"]) and got["settings"] is None,
+                [c.get("deployed_by") for c in got["changes"]],
+            )
+
+    forge = rules(facts(fixture))
+    acc = rules(facts(pathlib.Path(tmp) / "acc-1"))
+    differ = sorted(k for k in forge if forge[k] != acc[k])
+    results.check(
+        "[change-control] the forge and acc paths agree on the fixture, except where acc is stricter",
+        differ == ["pr-1044"]
+        and set(forge["pr-1044"]) < set(acc["pr-1044"]),
+        {k: (forge[k], acc[k]) for k in differ},
+    )
+    results.check(
+        "[change-control] a forge-export history keeps its derived facts unchanged",
+        "input" not in facts(fixture),
+        "input recorded for a forge export",
+    )
+
+    bad = pathlib.Path(tmp) / "not-acc.json"
+    for content, code, label in (
+        ("version: 0.4\n", 1, "a YAML manifest is refused with a hint"),
+        (json.dumps({"version": "0.2", "events": {}, "assessments": []}), 1, "an ACP version it does not read is refused"),
+        (json.dumps({"hello": "world"}), 1, "something that is not an acc manifest is refused"),
+    ):
+        bad.write_text(content, encoding="utf-8")
+        done = subprocess.run(
+            ["node", str(export), f"--manifest={bad}", f"--out={pathlib.Path(tmp) / 'x.json'}"],
+            capture_output=True, text=True, check=False,
+        )
+        results.check(f"[change-control] {label}", done.returncode == code, done.stderr[:200])
+    done = subprocess.run(["node", str(export)], capture_output=True, text=True, check=False)
+    results.check("[change-control] acc export without --manifest is a usage error", done.returncode == 2, done.stderr[:200])
+
+
 def test_change_control_rules_agree_across_languages(results, tmp):
     """The segregation rules are implemented twice, and two implementations of one rule drift.
 
@@ -4549,6 +4649,37 @@ def test_change_control_rules_agree_across_languages(results, tmp):
                 "authored_by": "a@example.com", "author_kind": "human",
                 "approvals": [{"by": "b@example.com", "state": "approved"}],
                 "bypass": {"used": True, "kind": "force_push"},
+            },
+        ),
+        (
+            "acc decides: an operator approved its own agent's change",
+            {
+                "authored_by": "bot@example.com", "author_kind": "agent",
+                "agent_operator": "a@example.com",
+                "approvals": [{"by": "a@example.com", "state": "approved"}],
+                "deployed_by": "bot@example.com", "bypass": {"used": False},
+                "acc": {"change_id": "github:o/r:pr:1", "verdicts": {
+                    "ACC001": "fail", "ACC002": "fail", "ACC003": "fail", "ACC005": "pass"}},
+            },
+        ),
+        (
+            "acc decides: unknown is a violation, pass is not",
+            {
+                "authored_by": "a@example.com", "author_kind": "human",
+                "approvals": [{"by": "a@example.com", "state": "approved"}],
+                "bypass": {"used": False},
+                "acc": {"change_id": "github:o/r:pr:2", "verdicts": {
+                    "ACC001": "not_applicable", "ACC002": "pass", "ACC003": "unknown"}},
+            },
+        ),
+        (
+            "acc did not assess ACC005: the recorded bypass decides",
+            {
+                "authored_by": "a@example.com", "author_kind": "human",
+                "approvals": [{"by": "b@example.com", "state": "approved"}],
+                "bypass": {"used": True, "kind": "force_push"},
+                "acc": {"change_id": "github:o/r:pr:3", "verdicts": {
+                    "ACC001": "not_applicable", "ACC002": "pass", "ACC003": "pass"}},
             },
         ),
     ]
@@ -4942,6 +5073,7 @@ def main(argv):
             test_digest_ignores_the_collectors_own_version(results, tmp)
             test_scaffold_template_scans_what_ci_checks_out(results, tmp)
             test_change_control_rules_agree_across_languages(results, tmp)
+            test_change_control_reads_acc(results, tmp)
             test_change_control_export_survives_a_forbidden_setting(results, tmp)
             test_iac_never_copies_the_line(results, tmp)
             test_iac_identity_survives_a_move(results, tmp)
