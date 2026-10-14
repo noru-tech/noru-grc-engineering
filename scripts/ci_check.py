@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one piece headless: scan -> validate -> expiry -> policy -> (diff -> publish preparation).
+"""Run one piece headless: scan -> validate -> expiry -> policy -> (state -> diff -> push).
 
 Standard library only, and by default no network and no credential — that is the whole design
 constraint. A fork pull request has no secrets, so the checks that matter most on a pull request
@@ -15,28 +15,32 @@ have to be computable from the repository alone. Two of them are:
      the committed privacy baseline does not permit. The baseline is a floor pinned from Noru so
      this stays offline; Noru is the truth. See scripts/check_policy.py.
 
-The `diff` and publication half genuinely needs Noru, so it is opt-in, and when the inputs it needs
-are absent it is reported as skipped rather than failed. REST-backed pieces can publish from this
-runner. MCP-backed pieces cannot: their push entrypoint emits the reviewed calls, but only an
-authenticated MCP host can execute them. A gate that breaks on every fork pull request gets deleted
-in a week.
+The `state`, `diff` and publication half genuinely needs Noru, so it is opt-in, and when the inputs
+it needs are absent it is reported as skipped rather than failed. With NORU_API_KEY present,
+`state` builds the snapshot from the read tools the piece declares (scripts/mcp_exec.mjs state),
+and `push` runs the piece's own confirmed :push and then, for an MCP-backed piece, executes exactly
+the calls it emitted (scripts/mcp_exec.mjs exec). The push is reported as written only when the
+executor's receipt says every call succeeded. A gate that breaks on every fork pull request gets
+deleted in a week.
 
 This file is driven entirely by `plugins/<piece>/piece.json` — entrypoints, artifact path, exit
 codes. A piece scaffolded tomorrow works here with no change to this file, and there is a test that
 says so.
 
 Credentials: NORU_API_KEY is never read, printed or written by this script. Its *presence* decides
-whether the push step can run; its value is passed through the process environment to the piece's
-own push entrypoint, which reads it at the point of use. Every step that does not need it is run
+whether the state and push steps can run; its value is passed through the process environment to
+the one child that sends it (the REST piece's own push entrypoint, or scripts/mcp_exec.mjs), which
+reads it at the point of use. The piece's MCP :push, which only writes a call list, never gets it. Every step that does not need it is run
 with it removed from the child environment, and everything captured from a child process is passed
 through redact() before it can reach stdout or the report.
 
 Usage:
     python3 scripts/ci_check.py --piece=<name> [--repo=<path>] [--plugins=<dir>]
-        [--mode=gate|warn] [--steps=scan,validate,expiry,policy,diff,push|all]
+        [--mode=gate|warn] [--steps=scan,validate,expiry,policy,state,diff,push|all]
         [--as-of=YYYY-MM-DD] [--warn-within-days=N] [--max-age-days=N]
         [--fail-on=<kinds>|none] [--baseline=<path>] [--base-ref=<ref>] [--gate-on-new]
-        [--state=<path>]
+        [--state=<path>] [--write-reviewed-plan=<path>]
+        [--reviewed-plan=<path> --acc-manifest=<path> --publish-workflow=<path>]
         [--on-missing-prerequisite=skip|fail] [--report=<path.json>]
         [--output=json|text] [--quiet]
 
@@ -77,8 +81,10 @@ from check_policy import (  # noqa: E402
     parse_document as parse_manifest_text,
 )
 from finding_docs import see as see_finding_docs  # noqa: E402
+import reviewed_plan  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+MCP_EXEC = pathlib.Path(__file__).resolve().parent / "mcp_exec.mjs"
 
 EXIT_OK = 0
 EXIT_MIXED = 1
@@ -89,7 +95,7 @@ EXIT_INVALID = 5
 EXIT_TOOLING = 6
 EXIT_POLICY = 7
 
-ALL_STEPS = ("scan", "validate", "expiry", "policy", "diff", "push")
+ALL_STEPS = ("scan", "validate", "expiry", "policy", "state", "diff", "push")
 DEFAULT_STEPS = ("scan", "validate", "expiry", "policy")
 
 FINDING_KINDS = ("drift", "invalid", "dangling_ref", "coverage") + EXPIRY_KINDS + POLICY_KINDS
@@ -125,10 +131,12 @@ IDENTITY_FIELDS = ("key", "file", "id", "name")
 
 USAGE = (
     "usage: ci_check.py --piece=<name> [--repo=<path>] [--plugins=<dir>] [--mode=gate|warn]\n"
-    "                   [--steps=scan,validate,expiry,policy,diff,push|all] [--as-of=YYYY-MM-DD]\n"
+    "                   [--steps=scan,validate,expiry,policy,state,diff,push|all]\n"
+    "                   [--as-of=YYYY-MM-DD]\n"
     "                   [--warn-within-days=N] [--max-age-days=N] [--fail-on=<kinds>|none]\n"
     "                   [--baseline=<path>] [--base-ref=<ref>] [--gate-on-new]\n"
-    "                   [--state=<path>]\n"
+    "                   [--state=<path>] [--write-reviewed-plan=<path>]\n"
+    "                   [--reviewed-plan=<path> --acc-manifest=<path> --publish-workflow=<path>]\n"
     "                   [--on-missing-prerequisite=skip|fail]\n"
     "                   [--report=<path.json>]\n"
     "                   [--output=json|text] [--quiet]\n"
@@ -562,7 +570,55 @@ def step_scan(report, piece_dir, decl, repo, manifest_path, on_missing_prereq):
     return "tooling"
 
 
-def step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path):
+def renewal_base(repo, artifact, base_ref):
+    """The commit an agent's renewal is judged against, or None when it cannot be read.
+
+    With --base-ref, the merge base, as the policy step uses. Without it, the commit the manifest
+    was changed against: HEAD when the working tree changes it, otherwise HEAD's first parent, which
+    on a push to a protected branch is the branch before the merge.
+    """
+    if git_read(repo, "rev-parse", "--git-dir") is None:
+        return None
+    if base_ref:
+        if git_read(repo, "rev-parse", "--verify", "--quiet", f"{base_ref}^{{commit}}") is None:
+            return None
+        merge_base = git_read(repo, "merge-base", "HEAD", base_ref)
+        return merge_base.strip() if merge_base else None
+    if git_read(repo, "diff", "--quiet", "HEAD", "--", artifact) is None:
+        head = git_read(repo, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+        return head.strip() if head else None
+    parent = git_read(repo, "rev-parse", "--verify", "--quiet", "HEAD^1^{commit}")
+    return parent.strip() if parent else None
+
+
+def renewal_args(piece_dir, decl, repo, base_ref):
+    """--base and --interpretation-policy, both as they stood at the base revision.
+
+    Only for a piece that lets an agent own a claim. Reading the policy from the base means a pull
+    request that widens it is judged by the policy it would replace. A file absent there is passed
+    as an empty one; a base that cannot be read at all is passed as an empty flag, and the
+    validator then refuses every agent-owned claim rather than taking it on trust.
+    """
+    owners = decl.get("interpretation", {}).get("agent_owners")
+    if not owners:
+        return [], None
+    commit = renewal_base(repo, decl["artifact"], base_ref)
+    if commit is None:
+        return ["--base=", "--interpretation-policy="], "unavailable"
+    cache = repo / ".noru" / ".cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    args = []
+    for flag, rel, suffix in (
+        ("--base", decl["artifact"], "base-manifest.yml"),
+        ("--interpretation-policy", owners["policy"], "base-interpretation-policy.yml"),
+    ):
+        target = cache / f"{piece_dir.name}.{suffix}"
+        target.write_text(git_read(repo, "show", f"{commit}:{rel}") or "", encoding="utf-8")
+        args.append(f"{flag}={target}")
+    return args, commit[:12]
+
+
+def step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path, base_ref=None):
     entry = piece_dir / decl["validator"]["entrypoint"]
     if not entry.is_file():
         report.step("validate", "error", detail=f"validator entrypoint {entry} does not exist")
@@ -570,6 +626,8 @@ def step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path):
     if not manifest_path.is_file():
         report.step("validate", "blocked", detail=f"no manifest at {manifest_path}")
         return "blocked"
+    renewal, base = renewal_args(piece_dir, decl, repo, base_ref)
+    judged = {"renewal_base": base} if base else {}
 
     parsed_path.parent.mkdir(parents=True, exist_ok=True)
     # No --as-of is passed, even to a validator that accepts one. Time is checked once, in the
@@ -583,6 +641,7 @@ def step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path):
             f"--emit-parsed={parsed_path}",
             "--output=json",
             "--quiet",
+            *renewal,
         ]
     )
     if failure:
@@ -591,11 +650,11 @@ def step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path):
 
     result = parse_child_json(completed)
     if completed.returncode == 0:
-        report.step("validate", "pass", counts=(result or {}).get("counts"))
+        report.step("validate", "pass", counts=(result or {}).get("counts"), **judged)
         return "ok"
     if completed.returncode == 1 and result is not None:
         errors = result.get("errors") or []
-        report.step("validate", "fail", errors=len(errors))
+        report.step("validate", "fail", errors=len(errors), **judged)
         for error in errors[:MAX_EXPLAINED_ITEMS]:
             report.find(
                 "invalid",
@@ -818,7 +877,51 @@ def step_policy(report, repo, parsed_path, baseline_source, delta=None):
     return "finding" if failing else "ok"
 
 
-def step_diff(report, piece_dir, decl, repo, state_source):
+def step_state(report, decl, repo, plugins, state_source):
+    """Build .noru/.cache/noru-state.json from the read tools the piece declares."""
+    if state_source is not None:
+        report.step("state", "skipped", detail=f"a snapshot was passed with --state={state_source}; it is used as given")
+        return "skipped"
+    declared = decl.get("state") or {}
+    if declared.get("headless") is not True:
+        report.step(
+            "state",
+            "skipped",
+            detail=(
+                "this piece declares no headless snapshot: "
+                + (declared.get("reason") or "piece.json has no state declaration")
+                + " Build it in an authenticated MCP host and pass --state=<path>."
+            ),
+        )
+        return "skipped"
+    # Presence only, as for the push step. The executor reads the value at the point of use.
+    if not os.environ.get("NORU_API_KEY"):
+        report.step(
+            "state",
+            "skipped",
+            detail=(
+                "NORU_API_KEY is not present in the environment, so this job cannot read the "
+                "organization. This is the expected state on a fork pull request."
+            ),
+        )
+        return "skipped"
+    completed, failure = run(
+        ["node", str(MCP_EXEC), "state", f"--piece={decl['piece']}", f"--repo={repo}",
+         f"--plugins={plugins}", "--output=json", "--quiet"],
+        with_api_key=True,
+    )
+    if failure:
+        report.step("state", "error", detail=redact(failure))
+        return "tooling"
+    if completed.returncode != 0:
+        report.step("state", "error", detail=first_error_line(completed) or f"exit {completed.returncode}")
+        return "tooling"
+    result = parse_child_json(completed) or {}
+    report.step("state", "pass", reads=result.get("reads"))
+    return "ok"
+
+
+def step_diff(report, piece_dir, decl, repo, state_source, write_reviewed=None):
     state_path = repo / ".noru" / ".cache" / "noru-state.json"
     if state_source is not None:
         source = pathlib.Path(state_source)
@@ -855,33 +958,87 @@ def step_diff(report, piece_dir, decl, repo, state_source):
         return "tooling"
 
     plan = parse_child_json(completed) or {}
-    report.step("diff", "pass", summary=plan.get("summary"))
+    row = report.step("diff", "pass", summary=plan.get("summary"))
+    if write_reviewed:
+        # The plan a reviewer reads on the pull request, and the digest a publish job will require
+        # of the plan it rebuilds after the merge (docs/ci-mode.md, "Confirmation by a reviewed
+        # plan").
+        try:
+            written = json.loads(plan_path(repo, decl).read_text(encoding="utf-8"))
+            doc = reviewed_plan.document(written)
+            out = pathlib.Path(write_reviewed)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            out.with_suffix(".md").write_text(reviewed_plan.render_markdown(doc), encoding="utf-8")
+        except (OSError, json.JSONDecodeError, reviewed_plan.Refusal) as exc:
+            report.step("diff", "error", detail=f"could not write the reviewed plan: {redact(str(exc))}")
+            return "tooling"
+        row["reviewed_plan"] = {"path": str(out), "digest": doc["digest"]}
     return "ok"
 
 
-def step_push(report, piece_dir, decl, repo, diff_outcome):
-    if diff_outcome != "ok":
-        report.step("push", "skipped", detail="the diff step did not produce a plan, so there is nothing to push")
-        return "skipped"
-    transports = {
-        operation.get("transport") for operation in decl.get("push", {}).get("operations", [])
-    }
-    if "mcp" in transports:
+def plan_path(repo, decl):
+    return repo / ".noru" / ".cache" / f"{decl['piece']}.plan.json"
+
+
+def confirm_reviewed(report, decl, repo, confirm):
+    """Confirmation by a reviewed plan: `ok`, `skipped` (no reviewed plan for this merge) or `refused`."""
+    source = pathlib.Path(confirm["reviewed_plan"])
+    if not source.is_file():
         report.step(
             "push",
             "skipped",
             detail=(
-                "this piece publishes over MCP. Headless CI can create and verify the reviewed "
-                "plan, but it cannot execute MCP calls; run :push in an authenticated MCP host"
+                f"no reviewed plan at {source}: this merge came from a fork, from a direct push, or "
+                "from a pull request whose workflow produced none, so nothing confirms its plan. "
+                "Publish it through the piece's :diff and an explicit confirmation."
             ),
         )
         return "skipped"
-    if transports != {"rest"}:
+    head = git_read(repo, "rev-parse", "HEAD")
+    try:
+        reviewed = json.loads(source.read_text(encoding="utf-8"))
+        acc = json.loads(pathlib.Path(confirm["acc_manifest"]).read_text(encoding="utf-8"))
+        rebuilt = json.loads(plan_path(repo, decl).read_text(encoding="utf-8"))
+        if not any(op.get("effect") != "skip" for op in rebuilt.get("operations") or []):
+            # Nothing to write needs no confirmation: a re-run after the publication, or a merge
+            # whose writes are already in Noru.
+            report.payload["confirmed_by"] = {"reviewed_plan": None, "reason": "nothing to write"}
+            return "ok"
+        if not head:
+            raise reviewed_plan.Refusal("the merge commit cannot be read from the checkout")
+        confirmed = reviewed_plan.verify(
+            reviewed, rebuilt, acc, head.strip(), confirm["publish_workflow"], decl["piece"]
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        report.step("push", "error", detail=f"cannot read the confirmation inputs: {redact(str(exc))}")
+        return "refused"
+    except reviewed_plan.Refusal as refusal:
+        report.step("push", "error", detail=f"not confirmed by a reviewed plan: {refusal}")
+        return "refused"
+    report.payload["confirmed_by"] = {"reviewed_plan": confirmed, "merge_commit": head.strip()}
+    return "ok"
+
+
+def step_push(report, piece_dir, decl, repo, diff_outcome, confirm=None):
+    if diff_outcome != "ok":
+        report.step("push", "skipped", detail="the diff step did not produce a plan, so there is nothing to push")
+        return "skipped"
+    if confirm:
+        confirmation = confirm_reviewed(report, decl, repo, confirm)
+        if confirmation == "skipped":
+            return "skipped"
+        if confirmation == "refused":
+            return "tooling"
+    transports = {
+        operation.get("transport") for operation in decl.get("push", {}).get("operations", [])
+    }
+    if transports not in ({"rest"}, {"mcp"}):
         report.step("push", "error", detail=f"unsupported push transport set: {sorted(transports)}")
         return "tooling"
 
-    # Presence only. The value is never read here; the REST piece's own push entrypoint reads it at
-    # the point of use.
+    # Presence only. The value is never read here; whichever child performs the writes (the REST
+    # piece's own push entrypoint, or scripts/mcp_exec.mjs) reads it at the point of use.
     if not os.environ.get("NORU_API_KEY"):
         report.step(
             "push",
@@ -898,9 +1055,11 @@ def step_push(report, piece_dir, decl, repo, diff_outcome):
         report.step("push", "error", detail=f"push entrypoint {entry} does not exist")
         return "tooling"
 
+    # The piece's own :push makes the confirmed, plan-bound call list. For an MCP piece it writes a
+    # file and nothing else, so it never sees the key; for the REST piece it is the writer.
     completed, failure = run(
         ["node", str(entry), f"--repo={repo}", "--confirm", "--output=json", "--quiet"],
-        with_api_key=True,
+        with_api_key=transports == {"rest"},
     )
     if failure:
         report.step("push", "error", detail=redact(failure))
@@ -909,12 +1068,37 @@ def step_push(report, piece_dir, decl, repo, diff_outcome):
         report.step("push", "error", detail=first_error_line(completed) or f"exit {completed.returncode}")
         return "tooling"
     result = parse_child_json(completed) or {}
-    report.step(
-        "push",
-        "pass",
-        uploaded=result.get("uploaded"),
-        calls=len(result.get("calls", [])) if isinstance(result.get("calls"), list) else None,
+    if transports == {"rest"}:
+        report.step(
+            "push",
+            "pass",
+            uploaded=result.get("uploaded"),
+            calls=len(result.get("calls", [])) if isinstance(result.get("calls"), list) else None,
+        )
+        return "ok"
+
+    completed, failure = run(
+        ["node", str(MCP_EXEC), "exec", f"--piece={decl['piece']}", f"--repo={repo}",
+         f"--plugins={piece_dir.parent}", "--output=json", "--quiet"],
+        with_api_key=True,
     )
+    if failure:
+        report.step("push", "error", detail=redact(failure))
+        return "tooling"
+    executed = parse_child_json(completed) or {}
+    receipt = executed.get("receipt") or str(repo / ".noru" / ".cache" / f"{decl['piece']}.receipt.json")
+    if completed.returncode != 0 or executed.get("ok") is not True:
+        report.step(
+            "push",
+            "error",
+            detail=first_error_line(completed) or f"exit {completed.returncode}",
+            written=executed.get("written"),
+            failed=executed.get("failed"),
+            not_run=executed.get("not_run"),
+            receipt=receipt,
+        )
+        return "tooling"
+    report.step("push", "pass", written=executed.get("written"), receipt=receipt)
     return "ok"
 
 
@@ -1035,6 +1219,10 @@ def parse_args(argv):
         "base_ref": None,
         "gate_on_new": False,
         "state": None,
+        "write_reviewed_plan": None,
+        "reviewed_plan": None,
+        "acc_manifest": None,
+        "publish_workflow": None,
         "on_missing_prerequisite": "skip",
         "report": None,
         "json": False,
@@ -1095,6 +1283,14 @@ def parse_args(argv):
             opts["gate_on_new"] = True
         elif arg.startswith("--state="):
             opts["state"] = arg.split("=", 1)[1]
+        elif arg.startswith("--write-reviewed-plan="):
+            opts["write_reviewed_plan"] = arg.split("=", 1)[1]
+        elif arg.startswith("--reviewed-plan="):
+            opts["reviewed_plan"] = arg.split("=", 1)[1]
+        elif arg.startswith("--acc-manifest="):
+            opts["acc_manifest"] = arg.split("=", 1)[1]
+        elif arg.startswith("--publish-workflow="):
+            opts["publish_workflow"] = arg.split("=", 1)[1]
         elif arg.startswith("--report="):
             opts["report"] = arg.split("=", 1)[1]
         elif arg.startswith("--on-missing-prerequisite="):
@@ -1112,6 +1308,10 @@ def parse_args(argv):
             opts["help"] = True
         else:
             return None, f"unknown option '{arg}'"
+    confirm = ("reviewed_plan", "acc_manifest", "publish_workflow")
+    given = [k for k in confirm if opts[k]]
+    if given and len(given) != len(confirm):
+        return None, "--reviewed-plan, --acc-manifest and --publish-workflow go together"
     return opts, None
 
 
@@ -1191,16 +1391,25 @@ def main(argv):
                 report, piece_dir, decl, repo, manifest_path, opts["on_missing_prerequisite"]
             )
         elif step == "validate":
-            outcome = step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path)
+            outcome = step_validate(
+                report, piece_dir, decl, repo, manifest_path, parsed_path, opts["base_ref"]
+            )
         elif step == "expiry":
             outcome = step_expiry(report, repo, parsed_path, expiry_policy)
         elif step == "policy":
             outcome = step_policy(report, repo, parsed_path, opts["baseline"], delta)
+        elif step == "state":
+            outcome = step_state(report, decl, repo, opts["plugins"].resolve(), opts["state"])
         elif step == "diff":
-            outcome = step_diff(report, piece_dir, decl, repo, opts["state"])
+            outcome = step_diff(report, piece_dir, decl, repo, opts["state"], opts["write_reviewed_plan"])
             diff_outcome = outcome
         else:
-            outcome = step_push(report, piece_dir, decl, repo, diff_outcome)
+            confirm = (
+                {k: opts[k] for k in ("reviewed_plan", "acc_manifest", "publish_workflow")}
+                if opts["reviewed_plan"]
+                else None
+            )
+            outcome = step_push(report, piece_dir, decl, repo, diff_outcome, confirm)
         if outcome == "tooling":
             tooling = True
             break

@@ -96,6 +96,60 @@
         {
           "path": "fixtures/invalid-special-category-horizon.privacy-datamap.yml",
           "expect_message": "may stand for at most"
+        },
+        {
+          "path": "fixtures/invalid-agent-no-operator.privacy-datamap.yml",
+          "expect_message": "missing required `operator`",
+          "agent_case": "no_operator",
+          "args": [
+            "--base=fixtures/valid.privacy-datamap.yml",
+            "--interpretation-policy=fixtures/agent-interpretation-policy.yml"
+          ]
+        },
+        {
+          "path": "fixtures/invalid-agent-team-operator.privacy-datamap.yml",
+          "expect_message": "reads as a team alias",
+          "agent_case": "team_alias_operator",
+          "args": [
+            "--base=fixtures/valid.privacy-datamap.yml",
+            "--interpretation-policy=fixtures/agent-interpretation-policy.yml"
+          ]
+        },
+        {
+          "path": "fixtures/invalid-agent-outside-policy.privacy-datamap.yml",
+          "expect_message": "outside the interpretation policy",
+          "agent_case": "outside_policy",
+          "args": [
+            "--base=fixtures/valid.privacy-datamap.yml",
+            "--interpretation-policy=fixtures/agent-interpretation-policy.yml"
+          ]
+        },
+        {
+          "path": "fixtures/invalid-agent-above-ceiling.privacy-datamap.yml",
+          "expect_message": "an agent's renewal may stand for at most",
+          "agent_case": "above_agent_ceiling",
+          "args": [
+            "--base=fixtures/valid.privacy-datamap.yml",
+            "--interpretation-policy=fixtures/agent-interpretation-policy.yml"
+          ]
+        },
+        {
+          "path": "fixtures/invalid-agent-structure-changed.privacy-datamap.yml",
+          "expect_message": "the structure changed since a person last owned it",
+          "agent_case": "structure_changed",
+          "args": [
+            "--base=fixtures/valid.privacy-datamap.yml",
+            "--interpretation-policy=fixtures/agent-interpretation-policy.yml"
+          ]
+        },
+        {
+          "path": "fixtures/invalid-agent-new-claim.privacy-datamap.yml",
+          "expect_message": "an agent cannot own a new claim",
+          "agent_case": "new_claim",
+          "args": [
+            "--base=fixtures/valid.privacy-datamap.yml",
+            "--interpretation-policy=fixtures/agent-interpretation-policy.yml"
+          ]
         }
       ]
     }
@@ -158,10 +212,21 @@
     ],
     "hardcoded_expectations": false
   },
+  "state": {
+    "headless": false,
+    "reason": "The snapshot leaves `datamap` out entirely when Noru holds nothing for this source, and narrows datasets to this source. Those are decisions about what the tools return, which a fixed list of reads cannot express."
+  },
   "interpretation": {
     "required": true,
     "level": "per_claim",
-    "unattributed": "error"
+    "unattributed": "error",
+    "agent_owners": {
+      "claims": [
+        "renewal"
+      ],
+      "anchor": "structure_digest",
+      "policy": ".noru/interpretation-policy.yml"
+    }
   },
   "ci": {
     "output_json": true,

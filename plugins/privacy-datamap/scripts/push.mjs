@@ -11,6 +11,8 @@
 //   4. emit the exact, ordered tool calls to .noru/.cache/privacy-datamap.calls.json
 //
 // The skill then executes those calls through the MCP client and nothing else.
+// In CI, that client is scripts/mcp_exec.mjs, which executes this file and refuses one that
+// differs from the plan.
 //
 // Usage: node push.mjs [--repo=<path>] --confirm [--output=json|text] [--quiet]
 // Exit codes:

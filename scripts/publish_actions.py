@@ -124,21 +124,31 @@ def source_commit():
 
 
 def runtime_scripts():
-    """Transitive closure of sibling imports from the runtime entrypoints."""
+    """Transitive closure of sibling imports from the runtime entrypoints.
+
+    A Node script a Python entrypoint launches by its file name (ci_check.py runs mcp_exec.mjs) is
+    followed the same way, so the executor cannot be left out of a mirror that calls it.
+    """
     scripts = ROOT / "scripts"
     wanted = list(RUNTIME_ENTRYPOINTS)
     seen = set()
     pattern = re.compile(r"^\s*(?:from\s+(\w+)\s+import|import\s+(\w+))", re.M)
+    launched = re.compile(r"[\"']([\w-]+\.mjs)[\"']")
     while wanted:
         name = wanted.pop()
         if name in seen:
             continue
         seen.add(name)
+        if not name.endswith(".py"):
+            continue
         text = (scripts / name).read_text(encoding="utf-8")
         for match in pattern.finditer(text):
             module = match.group(1) or match.group(2)
             if (scripts / f"{module}.py").is_file():
                 wanted.append(f"{module}.py")
+        for match in launched.finditer(text):
+            if (scripts / match.group(1)).is_file():
+                wanted.append(match.group(1))
     return sorted(seen)
 
 
@@ -593,7 +603,7 @@ def check(output_json, quiet):
         for action, mirror in mirrors.items():
             results.check(
                 f"[{action}] mirror root holds action.yml, README.md, SECURITY.md, DISTRIBUTION.json and the toolkit",
-                all((mirror / name).exists() for name in ("action.yml", "README.md", "SECURITY.md", "DISTRIBUTION.json", "scripts/ci_check.py", "plugins", "contract", "LICENSE")),
+                all((mirror / name).exists() for name in ("action.yml", "README.md", "SECURITY.md", "DISTRIBUTION.json", "scripts/ci_check.py", "scripts/mcp_exec.mjs", "plugins", "contract", "LICENSE")),
                 sorted(p.name for p in mirror.iterdir()),
             )
             # The generated banner always carries a `uses:` line, so the usage example has to be

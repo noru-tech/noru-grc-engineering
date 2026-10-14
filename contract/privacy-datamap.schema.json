@@ -264,6 +264,42 @@
           "type": "string",
           "minLength": 3
         },
+        "owner_kind": {
+          "description": "person (the default) or agent. An agent may only renew a collection exactly as a person signed it at the base revision, under a grant in .noru/interpretation-policy.yml, and the next renewal after an agent's is a person's. Declarations have no structural anchor and stay a person's.",
+          "enum": [
+            "person",
+            "agent"
+          ]
+        },
+        "operator": {
+          "description": "The named person who answers for an agent owner. Never a team alias.",
+          "type": "string",
+          "minLength": 3
+        },
+        "policy_ref": {
+          "description": "The id of the grant in .noru/interpretation-policy.yml the agent acted under.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "renews": {
+          "description": "The person's decision an agent's renewal renews, exactly as it stands at the base revision.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "decided_at"
+          ],
+          "properties": {
+            "owner": {
+              "type": "string",
+              "minLength": 3
+            },
+            "decided_at": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          }
+        },
         "decided_at": {
           "type": "string",
           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
@@ -281,6 +317,45 @@
           "items": {
             "$ref": "#/$defs/ref"
           }
+        }
+      },
+      "if": {
+        "properties": {
+          "owner_kind": {
+            "const": "agent"
+          }
+        },
+        "required": [
+          "owner_kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "operator",
+          "policy_ref",
+          "renews",
+          "expires_at"
+        ]
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "operator"
+              ]
+            },
+            {
+              "required": [
+                "policy_ref"
+              ]
+            },
+            {
+              "required": [
+                "renews"
+              ]
+            }
+          ]
         }
       }
     },
@@ -565,7 +640,24 @@
           }
         },
         "interpretation": {
-          "$ref": "#/$defs/interpretation"
+          "description": "A declaration has no structural anchor, so its owner is always a person.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/interpretation"
+            },
+            {
+              "not": {
+                "properties": {
+                  "owner_kind": {
+                    "const": "agent"
+                  }
+                },
+                "required": [
+                  "owner_kind"
+                ]
+              }
+            }
+          ]
         },
         "needs_review": {
           "type": "boolean"

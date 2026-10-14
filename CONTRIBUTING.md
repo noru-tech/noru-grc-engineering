@@ -119,6 +119,9 @@ python3 scripts/test_idempotency.py    # a second push is a no-op
 python3 scripts/contract_test.py       # every plugin satisfies requirements 1-9
 python3 scripts/test_privacy_ci.py     # provider-neutral privacy gate and REST publisher
 python3 scripts/test_ci_mode.py        # CI mode fails on drift and on an expired interpretation
+python3 scripts/test_mcp_exec.py       # headless state and MCP execution against a loopback server
+python3 scripts/test_reviewed_plan.py  # a merge publishes exactly the plan its pull request reviewed
+python3 scripts/test_agent_renewals.py # an agent may renew a person's unchanged claim, nothing else
 python3 scripts/test_repo_enforcement.py # enforcement ratchet, action and GitHub adapter safety
 python3 scripts/publish_actions.py --check # each action runs from its Marketplace mirror layout
 git diff --check

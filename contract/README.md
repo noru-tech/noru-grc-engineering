@@ -45,10 +45,10 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
 | 2 | A **collector** producing a typed, human-reviewable, git-committable manifest at `.noru/<piece>.yml`. Deterministic. No network. A piece may also declare an offline deterministic reconciler for comparing current facts with an accepted local baseline. | `check_item_2` — `artifact` matches `^\.noru/`, collector source contains no socket-opening API, and the collector is run twice on a fixture repo and its derived output diffed byte for byte. A declared reconciler is also run twice and its actions compared. Any path declared in the optional `outputs[]` must appear in the piece README and must not be the manifest itself |
 | 3 | A **validator**: stdlib only, no installs, no network, bundled vocabulary, "did you mean …?" hints, exit codes `0` valid / `1` invalid / `2` usage | `check_item_3` — the validator is executed against every declared fixture: valid → 0, each invalid → 1 *and* the expected message, no argument → 2. Imports are checked against the stdlib list |
 | 4 | A **push** that is *one* idempotent operation carrying `slug` + `commitSha` + `branch` — never an unkeyed fan-out of 50 creates | `check_item_4` — every declared operation has an idempotency key, `verified_at` cites the public documentation the behaviour was read from, `client_probe` operations must record what is undocumented, and `keyed_upsert` mode must describe the single operation it would collapse into |
-| 5 | **`:diff` before `:push`** — show what would change in Noru; writes need explicit confirmation | `check_item_5` — the push entrypoint is executed three ways and each refusal is a different exit code: no plan at all → `1`, a plan bound to different manifest bytes → `1` even with `--confirm`, a fresh plan with no `--confirm` → `2`. `1` says the plan is missing or stale and `:diff` has to run again; `2` says a human has not agreed to this one |
+| 5 | **`:diff` before `:push`** — show what would change in Noru; writes need explicit confirmation | `check_item_5` — the push entrypoint is executed three ways and each refusal is a different exit code: no plan at all → `1`, a plan bound to different manifest bytes → `1` even with `--confirm`, a fresh plan with no `--confirm` → `2`. `1` says the plan is missing or stale and `:diff` has to run again; `2` says a human has not agreed to this one. In CI, `scripts/test_reviewed_plan.py` proves a merge confirms only the plan its pull request reviewed: a failing or missing acc verdict, a plan from another workflow or one the pull request changed, an unchanged manifest, and a rebuilt plan that differs are each refused before anything is written |
 | 6 | Read-only by default; least-privilege scopes declared in the piece's README | `check_item_6` — declared scopes are real Noru scopes, and every one appears in the piece README's Scopes table |
-| 7 | CI-friendly: declared generic validate/drift/watch metadata, `--output=json --quiet`, documented exit codes, no TTY dependency | `check_item_7` — declarations match the trusted entrypoints, which are executed with `--output=json --quiet` and must emit JSON |
-| 8 | Every claim carries an **interpretation block**: `owner`, `decided_at`, `expires_at`, `rationale`, plus the `refs[]` (`file:line`) that produced it. Unattributed claims are a validator **error**, not a warning | `check_item_8` — a generated manifest with one interpretation block stripped must make the validator exit 1, and the message must name the missing field |
+| 7 | CI-friendly: declared generic validate/drift/watch metadata, `--output=json --quiet`, documented exit codes, no TTY dependency, and a `state` declaration — the read tools a headless `:diff` needs, or why a person has to build the snapshot | `check_item_7` — declarations match the trusted entrypoints, which are executed with `--output=json --quiet` and must emit JSON. `piece.schema.json` requires `state`, and `test_mcp_exec.py` checks that every declared read fills a key the piece's diff reads |
+| 8 | Every claim carries an **interpretation block**: `owner`, `decided_at`, `expires_at`, `rationale`, plus the `refs[]` (`file:line`) that produced it. Unattributed claims are a validator **error**, not a warning | `check_item_8` — a generated manifest with one interpretation block stripped must make the validator exit 1, and the message must name the missing field. A piece that declares `interpretation.agent_owners` must ship an invalid fixture for each way an agent's claim is refused: no operator, a team alias as operator, outside the policy, above the agent ceiling, a changed structure, a new claim. `change-control`, `audit-pack` and `review-signoff` are executed with an agent owner and must refuse it |
 | 9 | A piece **works Noru's queue, it does not invent one** | `check_item_9` — `queue.hardcoded_expectations` is `false`, `queue.source` names only MCP tools that exist, and no shipped plugin file outside `fixtures/` contains a catalogue-shaped evidence-item or control id |
 
 ### On requirement 4, honestly
@@ -198,7 +198,34 @@ given for, whatever date is written next to it. So `privacy-datamap` measures it
 `decided_at` — the plain reading, "how long since a person last looked" — and is the only piece that
 can do that without the objection applying.
 
-`owner` must be a person. A team alias cannot be asked what it was thinking.
+`owner` must be someone who can be asked what they were thinking. That is a person, or, where a
+piece allows it, an agent whose `operator` is a named person, acting within the repository's
+committed interpretation policy. A team alias cannot be asked anything and is always invalid. An
+agent may only renew a claim the piece anchors to a structure that has not changed since a person
+last owned it; a claim about something new or changed is a person's to make.
+
+That rule has one taker today, `privacy-datamap`, because it is the one piece with a structural
+anchor. Its `piece.json` declares `interpretation.agent_owners`, and its validator enforces the
+rest offline:
+
+- The agent's claim names `owner_kind: agent`, its `operator`, the `policy_ref` of a grant in
+  `.noru/interpretation-policy.yml` ([schema](interpretation-policy.schema.json)), and `renews`:
+  the person's decision it renews.
+- Compared with the manifest at the base revision, the collection is the one a person signed,
+  apart from the interpretation and the line numbers it cites. A new collection, a changed
+  structure, a changed classification, or a claim an agent last renewed are all refused: the next
+  renewal after an agent's is a person's.
+- The grant names the agent and the operator, and allows renewals only. A policy that grants
+  anything else, or grants anything in `change-control`, `audit-pack` or `review-signoff`, is
+  itself invalid. Those three pieces never accept an agent owner: their owners hold a duty that
+  exists to be held apart from someone else's.
+- An agent's renewal stands for at most the piece's agent ceiling, shorter than its ceiling for a
+  person, and at most the grant's own `max_days` when that is shorter still.
+
+CI mode reads the base manifest and the policy from the base revision, so a pull request that
+widens the policy is judged by the policy it would replace, and a base it cannot read refuses every
+agent-owned claim. Without a base, run locally, the validator reports the lineage as unchecked; it
+never reports it as checked.
 
 ### On requirement 9, and the loophole in it
 
@@ -249,9 +276,13 @@ has re-created the drift problem the catalogue rule exists to prevent, one layer
   Noru and a record of provenance, never a parallel register. If you find yourself adding a
   `status:` field that only your plugin reads, stop — that state belongs in Noru.
 - **No embedded framework control text.** Licensing *and* drift. Call the API.
-- **No credential handling.** Authentication is the MCP client's job (OAuth where supported) or a
-  `NORU_API_KEY` environment variable read at the point of use for REST. A piece never writes a
-  secret to disk, never logs one, never puts one in a manifest, an example, or a fixture.
+- **No credential handling in a piece.** A piece never reads, writes, logs or stores a secret, and
+  never puts one in a manifest, an example or a fixture. Authentication is the MCP client's job
+  (OAuth where supported). In CI, where there is no interactive client, the toolkit's own executor
+  (`scripts/mcp_exec.mjs`) is that client: it reads `NORU_API_KEY` at the point of use, as the
+  published API documentation says `/v1/mcp` accepts, under the same rules the REST path follows in
+  [CI mode](../docs/ci-mode.md#the-publication-half-and-why-it-is-separate). The one piece that
+  writes over REST, `evidence-push`, reads the key the same way.
 - **No SaaS connectors.** Noru runs those server-side, scheduled, with encrypted credentials. A
   laptop-run connector is strictly worse.
 
@@ -267,6 +298,12 @@ the repository root, remote, branch and commit, the piece version, and the scope
 require. `:push` refreshes the connection identity immediately before execution and refuses when
 any binding moved. A reviewed plan therefore cannot be replayed against another customer, another
 checkout, or a later plugin implementation.
+
+In CI there is one other way a plan is agreed: the plan a same-repository pull request's declared
+workflow showed for review, confirmed by that pull request's independently approved merge, and
+only if the plan rebuilt after the merge is the same plan
+([CI mode](../docs/ci-mode.md#confirmation-by-a-reviewed-plan)). It confirms exactly that plan and
+nothing else.
 
 ## Writing a new piece
 

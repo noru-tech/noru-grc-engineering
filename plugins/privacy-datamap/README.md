@@ -308,6 +308,60 @@ Pass `--as-of=YYYY-MM-DD` to turn an already-expired claim into an error. Leave 
 is judged on its own terms — nothing in the validator reads the clock by itself, so it stays
 deterministic and the staleness check happens where it belongs, in CI or before a release.
 
+## When an agent may renew a signature
+
+The structural anchor is what makes one more thing safe: an agent may **renew** a collection whose
+structure and classification are exactly what a person signed. Nothing else. A new collection, a
+changed one, a privacy declaration, or a collection an agent renewed last time is a person's to sign.
+
+The repository opts in with a committed `.noru/interpretation-policy.yml`
+([schema](../../contract/interpretation-policy.schema.json)). `repo-enforcement` already places
+everything under `.noru/` behind the GRC reviewers in CODEOWNERS.
+
+```yaml
+kind: interpretation-policy
+version: 1
+grants:
+  - id: datamap-renewals
+    piece: privacy-datamap
+    claims:
+      - renewal          # the only value accepted; the validator enforces it, not the file
+    agents:
+      - datamap-renewal-agent
+    operators:
+      - Dana Okafor      # a named person who answers for the agent
+    max_days: 60         # at most the piece's agent ceiling below
+```
+
+The renewal names the agent, the person who answers for it, the grant, and the decision it renews:
+
+```yaml
+interpretation:
+  owner: datamap-renewal-agent
+  owner_kind: agent
+  operator: Dana Okafor
+  policy_ref: datamap-renewals
+  renews:
+    owner: Dana Okafor
+    decided_at: "2026-08-20"
+  decided_at: "2027-02-15"
+  expires_at: "2027-04-15"
+  rationale: >-
+    Every column is one Dana Okafor signed for, with the classification given then.
+```
+
+| An agent's renewal of a collection holding | It may stand for |
+|---|---|
+| ordinary personal data | 90 days, or the grant's `max_days` if shorter |
+| GDPR Article 9, or Article 10 criminal-offence data | 45 days, or the grant's `max_days` if shorter |
+
+Whether the collection is unchanged is a comparison with the manifest at the base revision, and the
+grant is read from the policy as it stood there too. CI mode passes both to the validator
+(`--base`, `--interpretation-policy`): a pull request that widens the policy is judged by the
+policy it would replace, and a base CI cannot read refuses every agent-owned collection. Run without
+`--base`, the validator warns that the renewal's lineage is unchecked. The
+[fixtures](./fixtures/) named `*agent*` show each refusal.
+
 ## Accuracy
 
 The validator checks taxonomy membership, recursive evidence completeness and freshness. It cannot

@@ -26,9 +26,9 @@ inputs:
     default: "gate"
   steps:
     description: >
-      Comma-separated: scan, validate, expiry, policy, diff, push — or 'all'. The default,
-      scan,validate,expiry,policy, is the part that needs no credential. For MCP pieces, push
-      reports skipped after diff because this headless runner cannot execute MCP calls.
+      Comma-separated: scan, validate, expiry, policy, state, diff, push — or 'all'. The default,
+      scan,validate,expiry,policy, is the part that needs no credential. state, diff and push need
+      NORU_API_KEY in the job environment (never as an input) and report skipped without it.
     required: false
     default: "scan,validate,expiry,policy"
   fail-on:
@@ -80,8 +80,43 @@ inputs:
     default: "false"
   state:
     description: >
-      Path to a Noru state snapshot for the diff step. Only a job that can read the organization can
-      produce one; without it the diff and push steps report as skipped.
+      Path to a Noru state snapshot for the diff step, used as given instead of the state step. Only
+      a job that can read the organization can produce one; without one the diff and push steps
+      report as skipped.
+    required: false
+    default: ""
+  write-reviewed-plan:
+    description: >
+      On a pull request: write the plan the diff step built, with its digest, to this path (and a
+      summary for reviewers beside it, with a .md suffix), for the workflow to upload as the
+      artifact noru-reviewed-plan-<piece>. See docs/ci-mode.md, "Confirmation by a reviewed plan".
+    required: false
+    default: ""
+  reviewed-plan:
+    description: >
+      On the protected branch: the reviewed plan of the pull request this merge came from, as
+      scripts/reviewed_plan.py fetch wrote it. With acc-manifest and publish-workflow, push writes
+      only if the rebuilt plan is that plan and every condition holds; with no file there, push is
+      skipped.
+    required: false
+    default: ""
+  fetch-reviewed-plan:
+    description: >
+      On the protected branch: "true" fetches the reviewed plan of the pull request this commit
+      merged, from that pull request's run of publish-workflow, using github-token, instead of
+      reading reviewed-plan. A fork pull request or a direct push has none, and push is skipped.
+    required: false
+    default: "false"
+  github-token:
+    description: "Read access to pull requests and Actions artifacts, for fetch-reviewed-plan."
+    required: false
+    default: ${{ github.token }}
+  acc-manifest:
+    description: "The acc manifest evaluating this merge's pull request. Goes with reviewed-plan."
+    required: false
+    default: ""
+  publish-workflow:
+    description: "The workflow file that produces reviewed plans. Goes with reviewed-plan."
     required: false
     default: ""
   on-missing-prerequisite:
@@ -196,6 +231,12 @@ runs:
         NORU_CI_BASE_REF: ${{ inputs.base-ref }}
         NORU_CI_GATE_ON_NEW: ${{ inputs.gate-on-new }}
         NORU_CI_STATE: ${{ inputs.state }}
+        NORU_CI_WRITE_REVIEWED: ${{ inputs.write-reviewed-plan }}
+        NORU_CI_REVIEWED: ${{ inputs.reviewed-plan }}
+        NORU_CI_ACC_MANIFEST: ${{ inputs.acc-manifest }}
+        NORU_CI_PUBLISH_WORKFLOW: ${{ inputs.publish-workflow }}
+        NORU_CI_FETCH_REVIEWED: ${{ inputs.fetch-reviewed-plan }}
+        NORU_CI_GITHUB_TOKEN: ${{ inputs.github-token }}
         NORU_CI_ON_MISSING: ${{ inputs.on-missing-prerequisite }}
         NORU_CI_PLUGINS: ${{ inputs.plugins }}
         NORU_CI_REPORT_PATH: ${{ inputs.report-path }}
@@ -230,6 +271,26 @@ runs:
         [ -n "$NORU_CI_BASE_REF" ] && args+=("--base-ref=$NORU_CI_BASE_REF")
         [ "$NORU_CI_GATE_ON_NEW" = "true" ] && args+=("--gate-on-new")
         [ -n "$NORU_CI_STATE" ] && args+=("--state=$NORU_CI_STATE")
+        [ -n "$NORU_CI_WRITE_REVIEWED" ] && args+=("--write-reviewed-plan=$NORU_CI_WRITE_REVIEWED")
+        if [ "$NORU_CI_FETCH_REVIEWED" = "true" ]; then
+          NORU_CI_REVIEWED="${RUNNER_TEMP:-/tmp}/noru-reviewed-plan-${NORU_CI_PIECE}.json"
+          rm -f "$NORU_CI_REVIEWED"
+          # Exit 1 means this merge has no reviewed plan (a fork, a direct push): no file is
+          # written and the push step reports skipped. Anything else is a failure to read GitHub.
+          GITHUB_TOKEN="$NORU_CI_GITHUB_TOKEN" python3 "$root/scripts/reviewed_plan.py" fetch \
+            "--repository=$GITHUB_REPOSITORY" "--commit=$GITHUB_SHA" "--piece=$NORU_CI_PIECE" \
+            "--workflow=$NORU_CI_PUBLISH_WORKFLOW" "--out=$NORU_CI_REVIEWED"
+          fetched=$?
+          if [ "$fetched" -gt 1 ]; then
+            echo "::error::could not read the reviewed plan from GitHub (exit $fetched)"
+            exit "$fetched"
+          fi
+        fi
+        # The GitHub token is for the fetch alone: no piece and no other step inherits it.
+        unset NORU_CI_GITHUB_TOKEN
+        [ -n "$NORU_CI_REVIEWED" ] && args+=("--reviewed-plan=$NORU_CI_REVIEWED")
+        [ -n "$NORU_CI_ACC_MANIFEST" ] && args+=("--acc-manifest=$NORU_CI_ACC_MANIFEST")
+        [ -n "$NORU_CI_PUBLISH_WORKFLOW" ] && args+=("--publish-workflow=$NORU_CI_PUBLISH_WORKFLOW")
         args+=("--plugins=${NORU_CI_PLUGINS:-$root/plugins}")
 
         # NORU_API_KEY is deliberately not named here. If the caller put it in the job environment

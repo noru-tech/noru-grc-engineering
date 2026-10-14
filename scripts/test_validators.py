@@ -147,8 +147,8 @@ def load_module(path, name):
     return module
 
 
-def run(cmd):
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+def run(cmd, cwd=None):
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=120, check=False)
 
 
 def piece_dirs():
@@ -378,7 +378,10 @@ def test_fixtures_match_schema(results):
         # An invalid manifest must be rejected by the validator; the schema is a second opinion,
         # not the gate, because the validator enforces cross-references a schema cannot express.
         for entry in decl["validator"]["fixtures"]["invalid"]:
-            result = run(["python3", str(validator), str(piece / entry["path"])])
+            result = run(
+                ["python3", str(validator), str(piece / entry["path"]), *entry.get("args", [])],
+                cwd=piece,
+            )
             results.check(
                 f"[{piece.name}] {entry['path']} is rejected with a useful message",
                 result.returncode == 1 and entry["expect_message"] in (result.stdout + result.stderr),
