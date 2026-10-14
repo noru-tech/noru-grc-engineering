@@ -355,6 +355,12 @@ This action is not part of `v0.1.0`; use the tag of the first release that carri
 | `warn-within-days` | `30` | how far ahead to report an expiry that has not passed yet |
 | `as-of` | *(today)* | evaluate expiry against a fixed date. For testing |
 | `state` | *(none)* | a Noru state snapshot to use as given, instead of building one in the `state` step |
+| `write-reviewed-plan` | *(none)* | on a pull request, write the reviewed plan and its summary here ([below](#confirmation-by-a-reviewed-plan)) |
+| `fetch-reviewed-plan` | `false` | on the protected branch, fetch the reviewed plan of the merged pull request |
+| `reviewed-plan` | *(none)* | or read it from this path instead |
+| `acc-manifest` | *(none)* | the acc manifest evaluating the merged pull request |
+| `publish-workflow` | *(none)* | the workflow file that produces reviewed plans |
+| `github-token` | `github.token` | read access to pull requests and Actions artifacts, for `fetch-reviewed-plan` only |
 | `on-missing-prerequisite` | `skip` | `fail` turns a step with no input into a tooling failure |
 | `plugins` | *(bundled)* | where the pieces live, if not the ones shipped with the action |
 | `require-yaml-loader` | *(report only)* | assert the runner's YAML loader is `pyyaml` or `fallback` |
@@ -461,6 +467,114 @@ Rules this workflow obeys, and that a reviewer should check it still obeys:
   organization, repository, plugin version and required scopes. Putting `steps: all` in this
   workflow is that confirmation, given once in a reviewed file — which is why it belongs on a
   protected branch with an environment, not on `pull_request`
+
+## Confirmation by a reviewed plan
+
+`steps: all` in a reviewed workflow confirms every plan the job builds. There is a narrower
+alternative that ties publication to change control: a pull request's own workflow computes the
+plan and shows it for review, and after that pull request merges, a publish job writes **that plan
+or nothing**. Merge approval alone is never permission to publish; this is the one exception, and
+it confirms exactly one plan.
+
+The publish job refuses, before anything is written, unless all of these hold:
+
+1. **The pull request came from this repository.** A fork has no key to compute a plan with, so
+   it has no reviewed plan and the push step reports `skipped`.
+2. **The plan came from the declared workflow, which the merge did not change.** A workflow on a
+   `pull_request` event runs the pull request's own copy of the workflow file. If the pull
+   request changed it, it cannot confirm its own publication.
+3. **acc found the merge independently approved.** The publish job runs
+   [acc](https://github.com/noru-tech/agent-change-control) on the merged pull request: complete
+   collection, an approval independent of the effective author (ACC003 `pass`), and no open
+   finding at or above the policy threshold.
+4. **The merge changed `.noru/<piece>.yml`.** A plan driven only by a change in Noru, with the
+   manifest untouched, was never reviewed.
+5. **The plan rebuilt after the merge is the reviewed plan.** The digest covers what the plan does
+   (piece, version, manifest bytes, target organization and endpoint, scopes and every operation),
+   not when or where it was built. If Noru's state moved between review and merge, the digests
+   differ and the job stops with nothing written. Review the new plan and confirm it explicitly.
+
+A rebuilt plan with nothing to write needs no confirmation, so a re-run after a publication is a
+no-op rather than a refusal. `/repo-enforcement:apply`, which administers GitHub, is outside this
+exception and always needs its own explicit `--confirm`.
+
+```yaml
+name: noru-publish
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    # Same-repository pull requests only: a fork has no secret, and gets no reviewed plan.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - uses: noru-tech/noru-ci-action@v0
+        env:
+          NORU_API_KEY: ${{ secrets.NORU_READ_API_KEY }}   # read scopes only
+        with:
+          piece: iac-scan
+          steps: scan,validate,state,diff
+          write-reviewed-plan: ${{ runner.temp }}/reviewed-plan.json
+      - run: cat "$RUNNER_TEMP/reviewed-plan.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: noru-reviewed-plan-iac-scan
+          path: ${{ runner.temp }}/reviewed-plan.json
+
+  publish:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: compliance
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - id: pr
+        run: echo "number=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].number // empty')" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - id: acc
+        if: steps.pr.outputs.number != ''
+        uses: noru-tech/agent-change-control@v0.6.0
+        with:
+          pr: ${{ steps.pr.outputs.number }}
+          format: json
+          output: acc.json
+          fail-on-findings: false
+      - if: steps.pr.outputs.number != ''
+        uses: noru-tech/noru-ci-action@v0
+        env:
+          NORU_API_KEY: ${{ secrets.NORU_API_KEY }}
+        with:
+          piece: iac-scan
+          steps: all
+          fetch-reviewed-plan: "true"
+          publish-workflow: .github/workflows/noru-publish.yml
+          acc-manifest: ${{ steps.acc.outputs.manifest }}
+```
+
+The review job holds a read-scoped key; the publish job holds the write key, behind an
+`environment:`, on `push` to the protected branch only. The fetch uses the workflow token, which
+the action removes from the environment before any piece runs. The report records what confirmed
+the publication (`confirmed_by`). Without `reviewed-plan` or `fetch-reviewed-plan`, `steps: all`
+keeps its standing meaning described above.
 
 ## A whole pipeline, end to end
 

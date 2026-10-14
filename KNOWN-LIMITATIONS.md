@@ -88,7 +88,11 @@ From [docs/repository-enforcement.md, "Boundaries"](./docs/repository-enforcemen
 
 - **A local scheduled monitor is defence in depth, not the authority.** Somebody able to weaken the
   repository can remove it; strong drift monitoring belongs outside the protected repository.
-- **Merge approval is never permission to publish.** Noru publication remains each piece's own
+- **Merge approval confirms only a reviewed plan.** A passing merge confirms the plan its pull
+  request showed for review, and nothing else: the pull request came from this repository, its
+  plan came from the declared workflow, which the merge did not change, acc found an approval
+  independent of the author, the merge changed the manifest, and the plan rebuilt after the merge
+  is the same. Otherwise Noru publication remains each piece's own
   `diff`, confirmation and `push`.
 
 ## Non-goals

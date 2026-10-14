@@ -6,6 +6,17 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Confirmation by a reviewed plan. On a pull request, `write-reviewed-plan` stores the plan the
+  diff step built, with a digest of what it does and a summary for reviewers, for the workflow to
+  upload. After the merge, `fetch-reviewed-plan` (or `reviewed-plan`), `acc-manifest` and
+  `publish-workflow` make the push write that plan or nothing: it refuses unless the pull request
+  came from this repository, its plan came from the declared workflow and the merge did not change
+  that workflow, acc found the merge independently approved, the merge changed the manifest, and
+  the plan rebuilt after the merge has the same digest. A merge with no reviewed plan (a fork, a
+  direct push) skips the push. `scripts/reviewed_plan.py` holds the digest, the checks and the
+  fetch. Merge approval alone is still never permission to publish, and `/repo-enforcement:apply`
+  is unchanged.
+
 - Run the publication half from CI. A new `state` step builds `.noru/.cache/noru-state.json` from
   the read tools a piece declares in its `piece.json` (new required `state` field), with the
   connection taken from `getMcpCapabilities`. With `NORU_API_KEY` in the job environment, the `push`

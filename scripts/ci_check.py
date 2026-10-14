@@ -39,7 +39,8 @@ Usage:
         [--mode=gate|warn] [--steps=scan,validate,expiry,policy,state,diff,push|all]
         [--as-of=YYYY-MM-DD] [--warn-within-days=N] [--max-age-days=N]
         [--fail-on=<kinds>|none] [--baseline=<path>] [--base-ref=<ref>] [--gate-on-new]
-        [--state=<path>]
+        [--state=<path>] [--write-reviewed-plan=<path>]
+        [--reviewed-plan=<path> --acc-manifest=<path> --publish-workflow=<path>]
         [--on-missing-prerequisite=skip|fail] [--report=<path.json>]
         [--output=json|text] [--quiet]
 
@@ -80,6 +81,7 @@ from check_policy import (  # noqa: E402
     parse_document as parse_manifest_text,
 )
 from finding_docs import see as see_finding_docs  # noqa: E402
+import reviewed_plan  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MCP_EXEC = pathlib.Path(__file__).resolve().parent / "mcp_exec.mjs"
@@ -133,7 +135,8 @@ USAGE = (
     "                   [--as-of=YYYY-MM-DD]\n"
     "                   [--warn-within-days=N] [--max-age-days=N] [--fail-on=<kinds>|none]\n"
     "                   [--baseline=<path>] [--base-ref=<ref>] [--gate-on-new]\n"
-    "                   [--state=<path>]\n"
+    "                   [--state=<path>] [--write-reviewed-plan=<path>]\n"
+    "                   [--reviewed-plan=<path> --acc-manifest=<path> --publish-workflow=<path>]\n"
     "                   [--on-missing-prerequisite=skip|fail]\n"
     "                   [--report=<path.json>]\n"
     "                   [--output=json|text] [--quiet]\n"
@@ -913,7 +916,7 @@ def step_state(report, decl, repo, plugins, state_source):
     return "ok"
 
 
-def step_diff(report, piece_dir, decl, repo, state_source):
+def step_diff(report, piece_dir, decl, repo, state_source, write_reviewed=None):
     state_path = repo / ".noru" / ".cache" / "noru-state.json"
     if state_source is not None:
         source = pathlib.Path(state_source)
@@ -950,14 +953,78 @@ def step_diff(report, piece_dir, decl, repo, state_source):
         return "tooling"
 
     plan = parse_child_json(completed) or {}
-    report.step("diff", "pass", summary=plan.get("summary"))
+    row = report.step("diff", "pass", summary=plan.get("summary"))
+    if write_reviewed:
+        # The plan a reviewer reads on the pull request, and the digest a publish job will require
+        # of the plan it rebuilds after the merge (docs/ci-mode.md, "Confirmation by a reviewed
+        # plan").
+        try:
+            written = json.loads(plan_path(repo, decl).read_text(encoding="utf-8"))
+            doc = reviewed_plan.document(written)
+            out = pathlib.Path(write_reviewed)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            out.with_suffix(".md").write_text(reviewed_plan.render_markdown(doc), encoding="utf-8")
+        except (OSError, json.JSONDecodeError, reviewed_plan.Refusal) as exc:
+            report.step("diff", "error", detail=f"could not write the reviewed plan: {redact(str(exc))}")
+            return "tooling"
+        row["reviewed_plan"] = {"path": str(out), "digest": doc["digest"]}
     return "ok"
 
 
-def step_push(report, piece_dir, decl, repo, diff_outcome):
+def plan_path(repo, decl):
+    return repo / ".noru" / ".cache" / f"{decl['piece']}.plan.json"
+
+
+def confirm_reviewed(report, decl, repo, confirm):
+    """Confirmation by a reviewed plan: `ok`, `skipped` (no reviewed plan for this merge) or `refused`."""
+    source = pathlib.Path(confirm["reviewed_plan"])
+    if not source.is_file():
+        report.step(
+            "push",
+            "skipped",
+            detail=(
+                f"no reviewed plan at {source}: this merge came from a fork, from a direct push, or "
+                "from a pull request whose workflow produced none, so nothing confirms its plan. "
+                "Publish it through the piece's :diff and an explicit confirmation."
+            ),
+        )
+        return "skipped"
+    head = git_read(repo, "rev-parse", "HEAD")
+    try:
+        reviewed = json.loads(source.read_text(encoding="utf-8"))
+        acc = json.loads(pathlib.Path(confirm["acc_manifest"]).read_text(encoding="utf-8"))
+        rebuilt = json.loads(plan_path(repo, decl).read_text(encoding="utf-8"))
+        if not any(op.get("effect") != "skip" for op in rebuilt.get("operations") or []):
+            # Nothing to write needs no confirmation: a re-run after the publication, or a merge
+            # whose writes are already in Noru.
+            report.payload["confirmed_by"] = {"reviewed_plan": None, "reason": "nothing to write"}
+            return "ok"
+        if not head:
+            raise reviewed_plan.Refusal("the merge commit cannot be read from the checkout")
+        confirmed = reviewed_plan.verify(
+            reviewed, rebuilt, acc, head.strip(), confirm["publish_workflow"], decl["piece"]
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        report.step("push", "error", detail=f"cannot read the confirmation inputs: {redact(str(exc))}")
+        return "refused"
+    except reviewed_plan.Refusal as refusal:
+        report.step("push", "error", detail=f"not confirmed by a reviewed plan: {refusal}")
+        return "refused"
+    report.payload["confirmed_by"] = {"reviewed_plan": confirmed, "merge_commit": head.strip()}
+    return "ok"
+
+
+def step_push(report, piece_dir, decl, repo, diff_outcome, confirm=None):
     if diff_outcome != "ok":
         report.step("push", "skipped", detail="the diff step did not produce a plan, so there is nothing to push")
         return "skipped"
+    if confirm:
+        confirmation = confirm_reviewed(report, decl, repo, confirm)
+        if confirmation == "skipped":
+            return "skipped"
+        if confirmation == "refused":
+            return "tooling"
     transports = {
         operation.get("transport") for operation in decl.get("push", {}).get("operations", [])
     }
@@ -1147,6 +1214,10 @@ def parse_args(argv):
         "base_ref": None,
         "gate_on_new": False,
         "state": None,
+        "write_reviewed_plan": None,
+        "reviewed_plan": None,
+        "acc_manifest": None,
+        "publish_workflow": None,
         "on_missing_prerequisite": "skip",
         "report": None,
         "json": False,
@@ -1207,6 +1278,14 @@ def parse_args(argv):
             opts["gate_on_new"] = True
         elif arg.startswith("--state="):
             opts["state"] = arg.split("=", 1)[1]
+        elif arg.startswith("--write-reviewed-plan="):
+            opts["write_reviewed_plan"] = arg.split("=", 1)[1]
+        elif arg.startswith("--reviewed-plan="):
+            opts["reviewed_plan"] = arg.split("=", 1)[1]
+        elif arg.startswith("--acc-manifest="):
+            opts["acc_manifest"] = arg.split("=", 1)[1]
+        elif arg.startswith("--publish-workflow="):
+            opts["publish_workflow"] = arg.split("=", 1)[1]
         elif arg.startswith("--report="):
             opts["report"] = arg.split("=", 1)[1]
         elif arg.startswith("--on-missing-prerequisite="):
@@ -1224,6 +1303,10 @@ def parse_args(argv):
             opts["help"] = True
         else:
             return None, f"unknown option '{arg}'"
+    confirm = ("reviewed_plan", "acc_manifest", "publish_workflow")
+    given = [k for k in confirm if opts[k]]
+    if given and len(given) != len(confirm):
+        return None, "--reviewed-plan, --acc-manifest and --publish-workflow go together"
     return opts, None
 
 
@@ -1313,10 +1396,15 @@ def main(argv):
         elif step == "state":
             outcome = step_state(report, decl, repo, opts["plugins"].resolve(), opts["state"])
         elif step == "diff":
-            outcome = step_diff(report, piece_dir, decl, repo, opts["state"])
+            outcome = step_diff(report, piece_dir, decl, repo, opts["state"], opts["write_reviewed_plan"])
             diff_outcome = outcome
         else:
-            outcome = step_push(report, piece_dir, decl, repo, diff_outcome)
+            confirm = (
+                {k: opts[k] for k in ("reviewed_plan", "acc_manifest", "publish_workflow")}
+                if opts["reviewed_plan"]
+                else None
+            )
+            outcome = step_push(report, piece_dir, decl, repo, diff_outcome, confirm)
         if outcome == "tooling":
             tooling = True
             break

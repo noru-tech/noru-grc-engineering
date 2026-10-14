@@ -1,8 +1,10 @@
 # Repository enforcement
 
 `repo-enforcement` is the optional layer that makes the suite's existing review records a GitHub
-merge condition. It does not create a Noru claim and it never turns merge approval into permission
-to publish to Noru.
+merge condition. It does not create a Noru claim. Merge approval alone is never permission to
+publish to Noru. The one exception is narrow: a publish job may treat a passing merge as
+confirmation of the exact plan that was reviewed on that pull request, and of nothing else (see
+[CI mode](./ci-mode.md#confirmation-by-a-reviewed-plan)).
 
 The enforced path is:
 
@@ -10,6 +12,7 @@ The enforced path is:
 piece collectors -> committed .noru manifests -> offline aggregate check
                  -> required GitHub check -> CODEOWNERS approval -> merge
                  -> piece diff -> explicit confirmation -> Noru push
+                    (or: the plan reviewed on the pull request -> Noru push)
 ```
 
 ## Install and adoption
@@ -84,4 +87,7 @@ those writes occurred.
 - A local scheduled monitor is defence in depth, not the authority: somebody able to weaken the
   repository can remove it. Strong drift monitoring belongs in an organization-controlled workflow,
   GitHub App, or scheduled integration outside the protected repository.
-- Noru publication remains the owning piece's `diff -> confirmation -> push` operation.
+- Noru publication remains the owning piece's `diff -> confirmation -> push` operation, or the
+  plan reviewed on the merged pull request ([CI mode](./ci-mode.md#confirmation-by-a-reviewed-plan)).
+  Neither extends to `/repo-enforcement:apply`, which administers GitHub and always needs its own
+  explicit `--confirm`.
