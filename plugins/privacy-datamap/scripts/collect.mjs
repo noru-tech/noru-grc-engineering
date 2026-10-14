@@ -1132,7 +1132,7 @@ function safeText(repo, rel) {
 }
 
 /** Package metadata is consulted only when an executable script points to an existing entrypoint. */
-export function discoverServices(repo, files) {
+export function discoverServices(repo, files, dotnetEntrypoints = []) {
   const evidence = new Map();
   const runtimeFiles = files.filter((rel) => rel !== MANIFEST_INPUT_PATH);
   const fileSet = new Set(runtimeFiles);
@@ -1197,6 +1197,11 @@ export function discoverServices(repo, files) {
           }
         }
       } catch { /* Invalid package metadata is not runtime evidence. */ }
+    }
+  }
+  for (const entry of dotnetEntrypoints) {
+    if (!isNonRuntimePath(entry.ref.replace(/:\d+$/, ""))) {
+      add(entry.root, entry.ref, entry.kind);
     }
   }
   if (evidence.size === 0) {
@@ -1434,8 +1439,29 @@ export function collectFacts(repo, { candidate = false } = {}) {
   }
   assertUniqueKeys("dataset", datasets);
 
-  const services = discoverServices(repo, files);
-  const systemKeys = new Set([...services.map(({ root }) => fidesKeyFor(root || "repository")), ...inputs.external_systems.map(s => s.fides_key)]);
+  const services = discoverServices(repo, files, dotnet.runtime_entrypoints ?? []);
+  for (const boundary of [...(dotnet.authentication_tickets ?? []), ...(dotnet.message_envelopes ?? [])]) {
+    const dataset = datasets.find(d => d.fides_key === boundary.dataset);
+    for (const project of boundary.runtime_projects?.length ? boundary.runtime_projects : [boundary.project]) {
+      const root = project?.split("/").slice(0,-1).join("/") ?? "";
+      if (dataset && services.some(service => service.root === root)) {
+        dataset.system_references = [...new Set([...(dataset.system_references ?? []), fidesKeyFor(root || "repository")])];
+      }
+    }
+  }
+  const provisioned = (dotnet.provisioned_runtimes ?? []).map(resource => ({
+    fides_key: resource.identity, name: resource.name, refs: resource.refs,
+    dataset_references: [], runtime_evidence: resource.refs.map(ref => ({ref, kind: "provisioned_proxy"})),
+    meta: {noru: {origin: "provisioned", provisioner: fidesKeyFor(resource.provisioner_root), refs: resource.refs}},
+    egress: [...new Set(resource.routes.filter(route => route.destination).map(route => fidesKeyFor(route.destination.root)))].map(fides_key => ({type: "system", fides_key})),
+  }));
+  const inputRuntimeMap = new Map([...inputs.external_systems, ...(inputs.provisioned_systems ?? [])].map(s => [s.fides_key, s]));
+  for (const runtime of provisioned) {
+    if (inputRuntimeMap.has(runtime.fides_key) && inputRuntimeMap.get(runtime.fides_key).meta?.noru?.origin !== "provisioned") throw new Error("Provisioned runtime conflicts with external system identity");
+    inputRuntimeMap.set(runtime.fides_key, runtime);
+  }
+  const inputRuntimes = [...inputRuntimeMap.values()];
+  const systemKeys = new Set([...services.map(({ root }) => fidesKeyFor(root || "repository")), ...inputRuntimes.map(s => s.fides_key)]);
   for (const dataset of datasets) {
     for (const systemKey of dataset.system_references ?? []) {
       if (!systemKeys.has(systemKey)) {
@@ -1465,13 +1491,16 @@ export function collectFacts(repo, { candidate = false } = {}) {
         .map((dataset) => dataset.fides_key).sort(BY_PATH),
     };
   });
-  for (const external of inputs.external_systems) {
-    systems.push({...external, ref: external.refs[0], runtime_evidence: []});
+  for (const external of inputRuntimes) {
+    systems.push({...external, ref: external.refs[0], runtime_evidence: external.runtime_evidence ?? []});
   }
   for (const system of systems) {
+    if (system.meta?.noru?.origin === "provisioned" && !systemKeys.has(system.meta.noru.provisioner)) {
+      throw new Error("Provisioned runtime must reference an evidenced provisioner system");
+    }
     const declared = inputs.systems.find(s => s.fides_key === system.fides_key);
     for (const direction of ["ingress", "egress"]) {
-      if (declared?.[direction]) system[direction] = declared[direction];
+      if (declared?.[direction] && !provisioned.some(p => p.fides_key === system.fides_key)) system[direction] = declared[direction];
     }
     if (declared?.meta) system.meta = declared.meta;
     for (const edge of [...(system.ingress ?? []), ...(system.egress ?? [])]) {
@@ -1714,6 +1743,7 @@ export function buildSkeleton(derived, provenance) {
       fides_key: system.fides_key,
       name: system.name,
       system_type: "Application",
+      ...Object.fromEntries(["ingress", "egress", "meta"].filter(key => system[key]).map(key => [key, system[key]])),
       dataset_references: system.dataset_references,
       privacy_declarations: [
         {

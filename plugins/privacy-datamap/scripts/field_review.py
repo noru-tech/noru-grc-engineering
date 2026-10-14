@@ -18,11 +18,13 @@ import analysis_storage
 import dependencies
 import shape_investigation
 import gap_resolution
+import uncertainty
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 VERSION = 2
 POLICY = "evidence-classification-v3"
+CONTENT_OUTCOMES = {"closed_by_runtime_validation", "bounded_content_contract", "reviewed_open_content", "accepted_certificate"}
 TAXONOMY = {r["fides_key"]: r["description"] for r in json.loads((ROOT / "references/taxonomy/data_categories.json").read_text())}
 SOURCE_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".py", ".sql", ".prisma", ".go", ".rs", ".java", ".rb", ".php", ".json", ".yaml", ".yml", ".toml", ".tf", ".cs", ".csproj", ".props", ".targets", ".sln", ".slnx"}
 EXCLUDED = {".git", ".noru", ".fides", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build", "coverage", "bin", "obj"}
@@ -56,7 +58,7 @@ def excluded_source(name, exclusions=None):
 
 
 def compact_type(value):
-    result = {key: copy.deepcopy(value[key]) for key in ("kind", "name", "open", "optional", "additional_types") if key in value}
+    result = {key: copy.deepcopy(value[key]) for key in ("kind", "name", "open", "optional", "additional_types", "key_type", "value_type") if key in value}
     if value.get("members"):
         result["members"] = [{"name": member["name"], "optional": member.get("optional", False)} for member in value["members"]]
     for key in ("variants", "items"):
@@ -104,7 +106,7 @@ def structure_digest(derived):
 
 
 def taxonomy_digest():
-    paths = [path for path in (HERE / "field_review.py", HERE / "dotnet.py", HERE / "dotnet_syntax.py", HERE / "dotnet_model.py", HERE / "dotnet_diagnostics.py", HERE / "gap_resolution.py", HERE / "migration_coverage.py", HERE / "dotnet_adapters.py", ROOT / "references/dotnet-framework-contracts.json", ROOT / "references/dotnet-diagnostics.json", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
+    paths = [path for path in (HERE / "field_review.py", HERE / "dotnet.py", HERE / "dotnet_syntax.py", HERE / "dotnet_model.py", HERE / "dotnet_diagnostics.py", HERE / "gap_resolution.py", HERE / "uncertainty.py", HERE / "migration_coverage.py", HERE / "dotnet_adapters.py", HERE / "dotnet_boundaries.py", ROOT / "references/dotnet-boundary-contracts.json", ROOT / "references/dotnet-framework-contracts.json", ROOT / "references/dotnet-diagnostics.json", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
     return digest({"policy": POLICY, "categories": TAXONOMY, "implementation": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}})
 
 
@@ -312,6 +314,14 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
                 "binding": {"observation_digest": document.get("observation_digest"), "structural_digest": structure_digest(derived),
                             "taxonomy_digest": taxonomy_digest(), "source_inventory": source_inventory(repo, exclusions)},
                 "evidence": {}, "facts": {}, "fields": [], "gaps": []}
+    audit_prior = document.get("classification_review", {})
+    contract["uncertainty_history"] = copy.deepcopy(audit_prior.get("uncertainty_history", []))
+    for old in all_rows(audit_prior.get("fields", [])):
+        if old.get("accepted_uncertainty"):
+            record = {"entity_id": old["entity_id"], "observation_digest": old["observation_digest"],
+                      "acceptance": copy.deepcopy(old["accepted_uncertainty"])}
+            if record not in contract["uncertainty_history"]:
+                contract["uncertainty_history"].append(record)
     shapes = prior.get("shape_observations", {})
     if not prior and not fresh:
         lock_path = repo / ".noru/privacy-datamap.lock.json"
@@ -323,6 +333,14 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
             except (ValueError, OSError):
                 pass
     contract["shape_observations"] = shape_investigation.current(shapes, contract["binding"])
+    contract["runtime_definitions"] = {}
+    for system in derived.get("systems", []):
+        refs = system.get("refs", []) or system.get("meta", {}).get("noru", {}).get("refs", [])
+        spans = [span for ref in refs if ref.rsplit(":", 1)[0] in contract["binding"]["source_inventory"]
+                 and (span := span_from_ref(repo, ref, exclusions))]
+        contract["runtime_definitions"][system["fides_key"]] = {
+            "definition": copy.deepcopy(system), "observation_digest": digest(system),
+            "evidence_ids": register_evidence(contract, spans, repo)}
     table_fields = []
     for table in report.get("tables", []) + derived.get("dotnet", {}).get("tables", []):
         for field in table.get("fields", []):
@@ -341,7 +359,7 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
         type_info = compact_type(extracted.get("type") or {"kind": "unknown", "name": shape})
         definition = add_fact(contract, "field_definition", identity, {"shape": shape, "type": type_info, "source_symbol": extracted.get("field_id")}, evidence_ids)
         fact_ids = [definition]
-        if extracted.get("clr_type"):
+        if extracted.get("clr_type") or extracted.get("framework_contract"):
             fact_ids.append(add_fact(contract, "persistence_representation", identity,
                 {key: extracted.get(key) for key in ("clr_type", "storage_type", "serialization", "framework_contract")}, evidence_ids))
         if extracted.get("_shape_observation"):
@@ -436,7 +454,7 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
     # Every collector coverage finding enters the same decision registry. Preserve the raw
     # collector payload separately; classification never erases an observed diagnostic.
     known = {gap_resolution.identity(gap) for gap in contract["gaps"]}
-    for gap in gap_resolution.observations(derived):
+    for gap in gap_resolution.observations(derived, document):
         if gap["gap_id"] in known:
             for existing in contract["gaps"]:
                 if gap_resolution.identity(existing) == gap["gap_id"]:
@@ -477,7 +495,7 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
 
 DECISION_KEYS = {"meaning", "personal_data", "categories", "identification_basis", "person_association", "category_fit", "security_sensitivity",
                  "rationale", "investigation", "semantic_review", "evidence_ids", "supporting_fact_ids", "status", "uncertainty", "resolution_owner", "confidence",
-                 "evidence_strength", "decision_origin", "decision_binding", "business_context_question", "resolution_needed", "decision_impact", "open_content_resolution", "decision_id", "decision_summary", "user_feedback"}
+                 "evidence_strength", "decision_origin", "decision_binding", "business_context_question", "resolution_needed", "decision_impact", "open_content_resolution", "decision_id", "decision_summary", "user_feedback", "accepted_uncertainty"}
 
 
 def decision_binding(row, contract):
@@ -569,6 +587,9 @@ def row_errors(row, contract, structural_only=False):
         return [str(identity) + ": categories must contain strings"]
     if structural_only:
         return []
+    accepted = bool(row.get("accepted_uncertainty"))
+    if accepted:
+        errors.extend(uncertainty.errors(row["accepted_uncertainty"], identity, row.get("evidence_ids", [])))
     categories = row.get("categories")
     if row.get("personal_data") not in PERSONAL:
         errors.append("set personal_data to yes, no, mixed or unknown explicitly")
@@ -577,9 +598,10 @@ def row_errors(row, contract, structural_only=False):
         categories = []
     if row.get("personal_data") in {"no", "unknown"} and categories:
         errors.append("non-personal or unknown values cannot carry resolved personal categories")
-    if row.get("composite") and categories:
+    reviewed_open = row.get("open_content") and (accepted or (row.get("open_content_resolution") or {}).get("outcome") in {"reviewed_open_content", "accepted_certificate"})
+    if row.get("composite") and categories and not reviewed_open:
         errors.append("composite categories belong on evidenced members, not their parent")
-    if row.get("personal_data") in {"yes", "mixed"} and not row.get("composite") and not categories and row.get("status") == "proposed":
+    if row.get("personal_data") in {"yes", "mixed"} and not row.get("composite") and not categories and row.get("status") == "proposed" and not accepted:
         errors.append("known personal data without category fit remains unresolved")
     for key in ("evidence_ids", "supporting_fact_ids"):
         values = row.get(key)
@@ -613,7 +635,7 @@ def row_errors(row, contract, structural_only=False):
                 errors.append("person identifier claim contradicts the classified foreign-key target")
     if row.get("status") == "proposed":
         errors.extend(category_meaning_errors(row))
-        if row.get("uncertainty") or row.get("resolution_owner") or row.get("personal_data") == "unknown":
+        if row.get("resolution_owner") or (not accepted and (row.get("uncertainty") or row.get("personal_data") == "unknown")):
             errors.append("unresolved evidence cannot be marked proposed")
         if not row.get("meaning") or not row.get("rationale") or not row.get("investigation"):
             errors.append("resolved decisions require meaning, rationale and recorded investigation")
@@ -627,8 +649,10 @@ def row_errors(row, contract, structural_only=False):
         if row.get("decision_binding") != decision_binding(row, contract):
             errors.append("classification decision is unbound or modified; submit it through plugin investigation")
         content = row.get("open_content_resolution")
-        if row.get("open_content") and (not isinstance(content, dict) or not content.get("rationale") or not content.get("evidence_ids") or not set(content["evidence_ids"]) <= set(row.get("evidence_ids", [])) or content.get("outcome") not in {"closed_by_runtime_validation", "bounded_content_contract", "accepted_certificate"}):
-            errors.append("open or unmodeled content requires an evidenced runtime contract")
+        if row.get("open_content") and not accepted and (not isinstance(content, dict) or not content.get("rationale") or not content.get("evidence_ids") or not set(content["evidence_ids"]) <= set(row.get("evidence_ids", [])) or content.get("outcome") not in CONTENT_OUTCOMES):
+            errors.append("open or unmodeled content requires an evidenced content assessment")
+        if content and content.get("outcome") == "reviewed_open_content" and (not isinstance(content.get("residual_uncertainty"), str) or not content["residual_uncertainty"].strip()):
+            errors.append("reviewed open content must describe its residual uncertainty")
         if content and content.get("outcome") == "accepted_certificate" and (row.get("decision_origin") != "accepted-certificate" or content.get("certificate_digest") != contract.get("accepted_certificate") or not contract.get("accepted_certificate")):
             errors.append("restored content coverage requires its current accepted certificate")
         if row.get("decision_origin") == "accepted-certificate" and not contract.get("accepted_certificate"):
@@ -636,7 +660,7 @@ def row_errors(row, contract, structural_only=False):
     elif row.get("status") != "needs_investigation" or not row.get("uncertainty") or row.get("resolution_owner") not in {"agent", "human"}:
         errors.append("unresolved decisions need a specific question and owner")
     descendants = list(all_rows(row.get("nested_members", [])))
-    if row.get("status") == "proposed" and row.get("composite") and row.get("personal_data") in {"yes", "mixed"} and not any(child.get("personal_data") in {"yes", "mixed"} and child.get("categories") for child in descendants):
+    if row.get("status") == "proposed" and row.get("composite") and row.get("personal_data") in {"yes", "mixed"} and not accepted and not (reviewed_open and categories) and not any(child.get("personal_data") in {"yes", "mixed"} and child.get("categories") for child in descendants):
         errors.append("personal composite requires categorized personal members; unresolved content cannot disappear from export")
     if row.get("personal_data") == "no" and any(child.get("personal_data") in {"yes", "mixed"} for child in descendants):
         errors.append("non-personal parent contradicts personal members")
@@ -759,7 +783,7 @@ def apply_decisions(document, decisions, repo):
             continue
         row["evidence_ids"] = sorted(set(row.get("evidence_ids", []) + extra))
         row["decision_origin"] = "agent-evidence-review"
-        unresolved = row.get("personal_data") == "unknown" or bool(row.get("uncertainty"))
+        unresolved = not row.get("accepted_uncertainty") and (row.get("personal_data") == "unknown" or bool(row.get("uncertainty")))
         row["status"] = "needs_investigation" if unresolved else "proposed"
         row["evidence_strength"] = "unresolved" if unresolved else "source_supported"
         if not unresolved:
@@ -823,9 +847,14 @@ def apply_gap_decisions(document, decisions, repo):
         if not decision.get("rationale") or not decision.get("investigation") or not cited or any(key not in contract["evidence"] for key in cited):
             errors.append(str(identity) + ": gap resolution requires rationale, attempted investigation and current evidence")
             continue
-        if decision.get("outcome") not in {"modeled", "not_applicable", "unresolved"}:
-            errors.append(str(identity) + ": use modeled, not_applicable or unresolved")
+        if decision.get("outcome") not in {"modeled", "not_applicable", "accepted_uncertainty", "unresolved"}:
+            errors.append(str(identity) + ": use modeled, not_applicable, accepted_uncertainty or unresolved")
             continue
+        if decision.get("outcome") == "unresolved" and decision.get("fallback_review") is not None:
+            fallback_errors = gap_resolution.fallback_errors(decision["fallback_review"], cited)
+            if fallback_errors:
+                errors.extend(str(identity) + ": " + error for error in fallback_errors)
+                continue
         expected_occurrences = gap_resolution.occurrence_ids(matches[0])
         if len(expected_occurrences) > 1 and decision.get("covered_occurrence_ids") != expected_occurrences:
             errors.append(str(identity) + ": explicitly cover every grouped occurrence")
@@ -845,7 +874,7 @@ def apply_gap_decisions(document, decisions, repo):
             row = rows.get(target)
             # Structure may be complete while privacy meaning is still under investigation.
             return bool(row and row.get("evidence_ids") and row.get("observation_digest"))
-        if decision["outcome"] == "modeled" and (not targets or any(not modeled(target) for target in targets)):
+        if decision["outcome"] == "modeled" and (not (targets or decision.get("system_ids")) or any(not modeled(target) for target in targets)):
             errors.append(str(identity) + ": modeled gaps must reference evidenced canonical fields/members; open structure remains unresolved")
             continue
         if decision["outcome"] == "not_applicable" and not decision.get("scope_rationale"):
@@ -876,7 +905,7 @@ def aggregate_members(contract):
         if not children or row.get("open_content") or row.get("decision_origin") == "agent-evidence-review":
             return
         personal = any(child["personal_data"] in {"yes", "mixed"} for child in children)
-        unknown = any(child["status"] != "proposed" for child in children)
+        unknown = any(child["status"] != "proposed" or child["personal_data"] == "unknown" for child in children)
         nonpersonal = any(child["personal_data"] == "no" for child in children)
         if unknown:
             row["personal_data"] = "mixed" if personal else "unknown"
@@ -885,7 +914,7 @@ def aggregate_members(contract):
             row["status"] = "needs_investigation"
             row["uncertainty"] = "member_investigation"
             unresolved = [child for child in children if child["status"] != "proposed"]
-            human_only = all(child.get("resolution_owner") == "human" for child in unresolved)
+            human_only = bool(unresolved) and all(child.get("resolution_owner") == "human" for child in unresolved)
             row["resolution_owner"] = "human" if human_only else "agent"
             if human_only:
                 row["business_context_question"] = " ".join(dict.fromkeys(child.get("business_context_question", "") for child in unresolved))
@@ -929,6 +958,17 @@ def projected_fields(rows, existing=None):
     for row in rows:
         field = copy.deepcopy(old.get(row["name"], {}))
         field.update(name=row["name"], data_categories=row["categories"], refs=row["evidence"], description=row["meaning"])
+        content = row.get("open_content_resolution") or {}
+        if content.get("outcome") == "reviewed_open_content":
+            field["description"] += " Open content: " + content["residual_uncertainty"]
+        entry = uncertainty.field_entry(row)
+        meta = field.setdefault("meta", {})
+        meta.pop("accepted_uncertainties", None)
+        if entry:
+            meta["accepted_uncertainties"] = [entry]
+            field["description"] += " " + uncertainty.disclosure(entry)
+        if not meta:
+            field.pop("meta", None)
         field.pop("needs_review", None)
         if row["status"] != "proposed":
             field["needs_review"] = True
@@ -987,7 +1027,7 @@ def project_candidate(document, candidate, derived=None, repo=None):
             rows = [row for identity, row in index.items() if identity.startswith(prefix)]
             if rows:
                 prior_compact = set(collection.get("non_personal_fields", []))
-                compact = {row["name"] for row in rows if row["name"] in prior_compact and row["personal_data"] == "no" and row["status"] == "proposed" and not row.get("nested_members")}
+                compact = {row["name"] for row in rows if row["name"] in prior_compact and row["personal_data"] == "no" and row["status"] == "proposed" and not row.get("nested_members") and not row.get("open_content") and not row.get("accepted_uncertainty")}
                 represented = [row for row in rows if row["name"] not in compact]
                 collection["fields"] = projected_fields(represented, collection.get("fields", []))
                 if (dataset.get("meta") or {}).get("noru", {}).get("origin") == "supplemental":
@@ -996,6 +1036,19 @@ def project_candidate(document, candidate, derived=None, repo=None):
                     collection["non_personal_fields"] = sorted(compact)
                 else:
                     collection.pop("non_personal_fields", None)
+    export_nodes = {"dataset:" + node["fides_key"]: node for node in candidate.get("dataset", [])}
+    export_nodes.update({"system:" + node["fides_key"]: node for node in candidate.get("system", [])})
+    for node in export_nodes.values():
+        node.setdefault("meta", {}).pop("accepted_uncertainties", None)
+    for gap in contract.get("gaps", []):
+        entry = uncertainty.gap_entry(gap)
+        if entry:
+            for target in gap["resolution"].get("export_targets", []):
+                if target in export_nodes:
+                    export_nodes[target]["meta"].setdefault("accepted_uncertainties", []).append(entry)
+    for node in export_nodes.values():
+        if not node.get("meta"):
+            node.pop("meta", None)
     if repo is not None and dependency_rows:
         additions = projected_dependencies(contract, dependency_rows, candidate.get("evidence_dependencies", []), repo)
         if additions:
@@ -1005,10 +1058,14 @@ def project_candidate(document, candidate, derived=None, repo=None):
 
 def validate_projection(contract, manifest):
     represented = {}
+    descriptions = {}
+    disclosures = {}
     def walk(fields, prefix):
         for field in fields:
             identity = prefix + field["name"]
             represented[identity] = field.get("data_categories", [])
+            descriptions[identity] = field.get("description", "")
+            disclosures[identity] = field.get("meta", {}).get("accepted_uncertainties", [])
             walk(field.get("fields", []), identity + ".")
     for dataset in manifest.get("dataset", []):
         for collection in dataset.get("collections", []):
@@ -1020,7 +1077,29 @@ def validate_projection(contract, manifest):
     errors = []
     if set(represented) != set(rows):
         errors.append("Manifest field/member coverage differs from canonical classification.")
+    export_nodes = {"dataset:" + node["fides_key"]: node for node in manifest.get("dataset", [])}
+    export_nodes.update({"system:" + node["fides_key"]: node for node in manifest.get("system", [])})
+    expected = {target: [] for target in export_nodes}
+    for gap in contract.get("gaps", []):
+        entry = uncertainty.gap_entry(gap)
+        if entry:
+            for target in gap["resolution"].get("export_targets", []):
+                if target not in expected:
+                    errors.append("Accepted uncertainty export target is missing: " + target)
+                else:
+                    expected[target].append(entry)
+    for target, entries in expected.items():
+        if export_nodes[target].get("meta", {}).get("accepted_uncertainties", []) != entries:
+            errors.append(target + ": accepted uncertainty disclosure differs from canonical decisions")
     for identity in represented.keys() & rows.keys():
+        entry = uncertainty.field_entry(rows[identity])
+        if disclosures.get(identity, []) != ([entry] if entry else []):
+            errors.append(identity + ": accepted uncertainty disclosure differs from canonical decision")
+        if entry and uncertainty.disclosure(entry) not in descriptions.get(identity, ""):
+            errors.append(identity + ": manifest omits accepted uncertainty")
+        content = rows[identity].get("open_content_resolution") or {}
+        if content.get("outcome") == "reviewed_open_content" and content.get("residual_uncertainty") not in descriptions.get(identity, ""):
+            errors.append(identity + ": manifest omits reviewed open-content uncertainty")
         if sorted(represented[identity]) != sorted(rows[identity].get("categories", [])):
             errors.append(identity + ": manifest category differs from the canonical decision")
     return errors
@@ -1041,8 +1120,12 @@ def classification_certificate(document, derived, repo, manifest):
             "source_inventory_digest": digest(source_inventory(repo, contract.get("migration_exclusions"))), "inventory_digest": contract["inventory_digest"], "migration_exclusions": contract.get("migration_exclusions", {}),
             "manifest_semantics_digest": digest(manifest_semantics(manifest)), "gap_inventory_digest": gap_inventory_digest(contract),
             "coverage_digest": coverage_digest(derived),
+            "runtime_digest": digest(derived.get("systems", [])),
             "shape_observations": copy.deepcopy(contract.get("shape_observations", {})),
             "gap_resolutions": copy.deepcopy(contract.get("gaps", [])),
+            "uncertainty_fields": {row["entity_id"]: copy.deepcopy(row) for row in all_rows(contract["fields"]) if row.get("accepted_uncertainty")},
+            "uncertainty_history": copy.deepcopy(contract.get("uncertainty_history", [])),
+            "uncertainty_evidence": {key: copy.deepcopy(contract["evidence"][key]) for row in all_rows(contract["fields"]) if row.get("accepted_uncertainty") for key in row["evidence_ids"]},
             "diagnostic_history": copy.deepcopy(contract.get("diagnostic_history", [])),
             "gap_evidence": {key:copy.deepcopy(contract["evidence"][key]) for gap in contract.get("gaps", []) for key in gap.get("resolution", {}).get("evidence_ids", [])}}
 
@@ -1066,6 +1149,8 @@ def accepted_certificate_errors(derived, repo, candidate=None):
         expected = {"version": VERSION, "policy_digest": taxonomy_digest(), "structural_digest": structure_digest(derived),
                     "source_inventory_digest": digest(source_inventory(repo, certificate.get("migration_exclusions"))), "manifest_semantics_digest": digest(manifest_semantics(manifest))}
         errors = []
+        if certificate.get("runtime_digest") is not None and certificate["runtime_digest"] != digest(derived.get("systems", [])):
+            errors.append("Sealed runtime definitions or flows changed.")
         for observation in certificate.get("gap_resolutions", []) + derived.get("coverage", {}).get("migration_coverage", {}).get("records", []):
             errors.extend(gap_resolution.observation_errors(observation, repo))
         if certificate.get("coverage_digest") != coverage_digest(derived) and (certificate.get("coverage_digest") or any(derived.get("coverage", {}).get(key) for key in gap_resolution.COVERAGE_KEYS)):
@@ -1094,16 +1179,16 @@ def gap_partition(document, derived, repo=None):
         # The complete snapshot binds both target definitions and recorded dispositions.
         for gap in contract["gaps"]:
             gap.setdefault("resolution_history", []).append(copy.deepcopy(gap.get("resolution", {})))
-            gap["resolution"] = {"outcome": "accepted_certificate", "certificate_digest": digest(certificate)}
+            gap["resolution"] = {**{key: copy.deepcopy(gap["resolution"][key]) for key in ("accepted_uncertainty", "export_targets", "covered_occurrence_ids") if key in gap["resolution"]}, "outcome": "accepted_certificate", "certificate_digest": digest(certificate)}
             contract["accepted_certificate"] = digest(certificate)
             gap["resolution_binding"] = gap_binding(gap, contract)
-        return gap_resolution.calculate({"classification_review":contract}, derived, repo)
+        return gap_resolution.calculate({**document, "classification_review":contract}, derived, repo)
     return gap_resolution.calculate(document, derived, repo)
 
 
 def validate_repository(document, derived, repo, require_complete=True, candidate=None):
     errors = validate_contract(document, derived, repo, require_complete=require_complete, candidate=candidate)
-    if errors and require_complete and not document.get("classification_review") and not accepted_certificate_errors(derived, repo, candidate):
+    if errors and require_complete and not document.get("classification_review") and not accepted_certificate_errors(derived, repo, candidate) and not gap_partition(document, derived, repo)["active_blockers"]:
         return []
     return errors
 
@@ -1146,10 +1231,19 @@ def restore_accepted_decisions(contract, derived, repo):
     if set(represented) != {row["entity_id"] for row in rows} or inventory != certificate.get("inventory_digest") or gap_inventory_digest(contract) != certificate.get("gap_inventory_digest"):
         return
     contract["accepted_certificate"] = digest(certificate)
+    contract["evidence"].update(copy.deepcopy(certificate.get("uncertainty_evidence", {})))
     contract["diagnostic_history"] = copy.deepcopy(certificate.get("diagnostic_history", []))
+    contract["uncertainty_history"] = copy.deepcopy(certificate.get("uncertainty_history", []))
     # The certificate attests prior completion; do not invent the discarded investigation or
     # claim that a particular runtime validator was inspected during this cache reconstruction.
     for row in reversed(rows):
+        preserved = certificate.get("uncertainty_fields", {}).get(row["entity_id"])
+        if preserved:
+            for key in DECISION_KEYS:
+                if key in preserved:
+                    row[key] = copy.deepcopy(preserved[key])
+            row["decision_binding"] = decision_binding(row, contract)
+            continue
         field = represented[row["entity_id"]]
         categories = field.get("data_categories", [])
         children = row.get("nested_members", [])
@@ -1173,7 +1267,7 @@ def restore_accepted_decisions(contract, derived, repo):
         if audited:
             gap["resolution_history"] = copy.deepcopy(audited.get("resolution_history", [])) + [copy.deepcopy(audited["resolution"])]
         gap["status"] = "resolved"
-        gap["resolution"] = {"outcome": "accepted_certificate", "certificate_digest": digest(certificate),
+        gap["resolution"] = {**{key: copy.deepcopy(audited["resolution"][key]) for key in ("accepted_uncertainty", "export_targets", "covered_occurrence_ids") if audited and key in audited["resolution"]}, "outcome": "accepted_certificate", "certificate_digest": digest(certificate),
             "rationale": "Prior resolution of this exact extraction gap is attested by the unchanged sealed snapshot; original investigation details were in the deleted cache."}
         gap["resolution_binding"] = gap_binding(gap, contract)
     contract["prior_field_decisions_used"] = True

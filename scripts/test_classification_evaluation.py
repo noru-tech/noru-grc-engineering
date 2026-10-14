@@ -136,7 +136,8 @@ class ClassificationEvaluation(unittest.TestCase):
         batch = command("python3", SCRIPTS / "investigate.py", f"--repo={repo}", "--limit=2")
         self.assertEqual(batch.returncode, 0, batch.stderr)
         request = json.loads(batch.stdout)
-        self.assertEqual(request["counts"]["included"], 2)
+        self.assertEqual(len(request["requests"]), 2)
+        self.assertEqual(request["counts"]["included"], 2 + len(request["extraction_gaps"]))
         self.assertGreater(request["counts"]["remaining_agent"], 0)
         self.assertEqual(request["counts"]["human_pending"], 0)
         decisions = [
@@ -260,7 +261,9 @@ class ClassificationEvaluation(unittest.TestCase):
                 batch = command("python3", SCRIPTS / "investigate.py", f"--repo={repo}", "--limit=200")
                 self.assertEqual(batch.returncode, 0, batch.stderr)
                 counts = json.loads(batch.stdout)["counts"]
-                self.assertEqual(counts["agent_pending"], 0)
+                self.assertEqual(counts["agent_pending_fields"], 0)
+                self.assertEqual(counts["agent_pending_gaps"], 1)
+                self.assertEqual(counts["agent_pending"], 1)
                 self.assertEqual(len(json.loads(batch.stdout)["extraction_gaps"]), 1)
                 self.assertGreater(counts["human_pending"], 0)
                 self.assertFalse((repo / ".fides/datamap.yml").exists())

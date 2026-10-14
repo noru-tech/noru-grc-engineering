@@ -261,6 +261,25 @@ preserves independent analysis and identifies the missing evidence or capability
 
 ## Scan completion
 
+For investigated uncertainty that a human explicitly accepts, follow
+`references/accepted-uncertainty.md`. Use the generated scoped acceptance templates and canonical
+`--uncertainties` command. Accepted uncertainty is accounted for and remains disclosed; it is not
+an unanswered review item. Preserve unknown meaning and never invent acceptance or missing facts.
+
+
+Source-evidenced arbitrary content may be reviewed and accepted with residual uncertainty. Follow
+**Reviewing deliberately open content** in `commands/scan.md`; bounded values are not a prerequisite.
+Keep known-member investigation and accountable acceptance separate.
+
+The agent owns gaps left by deterministic extraction. Follow the **Agent fallback is part of every
+scan** procedure in `commands/scan.md`: investigate source and available framework evidence, model
+supported findings through supplemental definitions or shape/relationship proposals, then submit
+canonical gap resolutions. Empty field batches do not exhaust work while extraction gaps remain.
+The agent must never delegate investigation to the plugin or halt evidence gathering for development
+work. A plugin limitation is not a scan outcome. For unresolved facts, report the inspected evidence,
+exact missing evidence, next evidence-gathering action and map impact; continue independent work.
+Keep semantic classification, accountable acceptance and publication separate from structural closure.
+
 Follow `commands/scan.md` through enrichment, not just collection and reconciliation. Investigate
 all queued fields, processing purposes, subjects, system-to-datastore access, and persistent stores
 outside supported schemas. Populate the separate proposal cache with citations, rationale,

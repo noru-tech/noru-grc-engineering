@@ -372,6 +372,22 @@
           "items": {
             "type": "string"
           }
+        },
+        "technical_questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "accepted_uncertainty_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "accepted_uncertainties": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         }
       }
     }

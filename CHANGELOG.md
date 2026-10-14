@@ -6,6 +6,32 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Add explicit scoped uncertainty acceptance for investigated fields and coverage findings. Preserve
+  unknown meaning, reviewer attribution and map impact through review, sealing and Fides export;
+  reopen changed evidence and retain acceptance history. Supply a batch command and review templates.
+
+- Permit evidenced, reviewed open content through classification and sealing without requiring
+  bounded values; preserve residual uncertainty in exported descriptions and retain evidence checks.
+
+- Keep collector gaps in the agent investigation queue even when all fields are classified. Supply
+  supplemental-model fallback steps and require actionable evidence investigations instead of
+  plugin-development outcomes
+  without clearing structural, semantic or approval gates.
+
+- Model supported authentication-ticket and RabbitMQ header structures independently of database
+  records, using pinned framework contracts and retaining open-content and customization gaps.
+- Trace injected default propagators through referenced projects and evidenced SDK initialization;
+  retain blockers for custom overrides, conditional activation and unsupported header decoding.
+- Discover Aspire YARP forwarding runtimes and source-defined routes separately from provisioners;
+  permit evidenced supplemental provisioned systems without labeling them external recipients.
+- Count enrichment-discovered storage gaps as technical blockers across the shared review gates.
+  Allow evidenced known-open record structure to resolve extraction without accepting its meaning.
+- Resolve explicitly scoped runtime findings against evidenced systems and flows; reopen them on
+  structural changes without requiring a fabricated dataset or accepting privacy meaning.
+
+- Privacy: add a pinned ASP.NET Identity 10.0.12 field contract and provisional default Identity tables. Configuration and framework model diagnostics still require evidence-backed investigation.
+- Privacy: discover C# web, worker, Aspire and MAUI runtime entrypoints from lexical source evidence and project boundaries.
+
 - Honor evidence-bound extraction-gap dispositions consistently across review, validation, sealing,
   export, publication preflight and CI. Preserve observed diagnostics, resolution history and active
   blockers; reopen stale or incomplete evidence instead of clearing acceptance safeguards.

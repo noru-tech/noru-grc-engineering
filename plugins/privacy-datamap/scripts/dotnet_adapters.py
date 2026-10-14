@@ -64,3 +64,24 @@ def external_properties(reader, name, model):
     adapter['package_refs'] = sorted({ref for p in evidence for ref in (p['ref'],p.get('version_ref',p['ref']))})
     return [{'name':f['name'],'type':f['clr_type'].replace('TKey',key_type),'line':model['line'],
              'attributes':[],'owner':model,'framework_contract':adapter} for f in contract['fields']]
+
+
+def identity_default_models(reader, model):
+    """Emit pinned default schemas as candidates; configuration still requires investigation."""
+    packages = reader.projects.get(model['project'], {}).get('packages', [])
+    evidence = [p for p in packages if p['name'] == 'Microsoft.AspNetCore.Identity.EntityFrameworkCore' and not p['conditional']]
+    versions = {p['version'] for p in evidence}
+    contract = next((c for c in CONTRACTS if versions == {c['version']} and c.get('default_tables')), None)
+    if contract is None: return []
+    refs = sorted({ref for p in evidence for ref in (p['ref'], p.get('version_ref', p['ref']))})
+    result = []
+    for table in contract['default_tables']:
+        adapter = {k: contract[k] for k in ('adapter_id', 'version', 'license', 'schema_sources')}
+        adapter.update({k: table[k] for k in ('source_url', 'source_sha256')})
+        adapter['package_refs'] = refs
+        synthetic = dict(model, name=table['type'], qualified='Microsoft.AspNetCore.Identity.'+table['type'],
+                         body=[], header=[], modifiers=[], attributes=[])
+        synthetic['contract_properties'] = [dict(name=f['name'], type=f['clr_type'].replace('TKey', 'string'),
+            line=model['line'], attributes=[], owner=synthetic, framework_contract=adapter) for f in table['fields']]
+        result.append((table['table'], synthetic))
+    return result

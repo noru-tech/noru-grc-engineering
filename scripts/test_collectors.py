@@ -2125,15 +2125,15 @@ def test_datamap_enrichment_gate(results, tmp):
     document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     gap = run(command)
-    results.check("[privacy-datamap] explicit store gaps remain visible at review readiness",
-                  gap.returncode == 0 and "Provide the archive payload contract" in (cache / "privacy-datamap.review.md").read_text())
+    results.check("[privacy-datamap] explicit store gaps remain visible and block review readiness",
+                  gap.returncode == 1 and "Provide the archive payload contract" in (cache / "privacy-datamap.review.md").read_text())
     document["proposals"][0].update(proposal_kind="special_category", proposed_categories=["user.health_and_medical"])
     document = seed_fixture_classification(repo, document=document)
     proposals.write_text(json.dumps(document))
     special = run(command)
     special_section = (cache / "privacy-datamap.review.md").read_text().split("## Possible Article 9 or Article 10 data")[1]
     results.check("[privacy-datamap] evidenced special categories appear in the dedicated review section",
-                  special.returncode == 0 and document["proposals"][0]["entity_id"].rsplit("/", 1)[0] in special_section
+                  special.returncode == 1 and document["proposals"][0]["entity_id"].rsplit("/", 1)[0] in special_section
                   and "user.health_and_medical" in special_section)
 
 
@@ -2145,6 +2145,7 @@ def test_datamap_enrichment_gate(results, tmp):
     observed_count = sum(len(c["fields"]) for d in derived["datasets"] for c in d["collections"])
     results.check("[privacy-datamap] evidence retains every observed field including deterministic fields",
                   len(evidence["evidence_record"]["fields"]) == observed_count)
+    document["store_investigation"]["findings"] = covered["store_investigation"]["findings"]
     for row in document["proposals"]:
         row.update(proposal_kind="personal", proposed_categories=["user.unique_id"], unresolved_question="",
                    resolution_needed="", decision_impact="", reasoning_group="identifiers", rationale="", analysis={})
@@ -4885,7 +4886,7 @@ def main(argv):
         return 2
 
     results = Results()
-    for suite in ("test_field_review.py", "test_typescript_evidence.py", "test_classification_evaluation.py", "test_privacy_investigation.py", "test_privacy_delivery_gate.py", "test_static_bindings.py", "test_dotnet.py", "test_dotnet_generic.py", "test_gap_resolution.py"):
+    for suite in ("test_field_review.py", "test_typescript_evidence.py", "test_classification_evaluation.py", "test_privacy_investigation.py", "test_privacy_delivery_gate.py", "test_static_bindings.py", "test_dotnet.py", "test_dotnet_generic.py", "test_dotnet_boundaries.py", "test_gap_resolution.py", "test_uncertainty.py"):
         checks = run([sys.executable, str(ROOT / "scripts" / suite)])
         results.check("[privacy-datamap] " + suite, checks.returncode == 0, checks.stderr)
 

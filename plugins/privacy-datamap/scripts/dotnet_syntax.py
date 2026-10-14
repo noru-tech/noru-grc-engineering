@@ -63,7 +63,7 @@ def string_end(text, start, depth=0):
     raise ValueError('Unterminated string')
 
 
-def lex(text):
+def lex(text, *, allow_preprocessor=False):
     tokens, pos, line = [], 0, 1
     while pos < len(text):
         ch = text[pos]
@@ -75,7 +75,7 @@ def lex(text):
             end = text.find('*/', pos + 2)
             if end < 0: raise ValueError('Unterminated comment')
             line += text[pos:end + 2].count('\n'); pos = end + 2; continue
-        if ch == '#' and not re.match(r'#(?:nullable\b|pragma\s+warning\b|region\b|endregion\b)', text[pos:]):
+        if ch == '#' and not allow_preprocessor and not re.match(r'#(?:nullable\b|pragma\s+warning\b|region\b|endregion\b)', text[pos:]):
             raise SourceError('Conditional or preprocessor source requires investigation',line)
         if ch == '#':
             end = text.find('\n', pos); pos = len(text) if end < 0 else end; continue

@@ -33,6 +33,63 @@ class ResolutionTests(unittest.TestCase):
         field_review.build_contract(self.document,self.repo,self.compiler)
         return self.document['classification_review']['gaps'][-1]
 
+    def test_gap_only_batch_remains_agent_work_after_field_decisions(self):
+        import investigate
+        self.gap(); self.resolve()
+        batch=investigate.prepare_batch(self.document,24,self.repo)
+        self.assertEqual(batch['requests'],[])
+        self.assertEqual(batch['counts']['agent_pending'],1)
+        self.assertEqual(batch['counts']['agent_pending_gaps'],1)
+        self.assertEqual(batch['counts']['included'],1)
+        task=batch['extraction_gaps'][0]
+        self.assertEqual(task['resolution_owner'],'agent')
+        self.assertEqual(task['investigation_state'],'investigation_required')
+        self.assertTrue(task['investigation_steps'])
+        self.assertEqual(batch['human_questions'],[])
+
+    def test_fallback_attempt_is_audited_but_never_clears_a_gap(self):
+        import investigate
+        gap=self.gap(); self.resolve()
+        answer=self.answer(gap,'unresolved')
+        answer['fallback_review']=gap_resolution.fallback_template()
+        self.assertTrue(field_review.apply_gap_decisions(self.document,[answer],self.repo))
+        answer['fallback_review'].update(source_review='Read the producer and current source contract.',
+            evidence_ids=gap['evidence_ids'],supplemental_attempt='Known fields fit the supplemental dataset; the external payload definition is absent.',
+            missing_fact='Fields emitted by the configured external producer.',required_evidence='The versioned producer payload contract.',
+            decision_impact='Determines additional stored members and their classifications.',
+            next_evidence_action='Request the versioned producer payload contract from its owner.')
+        self.assertEqual(field_review.apply_gap_decisions(self.document,[answer],self.repo),[])
+        task=investigate.prepare_batch(self.document,24,self.repo)['extraction_gaps'][0]
+        self.assertEqual(task['investigation_state'],'evidence_unavailable')
+        self.assertTrue(field_review.gap_partition(self.document,self.derived,self.repo)['active_blockers'])
+        progress=review.scan_progress(self.document,{},self.derived,[],[],self.repo)
+        self.assertEqual(progress['publication'],'blocked')
+        answer['fallback_review']['remaining_reason']='representation_limitation'
+        self.assertTrue(field_review.apply_gap_decisions(self.document,[answer],self.repo))
+        self.assertEqual(task['next_evidence_action'],answer['fallback_review']['next_evidence_action'])
+        self.assertTrue(any('Never delegate investigation' in step for step in task['investigation_steps']))
+        self.assertIn('next evidence-gathering action', ' '.join(progress['next_actions']))
+        # Old cached implementation-limit records stay visible but require renewed investigation.
+        stored=self.document['classification_review']['gaps'][-1]['resolution']['fallback_review']
+        stored['remaining_reason']='representation_limitation'
+        legacy_task=investigate.prepare_batch(self.document,24,self.repo)['extraction_gaps'][0]
+        self.assertEqual(legacy_task['investigation_state'],'investigation_required')
+        self.assertEqual(legacy_task['resolution_owner'],'agent')
+        stored['remaining_reason']='evidence_unavailable'
+        next_action=stored.pop('next_evidence_action')
+        self.assertEqual(investigate.prepare_batch(self.document,24,self.repo)['extraction_gaps'][0]['investigation_state'],'investigation_required')
+
+        stored['next_evidence_action']=next_action
+        self.assertEqual(investigate.prepare_batch(self.document,24,self.repo)['extraction_gaps'][0]['investigation_state'],'evidence_unavailable')
+        with (self.repo/'schema.ts').open('a') as source:source.write('\n// changed evidence\n')
+        self.assertEqual(investigate.prepare_batch(self.document,24,self.repo)['extraction_gaps'][0]['investigation_state'],'investigation_required')
+
+    def test_legacy_unresolved_gap_is_not_an_exhausted_investigation(self):
+        import investigate
+        gap=self.gap()
+        self.assertEqual(field_review.apply_gap_decisions(self.document,[self.answer(gap,'unresolved')],self.repo),[])
+        self.assertEqual(investigate.prepare_batch(self.document,24,self.repo)['extraction_gaps'][0]['investigation_state'],'investigation_required')
+
     def answer(self, gap, outcome='not_applicable'):
         return {'gap_id':gap['gap_id'],'outcome':outcome,'rationale':'The inspected producer is represented by the current field definitions.',
                 'scope_rationale':'This diagnostic concerns an unused read-only helper; it does not alter represented storage.',
@@ -42,6 +99,79 @@ class ResolutionTests(unittest.TestCase):
                 'coverage_binding':{'datastore':'db','migration_paths':[gap.get('ref','').rsplit(':',1)[0]],'field_ids':['db/records/email'],'evidence_ids':gap['evidence_ids']},
                 'identity_rationale':'The explicit connection binds this producer to the represented datastore.',
                 'coverage_rationale':'The current declaration and producer enumerate the complete relevant schema.'}
+
+    def test_enrichment_resolution_is_honored_by_progress_without_erasing_finding(self):
+        self.document['store_investigation']={'findings':[{'store':'auxiliary','status':'gap','refs':['schema.ts:3'],
+            'unresolved_question':'Does the auxiliary producer persist records?', 'resolution_needed':'Trace the writer.'}]}
+        field_review.build_contract(self.document,self.repo,self.compiler)
+        gap=self.document['classification_review']['gaps'][-1]
+        self.resolve()
+        self.assertEqual(field_review.apply_gap_decisions(self.document,[self.answer(gap)],self.repo),[])
+        progress=review.scan_progress(self.document,{},self.derived,[],[],self.repo)
+        self.assertEqual(progress['agent_investigation'],'complete')
+        self.assertEqual(progress['technical_questions'],[])
+        self.assertEqual(progress['extraction_gaps'],0)
+        self.assertEqual(self.document['store_investigation']['findings'][0]['status'],'gap')
+        self.assertFalse(field_review.validate_contract(self.document,self.derived,self.repo))
+
+    def test_enrichment_gap_cannot_use_cacheless_certificate_to_bypass_review(self):
+        self.resolve()
+        manifest=self.accepted_fixture(resolve=False)
+        document={'store_investigation':{'findings':[{'store':'new','status':'gap','refs':['schema.ts:3'],
+            'unresolved_question':'A new producer needs a contract.'}]}}
+        self.assertTrue(field_review.gap_partition(document,self.derived,self.repo)['active_blockers'])
+        self.assertTrue(field_review.validate_repository(document,self.derived,self.repo,candidate=manifest))
+
+    def test_runtime_only_resolution_survives_rescan_and_reopens_on_flow_change(self):
+        self.derived['systems']=[{'fides_key':'edge','refs':['schema.ts:3'],
+                                 'dataset_references':[], 'egress':[{'type':'system','fides_key':'service'}]}]
+        self.document['store_investigation']={'findings':[{'store':'edge','status':'gap',
+            'refs':['schema.ts:3'],'required_system_ids':['edge'],
+            'unresolved_question':'Where does the provisioned runtime forward requests?'}]}
+        field_review.build_contract(self.document,self.repo,self.compiler)
+        gap=self.document['classification_review']['gaps'][-1]
+        answer=self.answer(gap,'modeled')
+        answer.update(field_ids=[],system_ids=['edge'],runtime_rationale='The evidenced runtime forwards to the represented service; it has no persistent dataset.')
+        answer['evidence_ids']=sorted(set(answer['evidence_ids']+self.document['classification_review']['runtime_definitions']['edge']['evidence_ids']))
+        self.assertEqual(field_review.apply_gap_decisions(self.document,[answer],self.repo),[])
+        field_review.build_contract(self.document,self.repo,self.compiler)
+        self.assertEqual(field_review.gap_partition(self.document,self.derived,self.repo)['active_blockers'],[])
+        self.derived['systems'][0]['egress'][0]['fides_key']='other-service'
+        self.assertTrue(field_review.gap_partition(self.document,self.derived,self.repo)['active_blockers'])
+        field_review.build_contract(self.document,self.repo,self.compiler)
+        self.assertTrue(field_review.gap_partition(self.document,self.derived,self.repo)['active_blockers'])
+
+    def test_unrelated_runtime_cannot_resolve_datastore_or_required_runtime(self):
+        self.derived['systems']=[{'fides_key':'edge','refs':['schema.ts:3']}]
+        gap=self.gap()
+        answer=self.answer(gap,'modeled');answer.update(field_ids=[],system_ids=['edge'],runtime_rationale='Forwarding only.')
+        answer['evidence_ids']=sorted(set(answer['evidence_ids']+self.document['classification_review']['runtime_definitions']['edge']['evidence_ids']))
+        self.assertTrue(field_review.apply_gap_decisions(self.document,[answer],self.repo))
+        answer['system_ids']=['missing']
+        self.assertTrue(field_review.apply_gap_decisions(self.document,[answer],self.repo))
+        self.document['classification_review']['gaps'][-1]['scope']={}
+        answer['system_ids']=['edge']
+        self.assertTrue(field_review.apply_gap_decisions(self.document,[answer],self.repo))
+
+    def test_sealed_certificate_rejects_changed_runtime_flows(self):
+        self.resolve(); self.accepted_fixture(resolve=False)
+        self.assertEqual(field_review.accepted_certificate_errors(self.derived,self.repo),[])
+        self.derived['systems']=[{'fides_key':'new-edge','egress':[]}]
+        self.assertIn('Sealed runtime definitions or flows changed.',field_review.accepted_certificate_errors(self.derived,self.repo))
+
+    def test_known_open_record_resolves_structure_without_accepting_meaning(self):
+        gap=self.gap()
+        row=self.document['classification_review']['fields'][0]
+        row.update(open_content=True, type={'kind':'record','key_type':'string','value_type':'string','open':True})
+        row['open_content_resolution']=None
+        answer=self.answer(gap,'modeled')
+        self.assertTrue(field_review.apply_gap_decisions(self.document,[answer],self.repo))
+        answer['open_structure']={row['entity_id']:{'additional_entries':True,'key_type':'string','value_type':'string',
+            'rationale':'The producer permits arbitrary string entries.', 'evidence_ids':gap['evidence_ids']}}
+        self.assertEqual(field_review.apply_gap_decisions(self.document,[answer],self.repo),[])
+        self.assertEqual(field_review.gap_partition(self.document,self.derived,self.repo)['active_blockers'],[])
+        self.assertTrue(field_review.validate_contract(self.document,self.derived,self.repo))
+        self.assertEqual(row['status'],'needs_investigation')
 
     def test_resolved_raw_diagnostic_is_visible_but_not_a_blocker(self):
         gap=self.gap(); self.resolve()

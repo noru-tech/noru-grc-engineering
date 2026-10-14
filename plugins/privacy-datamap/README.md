@@ -196,6 +196,18 @@ A manifest carrying any `needs_review: true` **cannot be pushed**. That is the m
 lint: a confidently wrong data category is worse than a gap, because the gap gets reviewed and the
 wrong answer gets signed.
 
+## Accepting uncertainty
+
+An investigated field or coverage finding can be explicitly accepted with uncertainty.
+The agent presents the remaining uncertainty and map impact; a named human reviewer decides.
+`investigate.py` supplies scoped `uncertainty_candidates` and accepts approved records through
+`--uncertainties=<decisions.json>`. See [the workflow](references/accepted-uncertainty.md).
+
+Accepted uncertainty clears the affected pending review, stays visible in the exported map,
+and reopens when its evidence changes. Zero active gaps means zero unaccounted-for findings,
+including those explicitly accepted with uncertainty. Unknown meaning is not relabeled non-personal.
+Normal map acceptance and publication confirmation still apply.
+
 ## Incremental reconciliation
 
 A repeatable scan compares normalized observations with the accepted baseline. Citation locations,

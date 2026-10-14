@@ -62,7 +62,7 @@ def dependency_gaps(doc):
                 check_inputs(collection.get("fields", []))
     for system in doc.get("system", []):
         meta = (system.get("meta") or {}).get("noru", {})
-        if meta.get("origin") == "external" or system.get("ingress") or system.get("egress"):
+        if meta.get("origin") in {"external", "provisioned"} or system.get("ingress") or system.get("egress"):
             if not meta.get("refs"):
                 errors.append(f"{system['fides_key']}: external systems and flows require meta.noru.refs")
             require_dependencies("system:" + system["fides_key"], meta.get("refs"))
@@ -117,13 +117,18 @@ def extract(repo, candidate=False):
                          "collections": collections, "definition": dataset,
                          "system_references": [s["fides_key"] for s in document.get("system", []) if dataset["fides_key"] in s.get("dataset_references", [])]})
     external = []
+    provisioned = []
     for system in document.get("system", []):
         if metadata(system).get("origin") == "external":
             external.append({**system, "refs": refs(metadata(system).get("refs"))})
+        if metadata(system).get("origin") == "provisioned":
+            if not metadata(system).get("provisioner"):
+                raise ValueError("Provisioned systems require an evidenced provisioner reference")
+            provisioned.append({**system, "refs": refs(metadata(system).get("refs"))})
     for system in document.get("system", []):
         if system.get("ingress") or system.get("egress"):
             refs(metadata(system).get("refs"))
-    return {"datasets": datasets, "external_systems": external, "systems": document.get("system", []), "evidence_dependencies": document.get("evidence_dependencies", [])}
+    return {"datasets": datasets, "external_systems": external, "provisioned_systems": provisioned, "systems": document.get("system", []), "evidence_dependencies": document.get("evidence_dependencies", [])}
 
 
 

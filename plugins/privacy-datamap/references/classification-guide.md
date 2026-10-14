@@ -286,7 +286,11 @@ on it. No broad category or approval substitutes for missing evidence.
 
 An empty category list on an object is not an uncategorized-value finding when its reviewed
 members carry the classifications. Review all nested members and unresolved/open content before
-calling the container covered. Keep categories on the members in the Fideslang export.
+calling the container covered. Keep known-member categories on those members in the Fideslang export.
+For source-evidenced arbitrary additional content, `reviewed_open_content` may carry a separately
+justified content category on the container, including when no named members exist. Record
+`residual_uncertainty` and cited evidence; the exported description preserves the open-content
+risk. Do not invent children or claim values are bounded to satisfy review.
 
 A declared delivery or queue state does not establish demographic information. The consistency
 gate rejects a resolved demographic category when the decision's meaning explicitly describes

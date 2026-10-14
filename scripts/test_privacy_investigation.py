@@ -116,7 +116,8 @@ class InvestigationTests(unittest.TestCase):
         result=self.command('--limit=1')
         self.assertEqual(result.returncode,0,result.stderr)
         batch=json.loads(result.stdout)
-        self.assertEqual(batch['counts'],{'agent_pending':2,'human_pending':0,'included':1,'remaining_agent':1})
+        self.assertEqual(batch['counts'],{'agent_pending':2,'agent_pending_fields':2,'agent_pending_gaps':0,
+                                         'human_pending':0,'included':1,'remaining_agent':1})
         self.assertEqual(len(batch['requests'][0]['evidence']),1)
         self.assertEqual(before,self.path.read_bytes())
         self.assertIn('not completion',batch['instructions'])

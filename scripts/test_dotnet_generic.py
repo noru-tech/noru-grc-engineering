@@ -94,6 +94,41 @@ class GenericTests(unittest.TestCase):
         self.assertEqual(diagnostic['details']['observed_versions'],['99.0.0'])
         self.assertIn('8.0.0',diagnostic['details']['supported_versions'])
 
+    def test_pinned_identity_default_schema_stays_provisional(self):
+        self.put('App.csproj','<Project><ItemGroup><PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.12" /></ItemGroup></Project>')
+        self.put('Data.cs','using Microsoft.AspNetCore.Identity; using Microsoft.AspNetCore.Identity.EntityFrameworkCore; class Customer : IdentityUser { public string Custom { get; set; } } class Store : IdentityDbContext<Customer> {}')
+        report = self.scan()
+        tables = {t['name']: t for t in report['tables']}
+        self.assertEqual(set(tables), {'AspNetUsers','AspNetRoles','AspNetUserClaims','AspNetUserLogins','AspNetUserTokens','AspNetRoleClaims','AspNetUserRoles'})
+        self.assertEqual(len(tables['AspNetUsers']['fields']), 16)
+        self.assertEqual({f['name'] for f in tables['AspNetUserTokens']['fields']}, {'UserId','LoginProvider','Name','Value'})
+        self.assertTrue(any('framework table names' in g['reason'] for g in report['gaps']))
+        field = tables['AspNetUserTokens']['fields'][0]
+        self.assertEqual(field['framework_contract']['version'], '10.0.12')
+        self.assertEqual(len(field['framework_contract']['schema_sources']), 2)
+        self.assertEqual(report, self.scan())
+        self.put('App.csproj', self.files['App.csproj'].replace('10.0.12','10.0.13'))
+        self.assertNotIn('AspNetUserTokens', {t['name'] for t in self.scan()['tables']})
+
+    def test_csharp_runtime_entrypoints_need_calls_and_project(self):
+        self.put('web/App.csproj','<Project />')
+        self.put('web/Program.cs','var builder = WebApplication.CreateBuilder(args); var app = builder.Build(); app.Run();')
+        self.put('worker/App.csproj','<Project />')
+        self.put('worker/Program.cs','var builder = Host.CreateApplicationBuilder(args); builder.Build().Run();')
+        self.put('phone/App.csproj','<Project />')
+        self.put('phone/Startup.cs','var builder = MauiApp.CreateBuilder(); builder.UseMauiApp<App>();')
+        self.assertEqual({e['root'] for e in self.scan()['runtime_entrypoints']}, {'web','worker','phone'})
+        self.put('web/Program.cs','// WebApplication.CreateBuilder(args); app.Run();\nvar text = "WebApplication.CreateBuilder(args); app.Run();";')
+        self.put('worker/Program.cs','var builder = Host.CreateApplicationBuilder(args); var text = "app.Run();";')
+        self.put('phone/Startup.cs','var builder = MauiApp.CreateBuilder(); builder.UseMauiApp<App>(); class MauiApp {}')
+        self.assertEqual(self.scan()['runtime_entrypoints'], [])
+        self.put('phone/Startup.cs', '#if ANDROID\nvar builder = MauiApp.CreateBuilder(); builder.UseMauiApp<App>();\n#endif')
+        self.put('shared/Helper.cs', 'class Helper {}')
+        report = self.scan()
+        self.assertTrue(all('diagnostic_id' in g for g in report['gaps']))
+        self.assertEqual([e['root'] for e in report['runtime_entrypoints']], ['phone'])
+        self.assertTrue(any('preprocessor' in g['reason'] for g in report['gaps']))
+
     def test_clr_storage_serialization_and_validation_stay_separate(self):
         self.context('b.Entity<Row>().Property(r => r.State).HasConversion<string>().HasColumnType("varchar(20)");', 'enum Status { One }')
         self.put('Data.cs',self.files['Data.cs'].replace('public int Id { get; set; }','[JsonIgnore][Required] public Status State { get; set; }'))

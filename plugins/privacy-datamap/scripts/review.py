@@ -3,6 +3,7 @@
 
 import json
 import analysis_storage
+import uncertainty
 import field_review
 import gap_resolution
 import pathlib
@@ -297,32 +298,40 @@ def scan_progress(document, result, derived, errors, blockers, repo=None):
                if row.get("status") != "proposed"]
     human = [row for row in pending if row.get("resolution_owner") == "human"]
     agent = [row for row in pending if row.get("resolution_owner") != "human"]
-    gaps = field_review.gap_partition(document, derived, repo)["active_blockers"]
+    partition = field_review.gap_partition(document, derived, repo)
+    gaps = partition["active_blockers"]
     questions = []
-    for row in human + document.get("system_proposals", []) + document.get("removal_proposals", []):
+    for row in human + document.get("removal_proposals", []):
         for item in [row] + row.get("processing_activities", []):
             question_text = item.get("business_context_question") or item.get("unresolved_question")
             if question_text:
                 questions.append(question_text)
-    questions.extend(row.get("unresolved_question", "Destination unknown") for row in
-                     (derived.get("relationship_mapping") or {}).get("questions", []))
-    questions.extend(row.get("unresolved_question", "Store contract unavailable") for row in
-                     document.get("store_investigation", {}).get("findings", []) if row.get("status") == "gap")
+    accounted_processing = {(gap.get("scope", {}).get("system"), gap.get("scope", {}).get("activity"))
+                            for gap in partition["resolved_diagnostics"] if gap.get("kind") == "processing_uncertainty"}
+    for system in document.get("system_proposals", []):
+        for item in [system] + system.get("processing_activities", []):
+            question = item.get("business_context_question") or item.get("unresolved_question")
+            if question and (system.get("entity_id"), item.get("activity_id")) not in accounted_processing:
+                questions.append(question)
+    technical_questions = []
+    technical_questions.extend(gap.get("message", "Contract unavailable") for gap in gaps)
     questions = list(dict.fromkeys(questions))
-    incomplete = bool(agent or gaps or errors or blockers or document.get("discovery_required"))
+    incomplete = bool(agent or gaps or errors or blockers or technical_questions or document.get("discovery_required"))
     accepted = bool(result.get("accepted_current") and not document.get("relationship_proposal")
                     and not incomplete and not questions and not human)
     actions = []
     if incomplete:
-        actions.append("Agent: finish source investigation and resolve extraction or validation issues; approval cannot resolve these.")
+        actions.append("Agent: investigate source and framework evidence, attempt supplemental structures and relationships, and record gap resolutions; report the exact missing evidence, investigation performed, next evidence-gathering action and map impact. The agent retains investigation ownership through extractor limitations. A reviewer may explicitly accept documented uncertainty; this does not establish missing facts.")
     if questions or human:
         actions.append("User: answer the specific missing-fact questions below; supported proposals remain available for review.")
     if not accepted and not incomplete and not questions and not human:
         actions.append("User: Accept or amend proposals; name the accountable owner.")
-    return {"collection": "complete", "agent_investigation": "incomplete" if incomplete else "complete",
+    accepted_uncertainties = [uncertainty.field_entry(row) for row in field_review.all_rows(contract.get("fields", [])) if row.get("accepted_uncertainty")]
+    accepted_uncertainties += [entry for gap in partition["resolved_diagnostics"] if (entry := uncertainty.gap_entry(gap))]
+    return {"accepted_uncertainties": accepted_uncertainties, "accepted_uncertainty_count": len(accepted_uncertainties), "collection": "complete", "agent_investigation": "incomplete" if incomplete else "complete",
             "agent_pending_fields": len(agent), "extraction_gaps": len(gaps),
             "source_information": "missing" if questions or human else "no open questions",
-            "missing_facts": questions,
+            "missing_facts": questions, "technical_questions": list(dict.fromkeys(technical_questions)),
             "human_approval": "recorded" if accepted else "deferred" if incomplete or questions or human else "pending",
             "publication": "eligible for validation" if accepted else "blocked",
             "next_actions": actions}
@@ -335,13 +344,12 @@ def member_coverage(row):
     members = list(field_review.all_rows(row.get("nested_members", [])))
     def content_pending(item):
         resolution = item.get("open_content_resolution") or {}
-        return item.get("open_content") and resolution.get("outcome") not in {
-            "closed_by_runtime_validation", "bounded_content_contract", "accepted_certificate"}
+        return item.get("open_content") and not item.get("accepted_uncertainty") and resolution.get("outcome") not in field_review.CONTENT_OUTCOMES
     pending = [child["entity_id"] for child in members
-               if child.get("status") != "proposed" or child.get("personal_data") == "unknown" or content_pending(child)
+               if child.get("status") != "proposed" or (child.get("personal_data") == "unknown" and not child.get("accepted_uncertainty")) or content_pending(child)
                or (child.get("personal_data") in {"yes", "mixed"}
-                   and not child.get("composite") and not child.get("categories"))]
-    complete = (bool(members) and not pending and row.get("status") == "proposed"
+                   and not child.get("composite") and not child.get("categories") and not child.get("accepted_uncertainty"))]
+    complete = ((bool(members) or row.get("accepted_uncertainty") or (row.get("open_content_resolution") or {}).get("outcome") in {"reviewed_open_content", "accepted_certificate"}) and not pending and row.get("status") == "proposed"
                 and not content_pending(row))
     return {"state": "reviewed members" if complete else "member review incomplete",
             "categories": sorted({c for child in members for c in child.get("categories", [])}),
@@ -377,7 +385,7 @@ def build_outputs(document, result, derived, candidate, errors, repo=None):
         summary = row.get("decision_summary") or group_decision.get("decision_summary") or presentation.get("decision_summary") or row["meaning"].split("\n", 1)[0][:240]
         proposal = {"proposal_kind": "non_personal" if row["personal_data"] == "no" else "personal" if row["personal_data"] in {"yes", "mixed"} else "ambiguous",
                     "proposed_categories": row["categories"], "decision_id": decision_id, "decision_summary": summary,
-                    "unresolved_question": row.get("business_context_question") or (row.get("uncertainty") if row.get("resolution_owner") != "human" else ""),
+                    "unresolved_question": "" if row.get("accepted_uncertainty") else row.get("business_context_question") or (row.get("uncertainty") if row.get("resolution_owner") != "human" else ""),
                     "business_context_question": row.get("business_context_question"), "resolution_needed": row.get("resolution_needed"),
                     "decision_impact": row.get("decision_impact"), "resolution_owner": row.get("resolution_owner"),
                     "rationale": row["rationale"], "refs": row["evidence"]}
@@ -434,8 +442,11 @@ def build_outputs(document, result, derived, candidate, errors, repo=None):
         group["collections"] = sorted(set(group["collections"]) | {collection})
         group["proposal_kinds"] = sorted(set(group["proposal_kinds"]) | {proposal.get("proposal_kind") or "requested"})
         group["data_categories"] = sorted(set(group["data_categories"]) | set(field["classification"]))
+    progress = scan_progress(document, result, derived, errors, blockers, repo)
+    if progress["agent_investigation"] == "incomplete":
+        status = "enrichment incomplete"
     return {"version": "1.0.0", "status": status,
-            "progress": scan_progress(document, result, derived, errors, blockers, repo),
+            "progress": progress,
             "observation_digest": result["observation_digest"],
             "collection_mode": "candidate" if result.get("candidate_context") else "manifest",
             "data_map": {"dotnet": {"diagnostic_summary": derived.get("dotnet", {}).get("diagnostic_summary", {}), **{key: derived.get("dotnet", {}).get(key, []) for key in ("projects", "solutions", "technologies", "relationships", "runtime_bindings", "entity_relationships", "gaps")}}, "system_flows": [{"system": s["fides_key"], "direction": k, "resources": s[k]} for s in candidate.get("system", []) for k in ("ingress", "egress") if s.get(k)], "stores": stores, "processing_activities": activities, "monitoring_scope": result.get("monitoring_scope", {}), "connection_questions": (derived.get("relationship_mapping") or {}).get("questions", []), "relationship_proposal": document.get("relationship_proposal")},
@@ -484,6 +495,7 @@ def render_outputs(outputs):
             data_map.append(f"- {label}: **{progress[key]}**.")
         data_map.extend(["", "Approval pending is not scan failure.", ""])
         data_map.extend(f"- {action}" for action in progress["next_actions"])
+        data_map.extend(f"- Agent investigation: {question}" for question in progress.get("technical_questions", []))
         data_map.append("")
     if outputs["evidence_record"]["reconciliation"].get("candidate_context"):
         data_map.extend(["Candidate collection: stores and fields below use the proposed relationship graph. Accepted files are unchanged.", ""])
@@ -565,6 +577,8 @@ def render_outputs(outputs):
     for gap in outputs["evidence_record"]["agent_analysis"].get("classification_review", {}).get("gaps", []):
         if gap.get("status") != "resolved":
             review.append(f"- Extraction limitation **{gap.get('subject') or gap.get('kind')}**: {gap.get('message', 'Inspect extraction evidence')}")
+    for entry in outputs.get("progress", {}).get("accepted_uncertainties", []):
+        review.append("- " + entry["target_id"] + ": " + uncertainty.disclosure(entry))
     for change in outputs["evidence_record"]["reconciliation"].get("semantic_changes", []):
         if change["kind"] != "personal_to_non_personal_or_removed":
             review.append(f"- **{change['kind'].replace('_', ' ')}**: {change['entity_id'].removeprefix('semantic:')}")
@@ -622,10 +636,11 @@ def render_outputs(outputs):
             question(review, activity)
         findings = outputs["evidence_record"]["agent_analysis"].get("store_investigation", {}).get("findings", [])
         gaps = outputs["evidence_record"].get("extraction_diagnostics", {}).get("active_blockers", [])
-        if gaps or any(finding.get("status") == "gap" for finding in findings):
+        active_stores = {gap.get("scope", {}).get("store") for gap in gaps if gap.get("kind") == "enrichment_coverage"}
+        if gaps:
             review.extend(["", "## Coverage and identity questions", ""])
         for finding in findings:
-            if finding.get("status") == "gap":
+            if finding.get("status") == "gap" and finding.get("store") in active_stores:
                 review.append(f"- {finding.get('store')}: {finding.get('decision_summary') or 'Coverage unresolved'}")
                 question(review, finding)
         for gap in gaps:

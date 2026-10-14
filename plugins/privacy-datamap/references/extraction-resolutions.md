@@ -93,3 +93,53 @@ The automated demonstration in `scripts/test_privacy_delivery_gate.py` creates a
 repository, scans an unlinked migration, records a modeled resolution through the investigation CLI,
 validates, seals, exports and runs publication preflight. It then changes evidence and verifies that
 acceptance/export/preflight block again. No repository-specific plugin edits or Noru calls are used.
+
+## Enrichment findings and known open records
+
+Unresolved `store_investigation.findings` enter the same blocker partition as collector diagnostics.
+They remain agent-owned technical work, including when the collector reports no diagnostics.
+Rebuild the canonical contract after recording a finding, then investigate its gap decision normally.
+A present enrichment gap cannot be bypassed by an older sealed certificate.
+
+A modeled resolution may account for a known open record without accepting its meaning. Supply
+`open_structure`, keyed by canonical field ID, with `additional_entries: true`, the extracted
+`key_type` and `value_type`, a rationale, and cited resolution `evidence_ids`. The type must already
+be an evidenced record with those types. Unknown object shapes do not qualify. This closes only
+the structural diagnostic: field classification, open-content semantic review and human acceptance
+remain mandatory. An evidenced `reviewed_open_content` assessment can complete content review
+without bounding arbitrary values; its `residual_uncertainty` is retained in export. Neither arbitrary values nor incoming baggage become non-personal by default.
+
+For a runtime-only finding, a modeled resolution can supply `system_ids` and `runtime_rationale`
+instead of inventing a dataset. Cite the runtime definition's evidence and explain how its flows
+cover the finding. `required_system_ids` on a finding must all be covered. Definitions and flow
+changes reopen the resolution, including when restoring a sealed certificate. A runtime alone
+cannot resolve a datastore-scoped finding; runtime targets require an explicit runtime scope or
+`required_system_ids`. Older caches remain readable; rebuild the canonical
+contract to obtain runtime definitions before recording this kind of resolution.
+
+## Agent fallback for collector limitations
+
+`investigate.py` counts active gaps alongside pending semantic fields and gives every gap an
+agent-owned fallback task. A zero-length field batch does not mean investigation is finished.
+Use the existing supplemental dataset/system/relationship or shape workflows when automatic
+extraction falls short. Investigation always remains the agent's responsibility. Recollect the candidate and resolve
+against current definitions and evidence; approval and classification remain separate.
+
+An unresolved decision may record `fallback_review` using the supplied template. The API validates
+its inspected-source account, cited evidence, supplemental attempt, exact missing fact, required
+evidence, next evidence-gathering action and decision impact. Current records use
+`evidence_unavailable`; implementation limitations may be documented but are not scan outcomes.
+Missing or stale records, including legacy records labeled `representation_limitation`, remain
+readable and return to `investigation_required`. New submissions must include the next action.
+Neither state clears a blocker or substitutes for acceptance.
+The record proves that an attempt was documented, not that prose is true or all evidence exhausted.
+Never delegate investigation to the plugin or halt evidence gathering for development work.
+Continue source investigation, relationship tracing and supplemental modeling; report the exact
+missing evidence and its map impact when facts remain unavailable. Continue independent tasks.
+
+## Accepted uncertainty
+
+An investigated finding can use `accepted_uncertainty` as an explicit human disposition.
+It remains visible but is excluded from active blockers while its evidence is current. See
+[accepted-uncertainty.md](accepted-uncertainty.md) for scoped records, export disclosures and the
+convenience command. This does not claim the absent structure was extracted.

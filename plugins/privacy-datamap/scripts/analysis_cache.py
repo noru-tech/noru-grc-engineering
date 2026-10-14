@@ -294,6 +294,10 @@ def semantic_snapshot(manifest, proposals=None):
                 fields[key + "/" + name] = {"data_categories": []}
     snapshot = {"fields": {key: sorted(set(row.get("data_categories") or [])) for key, row in fields.items() if row.get("data_categories")},
                 "collections": sorted(collections), "activities": {}}
+    accepted_uncertainties = {key: row.get("meta", {}).get("accepted_uncertainties")
+                              for key, row in fields.items() if row.get("meta", {}).get("accepted_uncertainties")}
+    if accepted_uncertainties:
+        snapshot["accepted_uncertainties"] = accepted_uncertainties
     def activity(row, uses=None, subjects=None, categories=None, recipients=None):
         return {"purposes": sorted(set(uses if uses is not None else [row.get("data_use")])),
                 "subjects": sorted(set(subjects if subjects is not None else row.get("data_subjects", []))),
@@ -339,10 +343,13 @@ def semantic_changes(previous, current):
                         "observation_digest": dependencies.digest({"kind": kind, "previous": before, "current": after})})
     for key, before in previous.get("fields", {}).items():
         after = current.get("fields", {}).get(key, [])
-        if before and not after:
+        if before and not after and key not in current.get("accepted_uncertainties", {}):
             record("field:" + key, "personal_to_non_personal_or_removed", before, after)
+    for key, before in previous.get("accepted_uncertainties", {}).items():
+        if key not in current.get("accepted_uncertainties", {}) and not current.get("fields", {}).get(key):
+            record("field:" + key, "accepted_uncertainty_removed", before, None)
     def visible(snapshot, collection):
-        return any(values for key, values in snapshot.get("fields", {}).items() if key.startswith(collection + "/"))
+        return any(values for key, values in snapshot.get("fields", {}).items() if key.startswith(collection + "/")) or any(key.startswith(collection + "/") for key in snapshot.get("accepted_uncertainties", {}))
     for key in previous.get("collections", []):
         if visible(previous, key) and key in current.get("collections", []) and not visible(current, key):
             record("collection:" + key, "collection_filtered_from_export", True, False)

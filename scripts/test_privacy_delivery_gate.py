@@ -42,6 +42,12 @@ class PrivacyDeliveryGateTests(unittest.TestCase):
         return self.command(['node', str(SCRIPTS / name), f'--repo={self.repo}', '--output=json', '--quiet', *args], expected)
 
     def test_investigated_migration_gap_reaches_seal_export_and_preflight(self):
+        self.migration_resolution('modeled')
+
+    def test_accepted_uncertainty_reaches_seal_export_and_publication_preflight(self):
+        self.migration_resolution('accepted_uncertainty')
+
+    def migration_resolution(self, outcome):
         sys.path.insert(0, str(SCRIPTS))
         import analysis_storage
         import field_review
@@ -76,15 +82,49 @@ class PrivacyDeliveryGateTests(unittest.TestCase):
                 'field_ids':[row['entity_id'] for row in rows], 'evidence_ids':[binding_id]},
             'coverage_rationale':'Inspected all current schema declarations and represented each current column; historical columns are not used.',
             'investigation':[{'question':'Is current storage represented independently of historical DDL?', 'outcome':'All current definitions were checked against the map.'}]}]
+        if outcome == 'accepted_uncertainty':
+            decisions[0].update(outcome=outcome, export_targets=['dataset:db'],
+                accepted_uncertainty={'scope': gaps[0]['gap_id'], 'accepted_by': 'Synthetic Reviewer',
+                    'accepted_at': '2026-01-01T00:00:00Z',
+                    'rationale': 'Explicitly accept incomplete knowledge of migration coverage.',
+                    'residual_uncertainty': 'Historical migration coverage is not fully established.',
+                    'map_impact': 'The map represents current observed structures with this coverage limitation.',
+                    'evidence_ids': decisions[0]['evidence_ids']})
         decision_path = self.repo / '.noru/.cache/gap-decisions.json'
         decision_path.write_text(json.dumps(decisions))
         self.command([sys.executable, str(SCRIPTS / 'investigate.py'), f'--repo={self.repo}', f'--gaps={decision_path}'])
         document=analysis_storage.load(self.repo/'.noru/.cache/privacy-datamap.analysis.json')
         self.assertEqual(review.structural_blockers(document,{},derived), [])
+        if outcome == 'accepted_uncertainty':
+            field = next(row for row in field_review.all_rows(document['classification_review']['fields']) if row['categories'] and not row['composite'])
+            decision = field_review.decision_template(field)
+            decision.update(personal_data='unknown', categories=[], category_fit=[],
+                uncertainty='The configured producer subject is unavailable.', resolution_owner='agent')
+            decision['person_association'] = dict(field['person_association'], kind='unknown', target=None)
+            decision['accepted_uncertainty'] = dict(decisions[0]['accepted_uncertainty'],
+                scope=field['entity_id'], evidence_ids=field['evidence_ids'],
+                residual_uncertainty='Whether the configured producer values identify people is unknown.')
+            self.assertEqual(field_review.apply_decisions(document, [decision], self.repo), [])
+            analysis_storage.save(self.repo/'.noru/.cache/privacy-datamap.analysis.json', document)
+            import reconcile
+            from validate_manifest import load_yaml
+            path = self.repo / '.noru/privacy-datamap.yml'
+            manifest, _ = load_yaml(path.read_text())
+            field_review.project_candidate(document, manifest, derived, self.repo)
+            path.write_text(reconcile.to_yaml(manifest))
         self.command([sys.executable, str(SCRIPTS / 'validate_manifest.py'), str(self.repo/'.noru/privacy-datamap.yml'), '--quiet'])
         self.command([sys.executable, str(SCRIPTS / 'reconcile.py'), f'--repo={self.repo}', '--seal', '--quiet'])
+        self.command([sys.executable, str(SCRIPTS / 'validate_manifest.py'), str(self.repo/'.noru/privacy-datamap.yml'), '--quiet'])
         self.script('collect.mjs', 0, '--export')
         self.script('diff.mjs')
+        if outcome == 'accepted_uncertainty':
+            calls = json.loads(self.script('push.mjs', 0, '--confirm').stdout)['calls']
+            wire = calls[0]['arguments']['manifest']
+            self.assertEqual(wire['dataset'][0]['meta']['accepted_uncertainties'][0]['acceptance']['accepted_by'], 'Synthetic Reviewer')
+            unknown_fields = [f for ds in wire['dataset'] for c in ds['collections'] for f in c['fields']
+                              if f.get('meta', {}).get('accepted_uncertainties')]
+            self.assertTrue(unknown_fields)
+            self.assertEqual(unknown_fields[0]['meta']['accepted_uncertainties'][0]['personal_data'], 'unknown')
         partition = field_review.gap_partition({},derived,self.repo)
         self.assertEqual(len(partition['resolved_diagnostics']),1)
         self.assertEqual(partition['active_blockers'],[])

@@ -7,7 +7,7 @@ import sys
 import xml.etree.ElementTree as ET
 from dotnet_syntax import Token, lex, values, close, split, attrs, attr, literal_arg
 from dotnet_model import ModelDiscovery
-from dotnet_adapters import REGISTRATIONS, registration_call, runtime_conditions, external_properties, VALIDATION_ATTRIBUTES, SERIALIZATION_ATTRIBUTES
+from dotnet_adapters import REGISTRATIONS, registration_call, runtime_conditions, external_properties, identity_default_models, VALIDATION_ATTRIBUTES, SERIALIZATION_ATTRIBUTES
 from dotnet_diagnostics import finalize as finalize_diagnostics, summary as diagnostic_summary
 
 MAX_BYTES = 1_000_000
@@ -226,6 +226,7 @@ class Reader(ModelDiscovery):
                 'extractor':'dotnet-structural@1'}
 
     def properties(self, model):
+        if "contract_properties" in model: return model["contract_properties"]
         try:
             properties = self._properties(model)
             for prop in properties:
@@ -727,6 +728,32 @@ class Reader(ModelDiscovery):
                         result.setdefault((projects[0], key), []).append((path, identity, refs+[ref,f'{path}:{t.line}']))
         return result
 
+    def runtime_entrypoints(self):
+        entries = []
+        factories = {'WebApplication': 'CreateBuilder', 'Host': 'CreateApplicationBuilder',
+                     'DistributedApplication': 'CreateBuilder', 'MauiApp': 'CreateBuilder'}
+        for path in self.files:
+            if not path.endswith('.cs') or path in self.excluded: continue
+            project = self.project(path)
+            if project not in self.projects: continue
+            text = self.read(path)
+            if text is None: continue
+            try: tokens = lex(text, allow_preprocessor=True)
+            except ValueError: continue
+            code = values([t for t in tokens if t.kind == 'code'])
+            for i, token in enumerate(tokens):
+                if token.kind != 'code' or token.value not in factories: continue
+                factory = factories[token.value]
+                if values(tokens[i+1:i+4]) != '. '+factory+' (': continue
+                owner = {'path':path, 'line':token.line, 'project':project, 'namespace':''}
+                if self.source_type_candidates(token.value, owner) or re.search(r'\b(?:class|struct) '+token.value+r'\b', code): continue
+                terminal = r'\. UseMauiApp <' if token.value == 'MauiApp' else r'\. Run(?:Async)? \('
+                if not re.search(terminal, code): continue
+                entries.append({'root': '' if pathlib.PurePosixPath(project).parent == pathlib.PurePosixPath('.') else str(pathlib.PurePosixPath(project).parent),
+                                'ref': f'{path}:{token.line}', 'kind':'dotnet_entrypoint'})
+                break
+        return entries
+
     def relationships_from_source(self):
         global_imports = self.global_ef_imports()
         self.aspire_bindings = self.aspire_connections()
@@ -750,8 +777,13 @@ class Reader(ModelDiscovery):
                     self.gap(model['path'],model['line'],'Identity framework table names and inherited framework fields require source or schema evidence; custom user fields are provisional')
                     if target:
                         before = len(self.observations)
-                        self.bind(owner,target,target['name'],store,'sql',model['line'],'identity_user_model')
+                        defaults = identity_default_models(self, model)
+                        self.bind(owner,target,'AspNetUsers' if defaults else target['name'],store,'sql',model['line'],'identity_user_model')
                         if len(self.observations) > before:
+                            self.observations[-1]['binding_refs'] += import_refs + connection_refs
+                            self.relationships[-1]['refs'] = sorted(set(self.relationships[-1]['refs'] + import_refs + connection_refs))
+                        for table, framework_model in defaults:
+                            self.bind(owner,framework_model,table,store,'sql',model['line'],'identity_user_model')
                             self.observations[-1]['binding_refs'] += import_refs + connection_refs
                             self.relationships[-1]['refs'] = sorted(set(self.relationships[-1]['refs'] + import_refs + connection_refs))
                 discovered = self.discover_entities(model)
@@ -898,8 +930,11 @@ class Reader(ModelDiscovery):
         for path, bindings in self.reviewed_bindings.items():
             if path.endswith('.cs') and len(bindings)>1:
                 self.gap(path,1,'Multiple reviewed bindings for one C# model need per-relationship investigation.',code='DOTNET_REVIEWED_BINDING')
+        from dotnet_boundaries import discover as discover_boundaries
+        boundaries = discover_boundaries(self)
+        runtime_entrypoints = self.runtime_entrypoints()
         self.gaps = finalize_diagnostics(self)
-        return {'type_symbols':[{'name':m['name'],'qualified':m['qualified'],'project':m['project'],'path':m['path']} for m in self.models], 'diagnostic_summary':diagnostic_summary(self.gaps),'runtime_bindings':self.runtime_bindings,'entity_relationships':self.entity_relationships,'solutions':self.solutions,'projects':list(self.projects.values()),'technologies':sorted(self.technologies,key=lambda r:(r['ref'],r['technology'])),
+        return {**boundaries, 'runtime_entrypoints':runtime_entrypoints, 'type_symbols':[{'name':m['name'],'qualified':m['qualified'],'project':m['project'],'path':m['path']} for m in self.models], 'diagnostic_summary':diagnostic_summary(self.gaps),'runtime_bindings':self.runtime_bindings,'entity_relationships':self.entity_relationships,'solutions':self.solutions,'projects':list(self.projects.values()),'technologies':sorted(self.technologies,key=lambda r:(r['ref'],r['technology'])),
                 'relationships':self.relationships,'observations':self.observations,'tables':self.tables,
                 'gaps':sorted(self.gaps,key=lambda r:(r['ref'],r['reason']))}
 
