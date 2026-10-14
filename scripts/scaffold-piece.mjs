@@ -117,6 +117,18 @@ function pieceJson(name) {
       ],
       hardcoded_expectations: false,
     },
+    state: {
+      headless: true,
+      reads: [
+        {
+          into: "evidence",
+          tool: "getOrganizationEvidence",
+          arguments: { search: `noru-grc-engineering:${name}` },
+          result: "evidence",
+          page: { limit: 200 },
+        },
+      ],
+    },
     interpretation: { required: true, level: "per_claim", unattributed: "error" },
     ci: {
       output_json: true,

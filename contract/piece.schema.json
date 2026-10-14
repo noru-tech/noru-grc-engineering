@@ -15,6 +15,7 @@
     "push",
     "scopes",
     "queue",
+    "state",
     "interpretation",
     "ci"
   ],
@@ -284,6 +285,80 @@
           "const": false
         }
       }
+    },
+    "state": {
+      "description": "How a job with no interactive MCP host builds .noru/.cache/noru-state.json for :diff. `connection` is always filled from getMcpCapabilities, so a plan binds to the organization the key actually reaches; each read fills one top-level key. A piece whose snapshot needs a person's judgement declares `headless: false` and says why, and its diff step stays skipped in CI unless a snapshot is passed in. (Requirement 7)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headless"],
+      "properties": {
+        "headless": {
+          "description": "true when the reads below are everything :diff needs.",
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "Required when headless is false: what a person has to decide or supply that a declaration cannot.",
+          "type": "string",
+          "minLength": 20
+        },
+        "reads": {
+          "description": "Read tools to call, in order. Each must be offered as a read capability by the connection at run time, or the state step refuses.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["into", "tool"],
+            "properties": {
+              "into": {
+                "description": "The top-level snapshot key this read fills. Not `connection` or `fetched_at`.",
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*$"
+              },
+              "tool": {
+                "description": "A published MCP read tool.",
+                "type": "string",
+                "pattern": "^(get|list|find)[A-Z][A-Za-z]*$"
+              },
+              "arguments": {
+                "description": "Fixed tool arguments. Nothing here is templated.",
+                "type": "object"
+              },
+              "result": {
+                "description": "The key in the tool's JSON result that holds the value; the whole result when omitted.",
+                "type": "string"
+              },
+              "page": {
+                "description": "Page with the tool's limit/offset arguments until its `total` is reached. A snapshot that stops short is refused rather than written, because a missing record plans a duplicate.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["limit"],
+                "properties": {
+                  "limit": { "type": "integer", "minimum": 1, "maximum": 200 }
+                }
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "headless": { "const": true } },
+            "required": ["headless"]
+          },
+          "then": {
+            "required": ["reads"],
+            "properties": { "reads": { "minItems": 1 } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "headless": { "const": false } },
+            "required": ["headless"]
+          },
+          "then": { "required": ["reason"] }
+        }
+      ]
     },
     "interpretation": {
       "description": "Attribution of claims. (Requirement 8)",

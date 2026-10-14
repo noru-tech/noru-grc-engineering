@@ -26,9 +26,9 @@ inputs:
     default: "gate"
   steps:
     description: >
-      Comma-separated: scan, validate, expiry, policy, diff, push — or 'all'. The default,
-      scan,validate,expiry,policy, is the part that needs no credential. For MCP pieces, push
-      reports skipped after diff because this headless runner cannot execute MCP calls.
+      Comma-separated: scan, validate, expiry, policy, state, diff, push — or 'all'. The default,
+      scan,validate,expiry,policy, is the part that needs no credential. state, diff and push need
+      NORU_API_KEY in the job environment (never as an input) and report skipped without it.
     required: false
     default: "scan,validate,expiry,policy"
   fail-on:
@@ -80,8 +80,9 @@ inputs:
     default: "false"
   state:
     description: >
-      Path to a Noru state snapshot for the diff step. Only a job that can read the organization can
-      produce one; without it the diff and push steps report as skipped.
+      Path to a Noru state snapshot for the diff step, used as given instead of the state step. Only
+      a job that can read the organization can produce one; without one the diff and push steps
+      report as skipped.
     required: false
     default: ""
   on-missing-prerequisite:

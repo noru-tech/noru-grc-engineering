@@ -11,6 +11,13 @@
 //   4. emit the exact, ordered tool calls to .noru/.cache/change-control.calls.json
 //
 // The skill then executes those calls through the MCP client and nothing else.
+// In CI, that client is scripts/mcp_exec.mjs, which executes this file and refuses one that
+// differs from the plan.
+//
+// Linking the window's evidence record to its controls needs the id the createEvidence call above
+// returns. Those calls carry `depends_on`, and an argument left null is filled in from the named
+// earlier call's result. That substitution is the ONLY thing the executing client may change about
+// a call.
 //
 // Usage: node push.mjs [--repo=<path>] --confirm [--output=json|text] [--quiet]
 // Exit codes:
@@ -26,6 +33,42 @@ import { assertPlanFresh, parseCommonArgs, planPathFor, readPlan, redact } from 
 
 const PIECE = "change-control";
 const USAGE = "usage: push.mjs [--repo=<path>] --confirm [--output=json|text] [--quiet]\n";
+
+/**
+ * Re-point each dependency at the position the call it depends on ends up in, since skipped
+ * operations are dropped. A dependency whose target was skipped is a bug in the plan, not something
+ * to paper over, so it is reported rather than silently dropped.
+ */
+export function resolveDependencies(pending, indexInPlan) {
+  const positionOf = new Map();
+  pending.forEach((op, i) => positionOf.set(indexInPlan[i], i + 1));
+
+  return pending.map((op, i) => {
+    const call = {
+      order: i + 1,
+      tool: op.operation,
+      transport: op.transport,
+      scope: op.scope,
+      subject: op.subject,
+      effect: op.effect,
+      arguments: op.arguments,
+    };
+    if (!op.depends_on) return call;
+    const order = positionOf.get(op.depends_on.operation_index);
+    if (order === undefined) {
+      call.error =
+        `depends on an operation that is not in this push (plan index ${op.depends_on.operation_index}); ` +
+        "do not execute this call — re-run :diff";
+      return call;
+    }
+    call.depends_on = {
+      order,
+      field: op.depends_on.field,
+      note: op.depends_on.note,
+    };
+    return call;
+  });
+}
 
 function main(argv) {
   const opts = parseCommonArgs(argv);
@@ -61,17 +104,14 @@ function main(argv) {
     return 2;
   }
 
-  const calls = plan.operations
-    .filter((op) => op.effect !== "skip" && op.operation)
-    .map((op, index) => ({
-      order: index + 1,
-      tool: op.operation,
-      transport: op.transport,
-      scope: op.scope,
-      subject: op.subject,
-      effect: op.effect,
-      arguments: op.arguments,
-    }));
+  const indexInPlan = [];
+  const pending = plan.operations.filter((op, i) => {
+    if (op.effect === "skip" || !op.operation) return false;
+    indexInPlan.push(i);
+    return true;
+  });
+  const calls = resolveDependencies(pending, indexInPlan);
+  const broken = calls.filter((c) => c.error);
 
   const callsPath = join(opts.repo, ".noru", ".cache", `${PIECE}.calls.json`);
   const payload = {
@@ -95,6 +135,13 @@ function main(argv) {
     return 2;
   }
 
+  if (broken.length > 0) {
+    process.stderr.write(
+      `error: ${broken.length} call(s) depend on an operation that is not in this push — re-run :diff\n`
+    );
+    return 1;
+  }
+
   if (opts.json) {
     process.stdout.write(
       `${JSON.stringify({ ...payload, calls_file: callsPath }, null, opts.quiet ? 0 : 2)}\n`
@@ -106,9 +153,15 @@ function main(argv) {
             "This is the expected result of a second run.\n"
         : [
             `${calls.length} confirmed MCP call(s) written to ${callsPath}:`,
-            ...calls.map((c) => `  ${String(c.order).padStart(2)}. ${c.tool.padEnd(22)} ${c.subject}`),
+            ...calls.map(
+              (c) =>
+                `  ${String(c.order).padStart(2)}. ${c.tool.padEnd(22)} ${c.subject}` +
+                (c.depends_on ? `  [${c.depends_on.field} from call ${c.depends_on.order}]` : "")
+            ),
             "",
             "Execute exactly these calls, in this order, through the Noru MCP connection.",
+            "Where a call carries depends_on, substitute that one field from the earlier call's result",
+            "and change nothing else.",
           ].join("\n") + "\n"
     );
   }

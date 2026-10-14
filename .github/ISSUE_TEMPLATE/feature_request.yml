@@ -6,7 +6,7 @@ body:
     attributes:
       value: >-
         Read the contract's non-goals first (`contract/README.md`): no local register, no framework
-        control text, no credential handling, no SaaS connectors, and no runtime dependencies. A
+        control text, no credential handling in a piece, no SaaS connectors, and no runtime dependencies. A
         request that needs one of those is best raised in Discussions.
   - type: dropdown
     id: component

@@ -13,6 +13,8 @@
 //
 // The skill then executes those calls through the MCP client and nothing else. The agent is not
 // free to improvise a call that is not in this file — that is the point of writing it down.
+// In CI, that client is scripts/mcp_exec.mjs, which executes this file and refuses one that
+// differs from the plan.
 //
 // Usage: node push.mjs [--repo=<path>] --confirm [--output=json|text] [--quiet]
 // Exit codes:
