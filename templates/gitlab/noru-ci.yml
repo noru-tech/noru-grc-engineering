@@ -1,0 +1,197 @@
+# The GitLab CI/CD component for one piece's CI-mode check: the counterpart of the noru-ci GitHub
+# Action. Include it from a release tag of noru-grc-engineering (templates/gitlab/README.md):
+#
+#   include:
+#     - remote: https://raw.githubusercontent.com/noru-tech/noru-grc-engineering/vX.Y.Z/templates/gitlab/noru-ci.yml
+#       inputs:
+#         piece: ai-inventory
+#
+# The job clones the toolkit at `toolkit-version`, which is the same release tag as this file, and
+# runs scripts/ci_check.py on the project checkout. It installs nothing: the image must already have
+# node, python3 and git. The default steps need no credential and no network beyond that clone.
+# NORU_API_KEY is never an input. When a step that needs it is requested, it comes from a masked
+# CI/CD variable in the job environment, and scripts/ci_check.py passes it only to the step that
+# sends it. NORU_GITLAB_NOTE_TOKEN, also a masked variable, is read only by the merge request note.
+spec:
+  inputs:
+    piece:
+      description: "Which piece to run, for example ai-inventory."
+      regex: ^[a-z0-9][a-z0-9-]*$
+    repo:
+      description: "Path to the repository to check, relative to the project directory."
+      default: "."
+    mode:
+      description: "gate fails the job on a finding; warn reports the identical findings and passes."
+      default: gate
+      options: [gate, warn]
+    steps:
+      description: >-
+        Comma-separated: scan, validate, expiry, policy, state, diff, push, or 'all'. The default
+        needs no credential. state, diff and push need NORU_API_KEY as a masked CI/CD variable and
+        report skipped without it.
+      default: scan,validate,expiry,policy
+      regex: ^(all|[a-z,]+)$
+    fail-on:
+      description: "Which finding kinds gate the job, or 'none'. Empty uses the tool default."
+      default: ""
+    baseline:
+      description: "Path to the agreed privacy baseline. Empty uses .noru/privacy-baseline.yml."
+      default: ""
+    max-age-days:
+      description: "The review cadence this pipeline declares, in days. 0 declares none."
+      default: "0"
+      regex: ^[0-9]+$
+    warn-within-days:
+      description: "How far ahead to report an expiry that has not passed yet."
+      default: "30"
+      regex: ^[0-9]+$
+    as-of:
+      description: "Evaluate expiry against this date (YYYY-MM-DD) instead of today. For testing."
+      default: ""
+      regex: ^([0-9]{4}-[0-9]{2}-[0-9]{2})?$
+    base-ref:
+      description: >-
+        Compare the manifest against the merge base with this ref, so a policy finding says whether
+        this merge request introduced it. Empty uses the merge request's diff base when there is one.
+      default: ""
+    gate-on-new:
+      description: "Gate only on findings this branch introduced. Needs a base."
+      type: boolean
+      default: false
+    state:
+      description: "Path to a Noru state snapshot for the diff step, used as given."
+      default: ""
+    on-missing-prerequisite:
+      description: "skip reports a step with no input and passes; fail treats it as a tooling failure."
+      default: skip
+      options: [skip, fail]
+    security-findings:
+      description: >-
+        For a piece that records security findings: include them in the job's SAST report, or omit
+        them. The report file is written either way; omitted, it has no findings.
+      default: include
+      options: [include, omit]
+    merge-request-note:
+      description: "Post or update one note with the result on the merge request (needs NORU_GITLAB_NOTE_TOKEN)."
+      type: boolean
+      default: true
+    report-dir:
+      description: "Where the reports are written, relative to the project directory. Saved as artifacts."
+      default: .noru/.cache/ci
+    job-suffix:
+      description: "Appended to the job name and report names, for including the same piece twice."
+      default: ""
+      regex: ^[a-z0-9-]*$
+    stage:
+      description: "The stage the job runs in."
+      default: test
+    image:
+      description: "An image that already has node (18 or later), python3 and git. Nothing is installed."
+      default: node:22-bookworm
+    expire-in:
+      description: "How long the job's artifacts are kept."
+      default: 30 days
+    toolkit-url:
+      description: "Where to clone the toolkit from. Change it only to use a mirror you control."
+      default: https://github.com/noru-tech/noru-grc-engineering.git
+    toolkit-version:
+      description: "The toolkit release tag to run. The same tag this file was included from."
+      default: v0.12.2
+      regex: ^v[0-9]+\.[0-9]+\.[0-9]+$
+    toolkit-sha:
+      description: "Optional: the full commit the tag must resolve to. The job stops when it does not."
+      default: ""
+      regex: ^([0-9a-f]{40})?$
+---
+noru-ci-$[[ inputs.piece ]]$[[ inputs.job-suffix ]]:
+  stage: $[[ inputs.stage ]]
+  image: $[[ inputs.image ]]
+  # The merge base has to be in the clone for base-ref, gate-on-new and an agent's renewal to be
+  # judged; a shallow clone makes every one of those report that the base cannot be read.
+  variables:
+    GIT_DEPTH: "0"
+    NORU_CI_PIECE: $[[ inputs.piece ]]
+    NORU_CI_REPO: $[[ inputs.repo ]]
+    NORU_CI_MODE: $[[ inputs.mode ]]
+    NORU_CI_STEPS: $[[ inputs.steps ]]
+    NORU_CI_FAIL_ON: $[[ inputs.fail-on ]]
+    NORU_CI_BASELINE: $[[ inputs.baseline ]]
+    NORU_CI_MAX_AGE_DAYS: $[[ inputs.max-age-days ]]
+    NORU_CI_WARN_WITHIN_DAYS: $[[ inputs.warn-within-days ]]
+    NORU_CI_AS_OF: $[[ inputs.as-of ]]
+    NORU_CI_BASE_REF: $[[ inputs.base-ref ]]
+    NORU_CI_GATE_ON_NEW: "$[[ inputs.gate-on-new ]]"
+    NORU_CI_STATE: $[[ inputs.state ]]
+    NORU_CI_ON_MISSING: $[[ inputs.on-missing-prerequisite ]]
+    NORU_CI_SECURITY_FINDINGS: $[[ inputs.security-findings ]]
+    NORU_CI_NOTE: "$[[ inputs.merge-request-note ]]"
+    NORU_CI_REPORT_DIR: $[[ inputs.report-dir ]]
+    NORU_CI_NAME: noru-ci-$[[ inputs.piece ]]$[[ inputs.job-suffix ]]
+    NORU_CI_TOOLKIT_URL: $[[ inputs.toolkit-url ]]
+    NORU_CI_TOOLKIT_VERSION: $[[ inputs.toolkit-version ]]
+    NORU_CI_TOOLKIT_SHA: $[[ inputs.toolkit-sha ]]
+  script: |
+    set -u
+    missing=""
+    for tool in node python3 git; do
+      command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+    done
+    if [ -n "$missing" ]; then
+      echo "this job needs$missing in the image. Choose an image that has node, python3 and git;"
+      echo "it installs nothing itself, on purpose."
+      exit 1
+    fi
+    echo "node $(node --version), $(python3 --version), $(git --version)"
+
+    # The toolkit lives outside the project directory, so no collector ever scans it.
+    toolkit="$(mktemp -d)/noru-grc-engineering"
+    git -c advice.detachedHead=false clone --quiet --depth 1 \
+      --branch "$NORU_CI_TOOLKIT_VERSION" "$NORU_CI_TOOLKIT_URL" "$toolkit" || exit 1
+    if [ -n "$NORU_CI_TOOLKIT_SHA" ]; then
+      actual="$(git -C "$toolkit" rev-parse HEAD)"
+      if [ "$actual" != "$NORU_CI_TOOLKIT_SHA" ]; then
+        echo "$NORU_CI_TOOLKIT_VERSION resolves to $actual, not the pinned $NORU_CI_TOOLKIT_SHA. Stopping."
+        exit 1
+      fi
+    fi
+
+    mkdir -p "$NORU_CI_REPORT_DIR"
+    report="$NORU_CI_REPORT_DIR/$NORU_CI_NAME.json"
+    base_ref="${NORU_CI_BASE_REF:-${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}}"
+    set -- "--piece=$NORU_CI_PIECE" "--repo=$NORU_CI_REPO" "--mode=$NORU_CI_MODE" \
+      "--steps=$NORU_CI_STEPS" "--max-age-days=$NORU_CI_MAX_AGE_DAYS" \
+      "--warn-within-days=$NORU_CI_WARN_WITHIN_DAYS" \
+      "--on-missing-prerequisite=$NORU_CI_ON_MISSING" "--plugins=$toolkit/plugins" \
+      "--report=$report" \
+      "--code-quality=$NORU_CI_REPORT_DIR/$NORU_CI_NAME.codequality.json" \
+      "--security-report=$NORU_CI_REPORT_DIR/$NORU_CI_NAME.sast.json" \
+      "--security-findings=$NORU_CI_SECURITY_FINDINGS" "--output=text"
+    if [ -n "$NORU_CI_FAIL_ON" ]; then set -- "$@" "--fail-on=$NORU_CI_FAIL_ON"; fi
+    if [ -n "$NORU_CI_AS_OF" ]; then set -- "$@" "--as-of=$NORU_CI_AS_OF"; fi
+    if [ -n "$NORU_CI_BASELINE" ]; then set -- "$@" "--baseline=$NORU_CI_BASELINE"; fi
+    if [ -n "$base_ref" ]; then set -- "$@" "--base-ref=$base_ref"; fi
+    if [ "$NORU_CI_GATE_ON_NEW" = "true" ]; then set -- "$@" "--gate-on-new"; fi
+    if [ -n "$NORU_CI_STATE" ]; then set -- "$@" "--state=$NORU_CI_STATE"; fi
+
+    # NORU_API_KEY is not named here. When it is a CI/CD variable it is inherited, and
+    # scripts/ci_check.py hands it only to the step that sends it. The note token is not inherited.
+    env -u NORU_GITLAB_NOTE_TOKEN python3 "$toolkit/scripts/ci_check.py" "$@"
+    code=$?
+
+    # The note is never the gate: whatever it does, the job ends with the check's exit code.
+    if [ "$NORU_CI_NOTE" = "true" ]; then
+      env -u NORU_API_KEY python3 "$toolkit/scripts/gitlab_mr_note.py" \
+        "--report=$report" "--key=$NORU_CI_NAME" \
+        || echo "the merge request note was not written; the check result above stands"
+    fi
+    exit "$code"
+  artifacts:
+    when: always
+    expire_in: $[[ inputs.expire-in ]]
+    paths:
+      - $[[ inputs.report-dir ]]/
+      - $[[ inputs.repo ]]/.noru/.cache/$[[ inputs.piece ]].receipt.json
+      - $[[ inputs.repo ]]/.noru/.cache/$[[ inputs.piece ]].plan.json
+    reports:
+      codequality: $[[ inputs.report-dir ]]/noru-ci-$[[ inputs.piece ]]$[[ inputs.job-suffix ]].codequality.json
+      sast: $[[ inputs.report-dir ]]/noru-ci-$[[ inputs.piece ]]$[[ inputs.job-suffix ]].sast.json

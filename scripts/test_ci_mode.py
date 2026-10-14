@@ -16,8 +16,16 @@ What it asserts, in one line each:
   * a check that cannot run is not a pass                                            -> exit 6
   * no credential means the push half is skipped, not failed                         -> exit 0
   * an MCP call list bound to another endpoint is refused, never reported as written -> exit 6
-  * NORU_API_KEY never reaches a step that does not need it
+  * NORU_API_KEY never reaches a step that does not need it, and a CI job token never reaches any
   * the orchestrator hardcodes no piece name; it reads piece.json
+  * the GitLab Code Quality report carries every finding, with a fingerprint that survives a moved line
+  * the GitLab security report carries the open security findings a manifest records, and none where
+    the manifest says its inputs reach no forge alert store
+
+Every case runs twice: once in a GitHub Actions environment (GITHUB_ACTIONS, GITHUB_*) and once in a
+GitLab CI one (GITLAB_CI, CI_*), with the other system's variables removed, because a gate that
+behaves differently on the second CI system has only been proven on the first. Each row is prefixed
+with the system it ran under.
 
 A fixed --as-of is passed everywhere so these cases mean the same thing next year.
 
@@ -37,6 +45,7 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import ci_check  # noqa: E402
+import gitlab_reports  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PLUGINS = ROOT / "plugins"
@@ -66,12 +75,49 @@ export async function summarize(text: string) {
 """
 
 
+# The environment each CI system gives a merge request or pull request job, reduced to what a
+# script could branch on. Values are synthetic; nothing here names a real project.
+CI_SYSTEMS = {
+    "github": {
+        "CI": "true",
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_EVENT_NAME": "pull_request",
+        "GITHUB_REPOSITORY": "example-org/example-app",
+        "GITHUB_SHA": "0" * 40,
+        "GITHUB_REF": "refs/pull/1/merge",
+        "GITHUB_API_URL": "https://api.github.example.invalid",
+    },
+    "gitlab": {
+        "CI": "true",
+        "GITLAB_CI": "true",
+        "CI_PIPELINE_SOURCE": "merge_request_event",
+        "CI_PROJECT_ID": "1",
+        "CI_PROJECT_PATH": "example-org/example-app",
+        "CI_COMMIT_SHA": "0" * 40,
+        "CI_MERGE_REQUEST_IID": "1",
+        "CI_API_V4_URL": "https://gitlab.example.invalid/api/v4",
+        "CI_SERVER_URL": "https://gitlab.example.invalid",
+        # Shaped like nothing scripts/check_repo.py looks for, because it is nothing.
+        "CI_JOB_TOKEN": "fixture-job-token-" + "0" * 12,
+    },
+}
+CI_SYSTEM_VARIABLE = re.compile(r"^(?:CI|CI_.*|GITLAB_.*|GITHUB_.*|RUNNER_.*)$")
+
+
+def ci_environment(system):
+    """os.environ with every CI system's variables removed and `system`'s put in their place."""
+    env = {k: v for k, v in os.environ.items() if not CI_SYSTEM_VARIABLE.match(k)}
+    env.update(CI_SYSTEMS[system])
+    return env
+
+
 class Results:
     def __init__(self):
         self.rows = []
+        self.prefix = ""
 
     def check(self, name, ok, detail=""):
-        self.rows.append({"test": name, "ok": bool(ok), "detail": str(detail)[:400]})
+        self.rows.append({"test": f"{self.prefix}{name}", "ok": bool(ok), "detail": str(detail)[:400]})
         return ok
 
     @property
@@ -878,6 +924,26 @@ def case_credentials(results, tmp):
         with_key is not None and with_key.stdout.strip() == "True",
         with_key.stdout if with_key else "",
     )
+    # A CI system's own credentials reach no step at all, the push step included: a GitLab job
+    # token, and the token scripts/gitlab_mr_note.py writes the merge request note with.
+    probe = [
+        sys.executable, "-c",
+        "import os;print(sorted(k for k in ('CI_JOB_TOKEN','NORU_GITLAB_NOTE_TOKEN') if k in os.environ))",
+    ]
+    os.environ["CI_JOB_TOKEN"] = "fixture-job-token-" + "1" * 12
+    os.environ["NORU_GITLAB_NOTE_TOKEN"] = "fixture-note-token-" + "1" * 12
+    try:
+        plain, _ = ci_check.run(probe)
+        pushing, _ = ci_check.run(probe, with_api_key=True)
+    finally:
+        os.environ.pop("NORU_GITLAB_NOTE_TOKEN", None)
+        os.environ.pop("CI_JOB_TOKEN", None)
+        os.environ.update({k: v for k, v in CI_SYSTEMS.get(ACTIVE_SYSTEM[0], {}).items() if k == "CI_JOB_TOKEN"})
+    results.check(
+        "credential: no step, not even push, inherits a CI job token or the merge request note token",
+        plain is not None and pushing is not None and plain.stdout.strip() == "[]" == pushing.stdout.strip(),
+        (plain.stdout if plain else "", pushing.stdout if pushing else ""),
+    )
     # Assembled from fragments rather than written out: a credential-shaped literal in a source
     # file is exactly what scripts/check_repo.py exists to reject, test or not.
     fake_bearer = "Authorization: Bearer " + ("a1b2c3d4" * 4)
@@ -997,12 +1063,23 @@ def case_invalid_manifest(results, tmp):
 def case_piece_agnostic(results, tmp):
     """The orchestrator must read piece.json, not know about the pieces that exist today."""
     source = CI_CHECK.read_text(encoding="utf-8")
+    reports_source = (ROOT / "scripts" / "gitlab_reports.py").read_text(encoding="utf-8")
     for name in sorted(p.parent.name for p in PLUGINS.glob("*/piece.json")):
         results.check(
             f"piece-agnostic: ci_check.py does not name '{name}'",
             name not in source,
             "a piece name in the orchestrator means the next piece needs a code change",
         )
+        results.check(
+            f"piece-agnostic: gitlab_reports.py does not name '{name}'",
+            name not in reports_source,
+            "the security report is chosen by the createSecurityFinding write piece.json declares",
+        )
+    results.check(
+        "CI-neutral: ci_check.py reads no CI system's variables",
+        not re.search(r"\b(?:GITHUB|GITLAB|RUNNER)_[A-Z_]+|\bCI_(?!CHECK)[A-Z_]+", source.replace("CI_JOB_TOKEN", "")),
+        "only CI_JOB_TOKEN may be named, and only to be removed from children",
+    )
     results.check(
         "piece-agnostic: entrypoints are read from the declaration",
         'decl["collector"]["entrypoint"]' in source and 'decl["validator"]["entrypoint"]' in source,
@@ -1158,6 +1235,250 @@ def case_next_review_due(results, tmp):
     )
 
 
+def ci_files(repo, out, *args, piece="ai-inventory", env=None):
+    """ci() with both GitLab report files requested. Returns (code, report, code quality, sast)."""
+    out = pathlib.Path(out)
+    cq, sast = out / "codequality.json", out / "sast.json"
+    for path in (cq, sast):
+        if path.exists():
+            path.unlink()
+    code, report = ci(repo, f"--code-quality={cq}", f"--security-report={sast}", *args, piece=piece, env=env)
+
+    def load(path):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    return code, report, load(cq), load(sast)
+
+
+CODE_QUALITY_SEVERITIES = {"info", "minor", "major", "critical", "blocker"}
+
+
+def code_quality_shape_ok(entries):
+    """Every field https://docs.gitlab.com/ci/testing/code_quality/ requires, with its type."""
+    if not isinstance(entries, list):
+        return False
+    for entry in entries:
+        location = entry.get("location") or {}
+        if not (
+            isinstance(entry.get("description"), str) and entry["description"]
+            and isinstance(entry.get("check_name"), str) and entry["check_name"]
+            and isinstance(entry.get("fingerprint"), str) and entry["fingerprint"]
+            and entry.get("severity") in CODE_QUALITY_SEVERITIES
+            and isinstance(location.get("path"), str) and location["path"]
+            and not location["path"].startswith(("./", "/"))
+            and isinstance((location.get("lines") or {}).get("begin"), int)
+            and location["lines"]["begin"] >= 1
+        ):
+            return False
+    return len({e["fingerprint"] for e in entries}) == len(entries)
+
+
+def case_code_quality(results, tmp):
+    out = pathlib.Path(tmp) / "code-quality-out"
+    out.mkdir(parents=True, exist_ok=True)
+    repo, manifest = build_green_repo(pathlib.Path(tmp) / "code-quality")
+    code, _, entries, _ = ci_files(repo, out)
+    results.check("code quality: a clean run writes an empty array, not nothing", code == 0 and entries == [], entries)
+
+    add_new_provider(repo)
+    expire_every_claim(manifest)
+    code, report, entries, _ = ci_files(repo, out)
+    results.check("code quality: writing it does not change the exit code", code == 1, f"exit {code}")
+    results.check(
+        "code quality: one entry per finding, in GitLab's documented shape",
+        code_quality_shape_ok(entries) and len(entries) == len((report or {}).get("findings", [])),
+        entries[:2] if isinstance(entries, list) else entries,
+    )
+    drift = [e for e in entries or [] if e["check_name"] == "noru/ai-inventory/drift"]
+    results.check(
+        "code quality: drift points at the file that arrived, and blocks as major",
+        len(drift) == 1 and drift[0]["location"]["path"] == NEW_PROVIDER_FILE and drift[0]["severity"] == "major",
+        drift,
+    )
+    expired = [e for e in entries or [] if e["check_name"] == "noru/ai-inventory/expired"]
+    results.check(
+        "code quality: an expired claim points into the manifest, at the line naming its subject",
+        expired and all(e["location"]["path"] == ".noru/ai-inventory.yml" for e in expired)
+        and all(e["location"]["lines"]["begin"] > 1 for e in expired),
+        expired[:2],
+    )
+
+    # The same findings, after the manifest gained a line above every one of them.
+    before = {e["fingerprint"]: e["location"]["lines"]["begin"] for e in entries or []}
+    manifest.write_text("# a comment that moves every line down\n" + manifest.read_text(encoding="utf-8"), encoding="utf-8")
+    _, _, moved, _ = ci_files(repo, out)
+    after = {e["fingerprint"]: e["location"]["lines"]["begin"] for e in moved or []}
+    results.check(
+        "code quality: fingerprints are the same after every line moved; only the lines differ",
+        before and set(before) == set(after)
+        and any(after[f] == before[f] + 1 for f in before if before[f] > 1 and f in after),
+        (sorted(before.items())[:3], sorted(after.items())[:3]),
+    )
+
+    code, _, warned, _ = ci_files(repo, out, "--mode=warn")
+    results.check(
+        "code quality: warn mode reports the same fingerprints and exits 0",
+        code == 0 and {e["fingerprint"] for e in warned or []} == set(after),
+        f"exit {code}",
+    )
+    _, _, advisory, _ = ci_files(repo, out, "--fail-on=expired")
+    results.check(
+        "code quality: a finding that does not gate is minor",
+        any(e["check_name"].endswith("/drift") and e["severity"] == "minor" for e in advisory or []),
+        advisory,
+    )
+
+    # In a monorepo the piece runs on a subdirectory; GitLab resolves paths from the project root.
+    project = pathlib.Path(tmp) / "code-quality-monorepo"
+    if project.exists():
+        shutil.rmtree(project)
+    sub, _ = build_green_repo(project / "services" / "api")
+    # Committed, not merely present: in a git checkout the collector reads what git tracks.
+    add_new_provider(sub)
+    git_init(project, "a monorepo")
+    _, _, nested, _ = ci_files(sub, out)
+    results.check(
+        "code quality: in a subdirectory, paths are relative to the project, not to --repo",
+        any(e["location"]["path"] == f"services/api/{NEW_PROVIDER_FILE}" for e in nested or []),
+        [e["location"]["path"] for e in nested or []],
+    )
+
+
+SAST_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
+
+
+def sast_shape_ok(doc):
+    """The required fields of the SAST report schema gitlab_reports.py targets."""
+    if not isinstance(doc, dict) or not re.fullmatch(r"\d+\.\d+\.\d+", str(doc.get("version"))):
+        return False
+    scan = doc.get("scan") or {}
+    for part in ("analyzer", "scanner"):
+        block = scan.get(part) or {}
+        if not all(block.get(k) for k in ("id", "name", "version")) or not (block.get("vendor") or {}).get("name"):
+            return False
+    if scan.get("type") != "sast" or scan.get("status") not in ("success", "failure"):
+        return False
+    if not (SAST_TIME.match(str(scan.get("start_time"))) and SAST_TIME.match(str(scan.get("end_time")))):
+        return False
+    for row in doc.get("vulnerabilities", None) if isinstance(doc.get("vulnerabilities"), list) else [None]:
+        if not isinstance(row, dict) or not row.get("id") or not row.get("identifiers") or "location" not in row:
+            return False
+        if row.get("severity") not in ("Info", "Unknown", "Low", "Medium", "High", "Critical"):
+            return False
+        if not all(i.get("type") and i.get("name") and i.get("value") for i in row["identifiers"]):
+            return False
+        if not (row["location"].get("file") and int(row["location"].get("start_line", 0)) >= 1):
+            return False
+    return True
+
+
+def case_security_report(results, tmp):
+    out = pathlib.Path(tmp) / "security-out"
+    out.mkdir(parents=True, exist_ok=True)
+    repo, manifest = build_green_repo(pathlib.Path(tmp) / "security-iac", "iac-scan")
+    document = ci_check.parse_manifest_text(manifest.read_text(encoding="utf-8"))
+    live = sorted(f["key"] for f in document["findings"] if f["status"] in ("open", "in_progress"))
+    code, report, _, sast = ci_files(repo, out, piece="iac-scan")
+    results.check(
+        f"security report: schema {gitlab_reports.SAST_SCHEMA_VERSION}, every required field present",
+        code == 0 and sast_shape_ok(sast) and sast["version"] == gitlab_reports.SAST_SCHEMA_VERSION,
+        sast,
+    )
+    names = sorted(v["name"] for v in (sast or {}).get("vulnerabilities", []))
+    titles = sorted(f["title"] for f in document["findings"] if f["key"] in live)
+    results.check(
+        "security report: exactly the open and in-progress findings; accepted ones are decisions, not vulnerabilities",
+        names == titles and len(names) < len(document["findings"]),
+        (names, titles),
+    )
+    results.check(
+        "security report: severities map onto GitLab's names",
+        {v["severity"] for v in (sast or {}).get("vulnerabilities", [])} <= {"Critical", "High", "Medium", "Low"},
+        sast,
+    )
+    _, _, _, again = ci_files(repo, out, piece="iac-scan")
+    results.check(
+        "security report: vulnerability ids are the same in every run",
+        [v["id"] for v in (sast or {}).get("vulnerabilities", [])] == [v["id"] for v in (again or {}).get("vulnerabilities", [])],
+    )
+    results.check(
+        "security report: the JSON report says what was written",
+        ((report or {}).get("gitlab") or {}).get("security_report", {}).get("vulnerabilities") == len(names),
+        (report or {}).get("gitlab"),
+    )
+    _, report, _, omitted = ci_files(repo, out, "--security-findings=omit", piece="iac-scan")
+    results.check(
+        "security report: --security-findings=omit still writes the file, with no findings",
+        sast_shape_ok(omitted) and omitted["vulnerabilities"] == [],
+        omitted,
+    )
+
+    repo, _ = build_green_repo(pathlib.Path(tmp) / "security-ai")
+    code, report, _, sast = ci_files(repo, out)
+    results.check(
+        "security report: a piece that records no security findings writes an empty one, and says why",
+        code == 0 and sast_shape_ok(sast) and sast["vulnerabilities"] == []
+        and "does not record security findings" in str(((report or {}).get("gitlab") or {}).get("security_report")),
+        (report or {}).get("gitlab"),
+    )
+
+    if (PLUGINS / "findings-ingest" / "piece.json").is_file():
+        repo, _ = build_green_repo(pathlib.Path(tmp) / "security-ingest", "findings-ingest")
+        code, report, _, sast = ci_files(repo, out, piece="findings-ingest")
+        results.check(
+            "security report: inputs declared to reach no forge alert store are never put in one",
+            code == 0 and sast_shape_ok(sast) and sast["vulnerabilities"] == []
+            and "forge alert store" in str(((report or {}).get("gitlab") or {}).get("security_report")),
+            (report or {}).get("gitlab"),
+        )
+
+    # change-control files separation-of-duties exceptions as security findings: they are about a
+    # change, not a line of code, so there is nothing for a SAST report to point at.
+    repo, _ = build_green_repo(pathlib.Path(tmp) / "security-change", "change-control")
+    code, report, _, sast = ci_files(repo, out, piece="change-control")
+    results.check(
+        "security report: findings with no file to point at are not invented a location",
+        sast_shape_ok(sast) and sast["vulnerabilities"] == [],
+        (code, (report or {}).get("gitlab")),
+    )
+
+    repo, manifest = build_green_repo(pathlib.Path(tmp) / "security-invalid", "iac-scan")
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace("severity: critical", "severity: catastrophic", 1), encoding="utf-8")
+    code, _, _, sast = ci_files(repo, out, piece="iac-scan")
+    results.check(
+        "security report: a manifest that did not validate reports a failed scan, not an empty success",
+        code == 5 and sast_shape_ok(sast) and sast["scan"]["status"] == "failure" and sast["vulnerabilities"] == [],
+        (code, (sast or {}).get("scan")),
+    )
+
+
+def case_ci_neutral(results, tmp):
+    """The same repository gives the same report under either CI system's environment."""
+    repo, manifest = build_green_repo(pathlib.Path(tmp) / "neutral")
+    add_new_provider(repo)
+    expire_every_claim(manifest)
+    reports = {}
+    current = dict(os.environ)
+    try:
+        for system in CI_SYSTEMS:
+            environment = ci_environment(system)
+            os.environ.clear()
+            os.environ.update(environment)
+            code, report = ci(repo)
+            reports[system] = (code, json.dumps(report, sort_keys=True))
+    finally:
+        os.environ.clear()
+        os.environ.update(current)
+    results.check(
+        "CI-neutral: GitHub and GitLab environments produce the identical exit code and report",
+        len(set(reports.values())) == 1 and reports["github"][0] == 1,
+        {k: v[0] for k, v in reports.items()},
+    )
+
+
 CASES = (
     case_green,
     case_policy,
@@ -1177,7 +1498,13 @@ CASES = (
     case_piece_agnostic,
     case_finding_docs,
     case_next_review_due,
+    case_code_quality,
+    case_security_report,
+    case_ci_neutral,
 )
+
+# The CI system the cases are running under, for the one case that has to restore its variables.
+ACTIVE_SYSTEM = [None]
 
 USAGE = "usage: test_ci_mode.py [--output=json] [--quiet] [--emit-fixture=<dir>]\n"
 
@@ -1214,12 +1541,26 @@ def main(argv):
         return 0
 
     results = Results()
+    saved = dict(os.environ)
     with tempfile.TemporaryDirectory(prefix="noru-ci-mode-") as tmp:
-        for case in CASES:
+        for system in CI_SYSTEMS:
+            # Every case, and every child it starts, sees exactly this CI system's environment.
+            environment = ci_environment(system)
+            os.environ.clear()
+            os.environ.update(environment)
+            ACTIVE_SYSTEM[0] = system
+            results.prefix = f"[{system}] "
+            workdir = pathlib.Path(tmp) / system
+            workdir.mkdir()
             try:
-                case(results, tmp)
-            except Exception as exc:  # noqa: BLE001 - a crashing case is a failing case
-                results.check(case.__name__, False, f"raised {type(exc).__name__}: {exc}")
+                for case in CASES:
+                    try:
+                        case(results, str(workdir))
+                    except Exception as exc:  # noqa: BLE001 - a crashing case is a failing case
+                        results.check(case.__name__, False, f"raised {type(exc).__name__}: {exc}")
+            finally:
+                os.environ.clear()
+                os.environ.update(saved)
 
     if output_json:
         sys.stdout.write(

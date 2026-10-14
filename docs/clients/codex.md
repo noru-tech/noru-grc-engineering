@@ -107,5 +107,5 @@ specific gaps, not the whole pipeline.
 can run; the value is passed through the environment to the piece's own push entrypoint, and every
 step that does not need it runs with the variable removed from its child environment.
 
-Exit codes, warn-only adoption, the GitHub Action's inputs and the GitLab and plain-shell recipes:
+Exit codes, warn-only adoption, the GitHub Action's inputs, the GitLab CI/CD components and the plain-shell recipe:
 [docs/ci-mode.md](../ci-mode.md).

@@ -6,6 +6,35 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- GitLab CI/CD components. `templates/gitlab/noru-ci.yml` and `templates/gitlab/noru-review.yml` are
+  the GitLab counterparts of the `noru-ci` and `noru-review` actions, with `spec: inputs:`, included
+  with `include: remote` from a release tag of this repository. The job clones the toolkit at the same
+  tag (`toolkit-version`, optionally pinned to a commit with `toolkit-sha`), installs nothing, needs
+  no credential for the offline checks, and saves its reports as artifacts whether it passes or
+  fails. `NORU_API_KEY` is never an input; `state`, `diff` and `push` read it from a masked CI/CD
+  variable. The review job runs in merge request pipelines only, with no `diff` or `push`.
+- GitLab merge request reports. `ci_check.py --code-quality=<path>` (and `ci_review.py
+  --code-quality=<path>`) writes every finding as a GitLab Code Quality report, which merge requests
+  show on every tier, fingerprinted on what the finding is and never on its line.
+  `ci_check.py --security-report=<path> [--security-findings=include|omit]` writes a SAST report
+  (schema 15.2.0) of the open security findings the committed manifest records, for a piece that
+  declares `createSecurityFinding`; GitLab shows it in the merge request on Ultimate. A manifest whose
+  inputs declare `reaches_forge_alert_store: false` (`findings-ingest`) never fills one. Neither file
+  changes an exit code. The JSON report records both under `gitlab`.
+- `scripts/gitlab_mr_note.py` writes the result to the merge request as one note, found again by a
+  hidden marker and its own author and updated in place on every run. It uses
+  `NORU_GITLAB_NOTE_TOKEN` (the job token cannot create notes), sent only to `CI_API_V4_URL` over
+  https, never through a redirect, and scrubbed from its output. Without the token or a merge request
+  it is skipped with exit 0, and it never changes the job's exit code.
+- `scripts/publish_gitlab_components.py` builds the component project the GitLab CI/CD Catalog needs
+  — `templates/`, README, LICENSE, `DISTRIBUTION.json` naming the source commit, and a
+  `.gitlab-ci.yml` with the `release` job — and the `release` workflow pushes it with the tag
+  `X.Y.Z` once `GITLAB_COMPONENT_PROJECT` and `GITLAB_COMPONENT_TOKEN` are configured. Until then the
+  job is skipped and publishes nothing; `--check` asserts both.
+- `ci_check.py` and `ci_review.py` no longer pass a GitLab job token (`CI_JOB_TOKEN`) or the note
+  token to any step. `test_ci_mode.py` runs every case under a GitHub Actions environment and again
+  under a GitLab CI one. New test script: `scripts/test_gitlab_ci.py`.
+
 - New piece, `findings-ingest`: SARIF 2.1.0 and OSV-Scanner JSON reports your CI writes and does
   not upload anywhere become reviewed security findings, through the same `createSecurityFinding`
   upsert as `iac-scan`, and findings no input reports any more are closed. The committed

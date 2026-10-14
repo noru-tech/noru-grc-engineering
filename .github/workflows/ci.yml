@@ -78,6 +78,8 @@ jobs:
         run: python3 scripts/test_repo_enforcement.py
       - name: the Marketplace distribution of every action is complete and runs from its own root
         run: python3 scripts/publish_actions.py --check
+      - name: the GitLab component project is complete, and nothing is published without its settings
+        run: python3 scripts/publish_gitlab_components.py --check
 
   tests:
     name: tests (node ${{ matrix.node }}, python ${{ matrix.python }}, ${{ matrix.yaml }})
@@ -151,6 +153,8 @@ jobs:
         run: python3 scripts/test_privacy_ci.py
       - name: consolidated PR review routes pieces and cannot publish
         run: python3 scripts/test_ci_review.py
+      - name: the GitLab templates and the merge request note, against a loopback GitLab
+        run: python3 scripts/test_gitlab_ci.py
       - name: the hub reviews branch changes without writing
         run: python3 scripts/test_hub.py
 

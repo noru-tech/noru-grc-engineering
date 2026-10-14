@@ -4,6 +4,8 @@
 This is the deterministic counterpart to `/noru:review`: route the branch diff to the relevant
 bundled pieces, run only their local scan/validation/expiry/policy checks, and combine the reports.
 It deliberately has no diff or push option and removes NORU_API_KEY from every child process.
+`--code-quality` writes the findings of every piece it ran as one GitLab Code Quality report
+(scripts/gitlab_reports.py), for the GitLab counterpart of the review job.
 """
 
 import json
@@ -12,6 +14,9 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import gitlab_reports  # noqa: E402
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -28,7 +33,7 @@ USAGE = (
     "usage: ci_review.py [--repo=<path>] [--plugins=<path>] [--base-ref=<ref>]\n"
     "                    [--pieces=a,b] [--mode=warn|gate] [--fail-on=<kinds>|none]\n"
     "                    [--baseline=<path>] [--max-age-days=N] [--warn-within-days=N]\n"
-    "                    [--gate-on-new] [--report=<path.json>]\n"
+    "                    [--gate-on-new] [--report=<path.json>] [--code-quality=<path.json>]\n"
     "                    [--output=json|text] [--quiet]\n"
 )
 
@@ -46,6 +51,7 @@ def parse_args(argv):
         "warn_within_days": 30,
         "gate_on_new": False,
         "report": None,
+        "code_quality": None,
         "json": False,
         "quiet": False,
         "help": False,
@@ -79,6 +85,8 @@ def parse_args(argv):
             opts["gate_on_new"] = True
         elif arg.startswith("--report="):
             opts["report"] = pathlib.Path(arg.split("=", 1)[1])
+        elif arg.startswith("--code-quality="):
+            opts["code_quality"] = pathlib.Path(arg.split("=", 1)[1])
         elif arg == "--output=json":
             opts["json"] = True
         elif arg == "--output=text":
@@ -101,6 +109,9 @@ def run(command, cwd):
     # This workflow is structurally read-only. Even an accidentally configured repository secret
     # cannot widen it into a publisher.
     env.pop("NORU_API_KEY", None)
+    # Nor does any piece need the CI system's own job token or the merge request note token.
+    for name in ("CI_JOB_TOKEN", "NORU_GITLAB_NOTE_TOKEN"):
+        env.pop(name, None)
     try:
         return subprocess.run(
             command,
@@ -266,6 +277,15 @@ def main(argv):
         "exit_code": code,
         "write_boundary": "scan, validate, expiry and policy only; diff and push unavailable",
     }
+    if opts["code_quality"] is not None:
+        try:
+            gitlab_reports.write_json(
+                opts["code_quality"], gitlab_reports.code_quality_for_review(payload, opts["repo"])
+            )
+        except OSError as exc:
+            sys.stderr.write(f"error: could not write {opts['code_quality']} ({exc})\n")
+            return EXIT_TOOLING
+
     if opts["report"] is not None:
         try:
             opts["report"].parent.mkdir(parents=True, exist_ok=True)

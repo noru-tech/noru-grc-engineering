@@ -17,6 +17,8 @@ What it covers, and why each one is here rather than left to review:
   * **Supported workflows** — the copyable PR review stays fork-safe and structurally read-only.
   * **Hub routing** — every declared piece appears exactly once in the hub's routing catalogue.
   * **Published examples** — copyable `noru-ci` examples pin the current marketplace version.
+  * **GitLab templates** — each runs the toolkit at the release it ships in, and every copyable
+    `include: remote` names a release tag, never a branch.
   * **Schema / vocabulary sync** — a piece's bundled vocabulary and the contract schema describe the
     same enums. Two sources of truth is one too many, so this makes them one in effect.
   * **Schema evaluability** — no contract schema uses a JSON Schema keyword scripts/jsonschema_mini.py
@@ -708,6 +710,53 @@ def check_action_references(problems):
         problems.append(f"no copyable Noru action reference at @{major} is documented")
 
 
+GITLAB_REMOTE_INCLUDE = re.compile(
+    r"raw\.githubusercontent\.com/noru-tech/noru-grc-engineering/([^/\s]+)/templates/gitlab/"
+)
+
+
+def check_gitlab_templates(problems):
+    """The GitLab templates run the toolkit at the release they are included from.
+
+    `include: remote` pins a tag in the URL, and the job clones the toolkit at `toolkit-version`. If
+    the two disagreed, a pipeline would run one release's template against another release's
+    scripts, so the default is one more copy of the shared version, bumped with the rest. A copyable
+    include names the tag as `vX.Y.Z` for the reader to fill in: an exact version in a doc goes
+    stale, and a branch is not a release.
+    """
+    templates = ROOT / "templates" / "gitlab"
+    marketplace = ROOT / ".claude-plugin" / "marketplace.json"
+    if not templates.is_dir() or not marketplace.is_file():
+        return
+    entries = {e.get("name"): e for e in json.loads(marketplace.read_text(encoding="utf-8")).get("plugins", [])}
+    expected = f"v{(entries.get('noru') or {}).get('version')}"
+    found = 0
+    for path in sorted(templates.glob("*.yml")):
+        found += 1
+        text = path.read_text(encoding="utf-8")
+        match = re.search(r"^    toolkit-version:\n(?:      (?!default:).*\n)*      default: (\S+)\s*$", text, re.M)
+        if not match or match.group(1) != expected:
+            problems.append(
+                f"{path.relative_to(ROOT)}: toolkit-version defaults to "
+                f"{match.group(1) if match else 'nothing'}, expected {expected}; bump it with the release"
+            )
+        if "\n---\n" not in text or not text.startswith(("spec:", "#")):
+            problems.append(f"{path.relative_to(ROOT)}: a component needs a spec: header and a --- separator")
+    if not found:
+        problems.append("templates/gitlab/ has no component template")
+    for path in (ROOT / "README.md", ROOT / "docs" / "ci-mode.md", templates / "README.md",
+                 ROOT / ".github" / "actions" / "noru-ci" / "README.md"):
+        if not path.is_file():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            for ref in GITLAB_REMOTE_INCLUDE.findall(line):
+                if ref != "vX.Y.Z":
+                    problems.append(
+                        f"{path.relative_to(ROOT)}:{number}: a copyable GitLab include names "
+                        f"'{ref}'; write the release tag as vX.Y.Z"
+                    )
+
+
 def check_supported_workflows(problems):
     """The supported PR template must stay fork-safe and structurally unable to publish."""
     template = ROOT / "templates" / "github" / "noru-grc-review.yml"
@@ -1131,6 +1180,7 @@ def main(argv):
         check_pieces_registered(problems, plugin_names)
         check_hub_routing(problems)
         check_action_references(problems)
+        check_gitlab_templates(problems)
         check_supported_workflows(problems)
         check_reviewed_plan_publication(problems)
         check_reference_files_exist(problems)

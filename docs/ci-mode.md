@@ -604,9 +604,168 @@ Four things in it are worth copying deliberately rather than by accident:
   personal data about colleagues — and an artifact store keeps things for ninety days.
 - **The write job is separate, on `main`, behind an environment.** Never on `pull_request_target`.
 
+## GitLab CI
+
+Two CI/CD components in [`templates/gitlab/`](../templates/gitlab/README.md) are the GitLab
+counterparts of the two GitHub Actions: `noru-ci.yml` runs one piece's check, and `noru-review.yml`
+routes a merge request's changes to the pieces they implicate. Include them from a **release tag** of
+this repository, replacing `vX.Y.Z` with the tag of the
+[release](https://github.com/noru-tech/noru-grc-engineering/releases) you want:
+
+```yaml
+include:
+  - remote: https://raw.githubusercontent.com/noru-tech/noru-grc-engineering/vX.Y.Z/templates/gitlab/noru-review.yml
+  - remote: https://raw.githubusercontent.com/noru-tech/noru-grc-engineering/vX.Y.Z/templates/gitlab/noru-ci.yml
+    inputs:
+      piece: ai-inventory
+      mode: warn
+```
+
+`include: remote` takes a public URL and no authentication
+(<https://docs.gitlab.com/ci/yaml/#includeremote>), and `include: inputs` is generally available
+from GitLab 17.0 (<https://docs.gitlab.com/ci/inputs/>). A release tag is immutable here, so the file
+behind that URL does not change; `integrity:` on the include pins its SHA-256 as well, from GitLab
+17.9.
+
+What each job does, in order: checks that the image has `node`, `python3` and `git` and stops with a
+sentence naming what is missing, because it installs nothing; clones this toolkit at
+`toolkit-version` into a temporary directory outside the project, so no collector ever scans it;
+runs `scripts/ci_check.py` (or `scripts/ci_review.py`) on the checkout; writes the merge request note;
+and exits with the check's own exit code. `toolkit-version` defaults to the tag the file was released
+in, so the template and the scripts it runs are always the same release. Set `toolkit-sha` to the
+full commit that tag points at and the job stops if the tag ever resolves to anything else. The
+default image is `node:22-bookworm`; any image with Node 18 or later, Python 3 and git will do.
+`GIT_DEPTH` is `0` in both jobs, because the merge base has to be in the clone for `base-ref`,
+`gate-on-new` and an agent's renewal to be judged.
+
+**The CI/CD Catalog.** `include: component:` and the Catalog list components only from a project on
+the same GitLab instance (<https://docs.gitlab.com/ci/components/>), and this repository is on
+GitHub. Each release can be mirrored into a GitLab component project by
+`scripts/publish_gitlab_components.py`; until that project exists, `include: remote` above is the way
+to use these templates, on GitLab.com and on GitLab Self-Managed alike. CI/CD components and the
+Catalog are generally available from GitLab 17.0; a Self-Managed instance uses a GitLab.com component
+by mirroring the component project and setting the mirror as a catalog project.
+
+### `noru-ci.yml` inputs
+
+The same as the action's, with these differences: `report-dir` instead of `report-path`, and the job
+writes all its reports into it; `base-ref` defaults to the merge request's diff base
+(`CI_MERGE_REQUEST_DIFF_BASE_SHA`) when there is one; there is no `fetch-reviewed-plan`, because
+confirmation by a reviewed plan reads GitHub's pull request and artifact APIs.
+
+| Input | Default | Description |
+|---|---|---|
+| `piece` | *(required)* | Which piece to run |
+| `repo` | `.` | Path to the repository to check, relative to the project directory |
+| `mode` | `gate` | `gate` fails the job on a finding; `warn` reports the same findings and passes |
+| `steps` | `scan,validate,expiry,policy` | Add `state`, `diff` and `push`, or use `all`; those need `NORU_API_KEY` |
+| `fail-on`, `baseline`, `max-age-days`, `warn-within-days`, `as-of`, `gate-on-new`, `state`, `on-missing-prerequisite` | as the action | As the action |
+| `base-ref` | the merge request's diff base | Compare the manifest against the merge base with this ref |
+| `security-findings` | `include` | `omit` writes the security report with no findings in it |
+| `merge-request-note` | `true` | Post or update one note with the result; needs `NORU_GITLAB_NOTE_TOKEN` |
+| `report-dir` | `.noru/.cache/ci` | Where the reports are written; saved as artifacts |
+| `job-suffix` | *(empty)* | Appended to the job name and report names, to include one piece twice |
+| `stage`, `image`, `expire-in` | `test`, `node:22-bookworm`, `30 days` | The job's stage, image and artifact lifetime |
+| `toolkit-url`, `toolkit-version`, `toolkit-sha` | this repository, this release, *(empty)* | Which toolkit to run, and the commit it must be |
+
+The job has no `rules:` of its own, so the pipeline's `workflow:rules` decide when it runs, exactly as
+a workflow's `on:` does for the action. `noru-review.yml` runs in merge request pipelines only, starts
+in `warn` mode with `gate-on-new: true`, and has no `steps` input at all.
+
+### Credentials
+
+| Variable | Read by | Needed for |
+|---|---|---|
+| `NORU_API_KEY` | `scripts/ci_check.py`, which passes it only to the one step that sends it | `state`, `diff` and `push`. Never an input |
+| `NORU_GITLAB_NOTE_TOKEN` | `scripts/gitlab_mr_note.py`, at the point of use | The merge request note. Nothing else inherits it |
+
+Both are CI/CD variables you create, masked. Make `NORU_API_KEY` **protected** as well: a protected
+variable is available only to pipelines on protected branches and tags
+(<https://docs.gitlab.com/ci/variables/>), which keeps the write key off merge request pipelines the
+way the GitHub publish job keeps it behind an `environment:`. Merge request pipelines need the note
+token, so it is masked, not protected.
+
+The job token cannot write the note: <https://docs.gitlab.com/ci/jobs/ci_job_token/> lists the merge
+request Notes API for `CI_JOB_TOKEN` as `GET` only. `NORU_GITLAB_NOTE_TOKEN` is a project access token
+on the one project, scope `api` (`read_api` cannot write), role Reporter: Planner can comment too,
+but not where merge requests are visible to project members only
+(<https://docs.gitlab.com/user/permissions/>). On GitLab.com, project access tokens need Premium or
+Ultimate (<https://docs.gitlab.com/user/project/settings/project_access_tokens/>); on the Free tier,
+use a personal access token of an account that is a member of this one project alone. The note writer
+sends the token in a `PRIVATE-TOKEN` header to `CI_API_V4_URL` only, only over https, never follows a
+redirect with it, and scrubs it from anything it prints. No step of `ci_check.py` or `ci_review.py`
+inherits the job token or the note token; `NORU_API_KEY` never reaches the note writer.
+
+A merge request from a fork runs its pipeline in the fork by default, without the parent project's
+variables, so the note is skipped and `state`, `diff` and `push` report `skipped`, as on a GitHub fork
+pull request. A pipeline run in the parent project for a fork's merge request has every variable,
+protected ones included where merge request pipelines are allowed them; review a fork's
+`.gitlab-ci.yml` before running one.
+
+### The merge request note
+
+The counterpart of the GitHub job summary: the step table and the findings, each kind linked to its
+page under [docs/findings/](./findings/README.md). Each job writes **one** note and updates it on
+every later run. The note starts with a hidden marker naming the job, and the writer updates only a
+note that carries that marker **and** was written by the token's own account, so quoting the marker
+in a comment cannot make it edit someone else's note.
+
+It is never a gate. Without the token, or outside a merge request pipeline, it is skipped with a
+sentence saying why and exit `0`; when GitLab refuses or cannot be reached, the job still ends with
+the check's exit code. Set `merge-request-note: false` to turn it off.
+
+### Reports and artifacts
+
+`artifacts: when: always`, so a failing gate keeps its reports:
+
+| File in `report-dir` | What it is |
+|---|---|
+| `noru-ci-<piece>.json` | The JSON report, as `--report` writes it |
+| `noru-ci-<piece>.codequality.json` | GitLab Code Quality, declared as `artifacts:reports:codequality` |
+| `noru-ci-<piece>.sast.json` | A GitLab SAST security report, declared as `artifacts:reports:sast` |
+
+The publication receipt and plan (`.noru/.cache/<piece>.receipt.json`, `<piece>.plan.json`) are
+saved too when a `push` wrote them. The reports name claim owners as the committed manifest does, so
+`expire-in` keeps them 30 days unless you say otherwise. `noru-review.yml` writes
+`noru-grc-review.json` and `noru-grc-review.codequality.json`.
+
+**Code Quality** carries every finding of the run — drift, an expired claim, a policy finding — one
+entry each. A finding that gates the job is `major`; one that does not is `minor`. Drift points at
+the first file it names; everything else points into the manifest, at the line that names its
+subject when there is one. The fingerprint is the finding's identity and never its line, so a
+manifest that gains a line above a finding moves the annotation and does not create a new finding.
+In a monorepo, paths are relative to the project, not to `repo`. GitLab shows Code Quality findings
+in merge request reports on every tier, in the pipeline report on Premium and Ultimate, and in the
+merge request changes view on Ultimate (<https://docs.gitlab.com/ci/testing/code_quality/>). The
+flags are `--code-quality=<path>` on `ci_check.py` and `ci_review.py`.
+
+**The security report** carries the security findings the committed manifest records, for a piece
+whose `piece.json` declares the `createSecurityFinding` write, in the SAST report schema `15.2.0`
+(<https://gitlab.com/gitlab-org/security-products/security-report-schemas>). Only `open` and
+`in_progress` findings are reported; an accepted finding or a false positive is a decision already
+recorded, not an open vulnerability. A finding with no file to point at, such as a `change-control`
+exception, is not given one. The file is written whenever the check runs, empty when there is nothing
+to report, so the path the artifact declares always exists; the JSON report says why it is empty. The
+flags are `--security-report=<path>` and `--security-findings=include|omit`.
+
+Three things to know before relying on it:
+
+- **GitLab shows it in the merge request on Ultimate only**; on Free and Premium it is a JSON
+  artifact to download (<https://docs.gitlab.com/user/application_security/sast/>). Code Quality is
+  the report every tier sees.
+- **GitLab ingests it only when the job succeeds**
+  (<https://docs.gitlab.com/ci/yaml/artifacts_reports/>). A gate that fails withholds it; run the
+  check in `warn` mode, or as a second job, where the security report is what you want.
+- **It is a forge alert store.** `findings-ingest` never puts a finding in one: every input it reads
+  declares `reaches_forge_alert_store: false`, and a merge request security report would make that
+  false, so its report is always empty. For `iac-scan`, if your Noru organization imports GitLab's
+  vulnerability report through an integration, the same finding arrives twice under two sources;
+  set `security-findings: omit`.
+
 ## The generic recipe
 
-Nothing here is GitHub-specific. The action is a thin wrapper over one command:
+Nothing here is GitHub-specific. The action and the GitLab components are thin wrappers over one
+command:
 
 ```bash
 python3 scripts/ci_check.py \
@@ -622,23 +781,9 @@ No TTY, no prompts, no colour, no interactive `git`. Everything it prints on std
 `--output=json` is a single JSON document; everything else goes to stderr.
 
 Get the toolkit onto the runner however that CI system prefers — a git clone at a tag, a vendored
-submodule, a cached artifact. There is nothing to build and nothing to install.
-
-### GitLab CI
-
-```yaml
-compliance:
-  image: node:20
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq python3 git
-    - git clone --depth 1 --branch v0.2.0 https://github.com/noru-tech/noru-grc-engineering /opt/ngce
-  script:
-    - python3 /opt/ngce/scripts/ci_check.py --piece=ai-inventory --repo="$CI_PROJECT_DIR"
-        --plugins=/opt/ngce/plugins --mode=gate --report=ci-report.json --output=text
-  artifacts:
-    when: always
-    paths: [ci-report.json]
-```
+submodule, a cached artifact. There is nothing to build and nothing to install. The script reads no
+CI system's variables: `scripts/test_ci_mode.py` runs every case under a GitHub Actions environment
+and again under a GitLab CI one, and requires the same report from both.
 
 ### A plain shell gate
 
@@ -720,6 +865,12 @@ Written down here rather than discovered later.
   last commit only, so a renewal added in an earlier commit of the same push reads as carried
   forward. Gate the pull request with `--base-ref`, where the whole range is judged, and merge
   rather than push to the protected branch.
+- **GitLab: the security report is withheld by a failing gate, and is a second copy where an
+  integration imports it.** GitLab ingests a SAST report only from a job that succeeded, and shows
+  it in the merge request on Ultimate only. Code Quality reaches every tier.
+- **GitLab: confirmation by a reviewed plan is GitHub-only.** `fetch-reviewed-plan` reads GitHub's
+  pull request and artifact APIs, and `noru-ci.yml` has no counterpart; `push` there keeps its
+  standing meaning, behind a protected `NORU_API_KEY`.
 - **A team alias is caught by its usual shapes, not by knowing your teams.** An operator that
   starts with `@`, contains `/`, or names a group ("Privacy Team", "platform-admins") is refused.
   Anything else is taken as a person's name. The control is that the policy lists its operators by
