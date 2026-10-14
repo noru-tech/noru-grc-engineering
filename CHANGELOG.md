@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.13.0 — 2026-10-14
+
 - Add explicit scoped uncertainty acceptance for investigated fields and coverage findings. Preserve
   unknown meaning, reviewer attribution and map impact through review, sealing and Fides export;
   reopen changed evidence and retain acceptance history. Supply a batch command and review templates.
