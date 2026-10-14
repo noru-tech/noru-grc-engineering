@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one piece headless: scan -> validate -> expiry -> policy -> (diff -> publish preparation).
+"""Run one piece headless: scan -> validate -> expiry -> policy -> (state -> diff -> push).
 
 Standard library only, and by default no network and no credential — that is the whole design
 constraint. A fork pull request has no secrets, so the checks that matter most on a pull request
@@ -15,25 +15,28 @@ have to be computable from the repository alone. Two of them are:
      the committed privacy baseline does not permit. The baseline is a floor pinned from Noru so
      this stays offline; Noru is the truth. See scripts/check_policy.py.
 
-The `diff` and publication half genuinely needs Noru, so it is opt-in, and when the inputs it needs
-are absent it is reported as skipped rather than failed. REST-backed pieces can publish from this
-runner. MCP-backed pieces cannot: their push entrypoint emits the reviewed calls, but only an
-authenticated MCP host can execute them. A gate that breaks on every fork pull request gets deleted
-in a week.
+The `state`, `diff` and publication half genuinely needs Noru, so it is opt-in, and when the inputs
+it needs are absent it is reported as skipped rather than failed. With NORU_API_KEY present,
+`state` builds the snapshot from the read tools the piece declares (scripts/mcp_exec.mjs state),
+and `push` runs the piece's own confirmed :push and then, for an MCP-backed piece, executes exactly
+the calls it emitted (scripts/mcp_exec.mjs exec). The push is reported as written only when the
+executor's receipt says every call succeeded. A gate that breaks on every fork pull request gets
+deleted in a week.
 
 This file is driven entirely by `plugins/<piece>/piece.json` — entrypoints, artifact path, exit
 codes. A piece scaffolded tomorrow works here with no change to this file, and there is a test that
 says so.
 
 Credentials: NORU_API_KEY is never read, printed or written by this script. Its *presence* decides
-whether the push step can run; its value is passed through the process environment to the piece's
-own push entrypoint, which reads it at the point of use. Every step that does not need it is run
+whether the state and push steps can run; its value is passed through the process environment to
+the one child that sends it (the REST piece's own push entrypoint, or scripts/mcp_exec.mjs), which
+reads it at the point of use. The piece's MCP :push, which only writes a call list, never gets it. Every step that does not need it is run
 with it removed from the child environment, and everything captured from a child process is passed
 through redact() before it can reach stdout or the report.
 
 Usage:
     python3 scripts/ci_check.py --piece=<name> [--repo=<path>] [--plugins=<dir>]
-        [--mode=gate|warn] [--steps=scan,validate,expiry,policy,diff,push|all]
+        [--mode=gate|warn] [--steps=scan,validate,expiry,policy,state,diff,push|all]
         [--as-of=YYYY-MM-DD] [--warn-within-days=N] [--max-age-days=N]
         [--fail-on=<kinds>|none] [--baseline=<path>] [--base-ref=<ref>] [--gate-on-new]
         [--state=<path>]
@@ -79,6 +82,7 @@ from check_policy import (  # noqa: E402
 from finding_docs import see as see_finding_docs  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+MCP_EXEC = pathlib.Path(__file__).resolve().parent / "mcp_exec.mjs"
 
 EXIT_OK = 0
 EXIT_MIXED = 1
@@ -89,7 +93,7 @@ EXIT_INVALID = 5
 EXIT_TOOLING = 6
 EXIT_POLICY = 7
 
-ALL_STEPS = ("scan", "validate", "expiry", "policy", "diff", "push")
+ALL_STEPS = ("scan", "validate", "expiry", "policy", "state", "diff", "push")
 DEFAULT_STEPS = ("scan", "validate", "expiry", "policy")
 
 FINDING_KINDS = ("drift", "invalid", "dangling_ref", "coverage") + EXPIRY_KINDS + POLICY_KINDS
@@ -125,7 +129,8 @@ IDENTITY_FIELDS = ("key", "file", "id", "name")
 
 USAGE = (
     "usage: ci_check.py --piece=<name> [--repo=<path>] [--plugins=<dir>] [--mode=gate|warn]\n"
-    "                   [--steps=scan,validate,expiry,policy,diff,push|all] [--as-of=YYYY-MM-DD]\n"
+    "                   [--steps=scan,validate,expiry,policy,state,diff,push|all]\n"
+    "                   [--as-of=YYYY-MM-DD]\n"
     "                   [--warn-within-days=N] [--max-age-days=N] [--fail-on=<kinds>|none]\n"
     "                   [--baseline=<path>] [--base-ref=<ref>] [--gate-on-new]\n"
     "                   [--state=<path>]\n"
@@ -813,6 +818,50 @@ def step_policy(report, repo, parsed_path, baseline_source, delta=None):
     return "finding" if failing else "ok"
 
 
+def step_state(report, decl, repo, plugins, state_source):
+    """Build .noru/.cache/noru-state.json from the read tools the piece declares."""
+    if state_source is not None:
+        report.step("state", "skipped", detail=f"a snapshot was passed with --state={state_source}; it is used as given")
+        return "skipped"
+    declared = decl.get("state") or {}
+    if declared.get("headless") is not True:
+        report.step(
+            "state",
+            "skipped",
+            detail=(
+                "this piece declares no headless snapshot: "
+                + (declared.get("reason") or "piece.json has no state declaration")
+                + " Build it in an authenticated MCP host and pass --state=<path>."
+            ),
+        )
+        return "skipped"
+    # Presence only, as for the push step. The executor reads the value at the point of use.
+    if not os.environ.get("NORU_API_KEY"):
+        report.step(
+            "state",
+            "skipped",
+            detail=(
+                "NORU_API_KEY is not present in the environment, so this job cannot read the "
+                "organization. This is the expected state on a fork pull request."
+            ),
+        )
+        return "skipped"
+    completed, failure = run(
+        ["node", str(MCP_EXEC), "state", f"--piece={decl['piece']}", f"--repo={repo}",
+         f"--plugins={plugins}", "--output=json", "--quiet"],
+        with_api_key=True,
+    )
+    if failure:
+        report.step("state", "error", detail=redact(failure))
+        return "tooling"
+    if completed.returncode != 0:
+        report.step("state", "error", detail=first_error_line(completed) or f"exit {completed.returncode}")
+        return "tooling"
+    result = parse_child_json(completed) or {}
+    report.step("state", "pass", reads=result.get("reads"))
+    return "ok"
+
+
 def step_diff(report, piece_dir, decl, repo, state_source):
     state_path = repo / ".noru" / ".cache" / "noru-state.json"
     if state_source is not None:
@@ -861,22 +910,12 @@ def step_push(report, piece_dir, decl, repo, diff_outcome):
     transports = {
         operation.get("transport") for operation in decl.get("push", {}).get("operations", [])
     }
-    if "mcp" in transports:
-        report.step(
-            "push",
-            "skipped",
-            detail=(
-                "this piece publishes over MCP. Headless CI can create and verify the reviewed "
-                "plan, but it cannot execute MCP calls; run :push in an authenticated MCP host"
-            ),
-        )
-        return "skipped"
-    if transports != {"rest"}:
+    if transports not in ({"rest"}, {"mcp"}):
         report.step("push", "error", detail=f"unsupported push transport set: {sorted(transports)}")
         return "tooling"
 
-    # Presence only. The value is never read here; the REST piece's own push entrypoint reads it at
-    # the point of use.
+    # Presence only. The value is never read here; whichever child performs the writes (the REST
+    # piece's own push entrypoint, or scripts/mcp_exec.mjs) reads it at the point of use.
     if not os.environ.get("NORU_API_KEY"):
         report.step(
             "push",
@@ -893,9 +932,11 @@ def step_push(report, piece_dir, decl, repo, diff_outcome):
         report.step("push", "error", detail=f"push entrypoint {entry} does not exist")
         return "tooling"
 
+    # The piece's own :push makes the confirmed, plan-bound call list. For an MCP piece it writes a
+    # file and nothing else, so it never sees the key; for the REST piece it is the writer.
     completed, failure = run(
         ["node", str(entry), f"--repo={repo}", "--confirm", "--output=json", "--quiet"],
-        with_api_key=True,
+        with_api_key=transports == {"rest"},
     )
     if failure:
         report.step("push", "error", detail=redact(failure))
@@ -904,12 +945,37 @@ def step_push(report, piece_dir, decl, repo, diff_outcome):
         report.step("push", "error", detail=first_error_line(completed) or f"exit {completed.returncode}")
         return "tooling"
     result = parse_child_json(completed) or {}
-    report.step(
-        "push",
-        "pass",
-        uploaded=result.get("uploaded"),
-        calls=len(result.get("calls", [])) if isinstance(result.get("calls"), list) else None,
+    if transports == {"rest"}:
+        report.step(
+            "push",
+            "pass",
+            uploaded=result.get("uploaded"),
+            calls=len(result.get("calls", [])) if isinstance(result.get("calls"), list) else None,
+        )
+        return "ok"
+
+    completed, failure = run(
+        ["node", str(MCP_EXEC), "exec", f"--piece={decl['piece']}", f"--repo={repo}",
+         f"--plugins={piece_dir.parent}", "--output=json", "--quiet"],
+        with_api_key=True,
     )
+    if failure:
+        report.step("push", "error", detail=redact(failure))
+        return "tooling"
+    executed = parse_child_json(completed) or {}
+    receipt = executed.get("receipt") or str(repo / ".noru" / ".cache" / f"{decl['piece']}.receipt.json")
+    if completed.returncode != 0 or executed.get("ok") is not True:
+        report.step(
+            "push",
+            "error",
+            detail=first_error_line(completed) or f"exit {completed.returncode}",
+            written=executed.get("written"),
+            failed=executed.get("failed"),
+            not_run=executed.get("not_run"),
+            receipt=receipt,
+        )
+        return "tooling"
+    report.step("push", "pass", written=executed.get("written"), receipt=receipt)
     return "ok"
 
 
@@ -1191,6 +1257,8 @@ def main(argv):
             outcome = step_expiry(report, repo, parsed_path, expiry_policy)
         elif step == "policy":
             outcome = step_policy(report, repo, parsed_path, opts["baseline"], delta)
+        elif step == "state":
+            outcome = step_state(report, decl, repo, opts["plugins"].resolve(), opts["state"])
         elif step == "diff":
             outcome = step_diff(report, piece_dir, decl, repo, opts["state"])
             diff_outcome = outcome

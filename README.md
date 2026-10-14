@@ -279,9 +279,10 @@ A fourth thing fails a build and is not a compliance finding at all: a collector
 schema in a repository that visibly has one (exit `6`). An empty data map and a repository with no
 personal data in it are the same file, and only one of them is good news.
 
-`:diff` needs a current read snapshot from Noru. Publication is opt-in and separate: MCP-backed
-pieces execute through an authenticated MCP host, while `evidence-push` uses a key for its REST file
-upload. Headless CI never reports an emitted MCP call list as an executed write. Exit codes,
+`:diff` needs a current read snapshot from Noru. Publication is opt-in and separate: in an
+authenticated MCP host the agent executes the reviewed calls; in CI, with `NORU_API_KEY` in the job
+environment, the `state` step builds the snapshot and the `push` step executes exactly the confirmed
+call list, reporting it written only with a receipt that says every call succeeded. Exit codes,
 warn-only adoption, and the GitLab and plain-shell recipes:
 [docs/ci-mode.md](./docs/ci-mode.md). What each finding means and how to clear it:
 [docs/findings/](./docs/findings/README.md).

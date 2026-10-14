@@ -158,6 +158,10 @@
     ],
     "hardcoded_expectations": false
   },
+  "state": {
+    "headless": false,
+    "reason": "The snapshot leaves `datamap` out entirely when Noru holds nothing for this source, and narrows datasets to this source. Those are decisions about what the tools return, which a fixed list of reads cannot express."
+  },
   "interpretation": {
     "required": true,
     "level": "per_claim",

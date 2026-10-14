@@ -15,7 +15,7 @@ What it asserts, in one line each:
   * calling it wrong is not a compliance finding                                     -> exit 2
   * a check that cannot run is not a pass                                            -> exit 6
   * no credential means the push half is skipped, not failed                         -> exit 0
-  * an MCP push is never reported as executed by a headless runner                   -> exit 0
+  * an MCP call list bound to another endpoint is refused, never reported as written -> exit 6
   * NORU_API_KEY never reaches a step that does not need it
   * the orchestrator hardcodes no piece name; it reads piece.json
 
@@ -842,13 +842,20 @@ def case_credentials(results, tmp):
         ),
         encoding="utf-8",
     )
-    code, report = ci(repo, "--steps=all", env={"NORU_API_KEY": "test-value-not-a-real-key"})
+    # The snapshot names the production endpoint; the job is configured for a loopback one. The
+    # executor must refuse before opening a socket, and the call list must never read as written.
+    # scripts/test_mcp_exec.py drives the writes themselves against a loopback MCP server.
+    code, report = ci(
+        repo,
+        "--steps=all",
+        env={"NORU_API_KEY": "test-value-not-a-real-key", "NORU_API_URL": "http://127.0.0.1:9"},
+    )
     push = next((s for s in (report or {}).get("steps", []) if s["step"] == "push"), None)
     results.check(
-        "MCP publication: headless CI never reports emitted calls as executed",
-        code == 0
-        and (push or {}).get("status") == "skipped"
-        and "authenticated MCP host" in (push or {}).get("detail", ""),
+        "MCP publication: calls emitted for another endpoint are refused, never reported as written",
+        code == ci_check.EXIT_TOOLING
+        and (push or {}).get("status") == "error"
+        and "is bound to" in (push or {}).get("detail", ""),
         push,
     )
 

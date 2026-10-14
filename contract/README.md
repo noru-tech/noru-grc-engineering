@@ -47,7 +47,7 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
 | 4 | A **push** that is *one* idempotent operation carrying `slug` + `commitSha` + `branch` — never an unkeyed fan-out of 50 creates | `check_item_4` — every declared operation has an idempotency key, `verified_at` cites the public documentation the behaviour was read from, `client_probe` operations must record what is undocumented, and `keyed_upsert` mode must describe the single operation it would collapse into |
 | 5 | **`:diff` before `:push`** — show what would change in Noru; writes need explicit confirmation | `check_item_5` — the push entrypoint is executed three ways and each refusal is a different exit code: no plan at all → `1`, a plan bound to different manifest bytes → `1` even with `--confirm`, a fresh plan with no `--confirm` → `2`. `1` says the plan is missing or stale and `:diff` has to run again; `2` says a human has not agreed to this one |
 | 6 | Read-only by default; least-privilege scopes declared in the piece's README | `check_item_6` — declared scopes are real Noru scopes, and every one appears in the piece README's Scopes table |
-| 7 | CI-friendly: declared generic validate/drift/watch metadata, `--output=json --quiet`, documented exit codes, no TTY dependency | `check_item_7` — declarations match the trusted entrypoints, which are executed with `--output=json --quiet` and must emit JSON |
+| 7 | CI-friendly: declared generic validate/drift/watch metadata, `--output=json --quiet`, documented exit codes, no TTY dependency, and a `state` declaration — the read tools a headless `:diff` needs, or why a person has to build the snapshot | `check_item_7` — declarations match the trusted entrypoints, which are executed with `--output=json --quiet` and must emit JSON. `piece.schema.json` requires `state`, and `test_mcp_exec.py` checks that every declared read fills a key the piece's diff reads |
 | 8 | Every claim carries an **interpretation block**: `owner`, `decided_at`, `expires_at`, `rationale`, plus the `refs[]` (`file:line`) that produced it. Unattributed claims are a validator **error**, not a warning | `check_item_8` — a generated manifest with one interpretation block stripped must make the validator exit 1, and the message must name the missing field |
 | 9 | A piece **works Noru's queue, it does not invent one** | `check_item_9` — `queue.hardcoded_expectations` is `false`, `queue.source` names only MCP tools that exist, and no shipped plugin file outside `fixtures/` contains a catalogue-shaped evidence-item or control id |
 
@@ -249,9 +249,13 @@ has re-created the drift problem the catalogue rule exists to prevent, one layer
   Noru and a record of provenance, never a parallel register. If you find yourself adding a
   `status:` field that only your plugin reads, stop — that state belongs in Noru.
 - **No embedded framework control text.** Licensing *and* drift. Call the API.
-- **No credential handling.** Authentication is the MCP client's job (OAuth where supported) or a
-  `NORU_API_KEY` environment variable read at the point of use for REST. A piece never writes a
-  secret to disk, never logs one, never puts one in a manifest, an example, or a fixture.
+- **No credential handling in a piece.** A piece never reads, writes, logs or stores a secret, and
+  never puts one in a manifest, an example or a fixture. Authentication is the MCP client's job
+  (OAuth where supported). In CI, where there is no interactive client, the toolkit's own executor
+  (`scripts/mcp_exec.mjs`) is that client: it reads `NORU_API_KEY` at the point of use, as the
+  published API documentation says `/v1/mcp` accepts, under the same rules the REST path follows in
+  [CI mode](../docs/ci-mode.md#the-publication-half-and-why-it-is-separate). The one piece that
+  writes over REST, `evidence-push`, reads the key the same way.
 - **No SaaS connectors.** Noru runs those server-side, scheduled, with encrypted credentials. A
   laptop-run connector is strictly worse.
 

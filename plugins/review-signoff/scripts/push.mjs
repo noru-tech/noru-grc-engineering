@@ -15,6 +15,8 @@
 // the evidence record the previous call creates. Those calls carry `depends_on`, and an argument
 // left null is filled in from the named earlier call's result. That substitution is the ONLY thing
 // the executing client may change about a call.
+// In CI, that client is scripts/mcp_exec.mjs, which executes this file and refuses one that
+// differs from the plan.
 //
 // Usage: node push.mjs [--repo=<path>] --confirm [--output=json|text] [--quiet]
 // Exit codes:

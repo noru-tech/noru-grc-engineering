@@ -93,9 +93,16 @@ plausible-looking call that fails at runtime, and far more useful than a confide
 check.
 
 For an MCP piece, `push.mjs` does **not** make the calls: it emits the confirmed, ordered call list
-and the client executes it. A script that made the calls would have to handle a credential, which
-the contract forbids. A REST piece may perform the write itself, reading `NORU_API_KEY` at the point
-of use, never storing or logging it.
+and the client executes it — an MCP host interactively, `scripts/mcp_exec.mjs` in CI. A piece
+script that made the calls would have to handle a credential, which the contract forbids. A REST
+piece may perform the write itself, reading `NORU_API_KEY` at the point of use, never storing or
+logging it.
+
+Declare `state` in `piece.json` so CI can build the snapshot your `:diff` reads: each entry names a
+published read tool, its fixed arguments, the result key that holds the value, and the snapshot key
+it fills (`"page": { "limit": 200 }` for a tool that pages with `limit`, `offset` and `total`).
+`connection` is always filled from `getMcpCapabilities`. If building the snapshot needs a person's
+answer, declare `"headless": false` and a `reason` instead.
 
 ## Then
 

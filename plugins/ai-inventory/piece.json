@@ -198,6 +198,10 @@
     ],
     "hardcoded_expectations": false
   },
+  "state": {
+    "headless": false,
+    "reason": "Which of the organization's enabled frameworks are its AI frameworks is a person's answer (see commands/diff.md), and the controls this piece reads depend on that answer. Nothing committed records it, so a job cannot build the snapshot on its own."
+  },
   "interpretation": {
     "required": true,
     "level": "per_claim",

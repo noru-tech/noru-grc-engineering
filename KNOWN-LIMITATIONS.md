@@ -49,8 +49,14 @@ From [docs/verification.md, "Known gaps"](./docs/verification.md#known-gaps-stat
 - **`governance-records` creates rather than updates** when an account is rewritten.
 - **The two YAML loaders disagree about YAML 1.1 booleans**; `check_repo.py` stops a file relying on
   it, but the divergence is a property of the machine.
-- **The MCP `push` does not perform the writes.** It emits the confirmed call list; an agent that
-  improvises a call outside it has stepped outside the reviewed plan.
+- **The MCP `push` does not perform the writes.** It emits the confirmed call list. In an
+  interactive host the agent executes it, and an agent that improvises a call outside it has
+  stepped outside the reviewed plan. In CI, `scripts/mcp_exec.mjs` executes exactly that list and
+  refuses one that differs from the plan.
+- **The id a create returns is read from an undocumented result shape.** Where a call depends on an
+  earlier create (`depends_on`), the executor takes the result's `id`, or the one nested object's
+  `id`; the published tool descriptions do not document the result. If neither is there, the run
+  stops before the dependent call.
 
 ## CI mode
 
@@ -60,6 +66,9 @@ From [docs/ci-mode.md, "Where this is weaker than it looks"](./docs/ci-mode.md#w
   changed.
 - **CI mode checks the repository's record, not Noru's.** A fork pull request cannot see whether a
   control is still satisfied or a record still exists.
+- **Two pieces cannot build their snapshot headless.** `ai-inventory` needs a person to say which
+  frameworks are the AI ones, and `privacy-datamap` needs judgement about what the privacy tools
+  return. Their `state` step reports `skipped`; pass a snapshot with `--state` to run `diff`.
 - **A queue-driven piece has almost nothing to check offline.** Every piece except `ai-inventory`
   reports `skipped` without the queue Noru serves; the expiry half still works.
 - **The policy gate trusts a baseline that people edit**, and sees stored columns, not flows:
@@ -80,5 +89,5 @@ From [docs/repository-enforcement.md, "Boundaries"](./docs/repository-enforcemen
 ## Non-goals
 
 From [contract/README.md, "Non-goals"](./contract/README.md#non-goals-stated-so-they-can-be-pointed-at):
-no local register duplicating Noru, no framework control text, no credential handling, and no SaaS
+no local register duplicating Noru, no framework control text, no credential handling in a piece, and no SaaS
 connectors.

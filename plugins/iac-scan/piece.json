@@ -131,6 +131,19 @@
     ],
     "hardcoded_expectations": false
   },
+  "state": {
+    "headless": true,
+    "reads": [
+      {
+        "into": "security_findings",
+        "tool": "getSecurityFindings",
+        "arguments": {
+          "source": "iac-scan"
+        },
+        "result": "findings"
+      }
+    ]
+  },
   "interpretation": {
     "required": true,
     "level": "per_claim",

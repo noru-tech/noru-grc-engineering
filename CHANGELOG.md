@@ -6,6 +6,20 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Run the publication half from CI. A new `state` step builds `.noru/.cache/noru-state.json` from
+  the read tools a piece declares in its `piece.json` (new required `state` field), with the
+  connection taken from `getMcpCapabilities`. With `NORU_API_KEY` in the job environment, the `push`
+  step now executes an MCP piece's confirmed call list through `scripts/mcp_exec.mjs` and reports it
+  written only with a receipt (`.noru/.cache/<piece>.receipt.json`) that says every call succeeded.
+  The executor refuses an edited call list, a plan bound to another endpoint or organization, and
+  missing scopes or tools before the first write, sends the key only to `NORU_API_URL` (https), and
+  stops at the first failing call. `ai-inventory` and `privacy-datamap` declare that a person has to
+  build their snapshot and keep reading one passed with `state:`.
+- The contract's non-goal is now "no credential handling in a piece": the toolkit's executor is the
+  MCP client in CI and reads the key at the point of use, as the REST path already does.
+- Fix `change-control`'s `:push`, which dropped `depends_on` from the call list, so a
+  `linkEvidenceToControl` call carried a null `evidenceId` with no instruction to fill it in.
+
 ## 0.12.2 — 2026-10-14
 
 - Explain recursive member coverage in privacy reviews without assigning child categories to

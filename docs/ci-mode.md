@@ -4,7 +4,7 @@ The commands are the same three moves a person runs — `:scan`, `:diff`, `:push
 with nobody watching:
 
 ```text
-scan  →  validate  →  expiry  →  policy  →  (diff  →  push)
+scan  →  validate  →  expiry  →  policy  →  (state  →  diff  →  push)
 ```
 
 The first four need **no network and no credential**. That is the design constraint, not an
@@ -328,7 +328,7 @@ This action is not part of `v0.1.0`; use the tag of the first release that carri
 | `piece` | *(required)* | which piece to run |
 | `repo` | `.` | path to the repository to check |
 | `mode` | `gate` | `gate` fails on a finding, `warn` reports and exits `0` |
-| `steps` | `scan,validate,expiry,policy` | add `diff` and `push`, or use `all` |
+| `steps` | `scan,validate,expiry,policy` | add `state`, `diff` and `push`, or use `all` |
 | `fail-on` | *(tool default)* | which finding kinds gate the build, or `none` |
 | `baseline` | `.noru/privacy-baseline.yml` | the agreed taxonomy for the policy step. Absent → skipped; a path that does not exist → a tooling failure |
 | `base-ref` | *(none)* | compare against the merge base with this ref, so findings say whether this pull request introduced them. Needs `fetch-depth: 0` |
@@ -336,7 +336,7 @@ This action is not part of `v0.1.0`; use the tag of the first release that carri
 | `max-age-days` | `0` | the review cadence this pipeline declares. `0` declares none |
 | `warn-within-days` | `30` | how far ahead to report an expiry that has not passed yet |
 | `as-of` | *(today)* | evaluate expiry against a fixed date. For testing |
-| `state` | *(none)* | a Noru state snapshot, so the `diff` step has something to compare against |
+| `state` | *(none)* | a Noru state snapshot to use as given, instead of building one in the `state` step |
 | `on-missing-prerequisite` | `skip` | `fail` turns a step with no input into a tooling failure |
 | `plugins` | *(bundled)* | where the pieces live, if not the ones shipped with the action |
 | `require-yaml-loader` | *(report only)* | assert the runner's YAML loader is `pyyaml` or `fallback` |
@@ -374,16 +374,38 @@ everything, so see the Known gaps in [verification.md](./verification.md).
 
 ## The publication half, and why it is separate
 
-`:diff` compares the manifest against a current organization snapshot. It is opt-in because a fork
-pull request cannot safely fetch that state. What happens after the diff depends on transport:
+`:diff` compares the manifest against a current organization snapshot, and `:push` writes. Both
+need a credential, so they are opt-in, and a fork pull request — which has none — reports them
+`skipped`, never `pass`.
 
-- with no state snapshot, the `diff` step reports `skipped` for the same reason. `:diff` needs to
-  know what is already in Noru, and reading that needs an authenticated, read-scoped connection.
-- MCP-backed pieces emit an ordered, reviewed call list, but this headless runner has no MCP host to
-  execute it. Their `push` step reports `skipped` and names the authenticated-client handoff; it
-  never reports those calls as written.
-- `evidence-push` is REST-backed. With no `NORU_API_KEY`, its `push` step reports skipped and the
-  build stays green; with a protected secret and a current state snapshot, it can upload.
+- **`state`** builds `.noru/.cache/noru-state.json` from the read tools the piece declares under
+  `state` in its `piece.json`. `connection` (organization, endpoint, granted scopes) comes from
+  `getMcpCapabilities`, so the plan binds to the organization the key actually reaches rather than
+  to one a file names. A read that stops short of the tool's `total` is refused rather than written,
+  because a missing record plans a duplicate. `ai-inventory` and `privacy-datamap` declare that a
+  person has to build their snapshot; for those, pass one with `state:` and the step reports
+  `skipped`.
+- **`diff`** runs the piece's own `:diff` against that snapshot and writes the plan.
+- **`push`** runs the piece's own `:push --confirm`, which refuses a stale plan exactly as it does
+  at a terminal. `evidence-push` performs its REST upload there. For every MCP piece, `:push` only
+  writes the confirmed call list, and `scripts/mcp_exec.mjs` executes exactly that list, in order,
+  stopping at the first failure. It writes a receipt (`.noru/.cache/<piece>.receipt.json`: the plan
+  and call-list digests, each call's status, a digest of each response) and the step reports
+  `written` only when the receipt says every call succeeded. A second run with nothing to change
+  makes no request at all.
+
+Before the first write, the executor refuses:
+
+- a call list that is not exactly the plan's operations, in order, with the same arguments and
+  the same dependencies, or that names a tool the piece does not declare;
+- a plan bound to an endpoint other than the one this job is configured for. The endpoint is
+  `NORU_API_URL` from the job's environment (default `https://api.noru.tech`, `https` only), never
+  a value from a file, so a crafted snapshot cannot steer the key to another host;
+- a key that reaches a different organization than the plan was built for, a connection missing a
+  required scope, or one that does not offer a tool the plan calls.
+
+Where a call needs the id an earlier create returned (`depends_on`), that one field is filled in
+from the earlier result and nothing else changes. The receipt records the substitution.
 
 ```yaml
   land-it:
@@ -400,30 +422,27 @@ pull request cannot safely fetch that state. What happens after the diff depends
         env:
           NORU_API_KEY: ${{ secrets.NORU_API_KEY }}
         with:
-          piece: evidence-push
+          piece: iac-scan
           mode: gate
           steps: all
-          state: .noru/.cache/noru-state.json
 ```
 
-Rules this REST example obeys, and that a reviewer should check it still obeys:
+Rules this workflow obeys, and that a reviewer should check it still obeys:
 
 - the key is passed in `env:` from a secret and **never** as a `with:` input, so it does not travel
   through the action's inputs
 - the orchestrator never reads its value. It checks only whether the variable is *present*, and
-  passes the environment through to the piece's own push entrypoint, which reads it at the point of
-  use
-- every step that does not push runs with `NORU_API_KEY` **removed** from its child environment
+  passes the environment through to the one child that sends it — the REST piece's own push
+  entrypoint, or `scripts/mcp_exec.mjs` — which reads it at the point of use
+- every other step, including the MCP piece's own `:push`, runs with `NORU_API_KEY` **removed** from
+  its child environment
 - everything captured from a child process is passed through the same redaction the plugins use
-  before it can reach a log, the report or a job summary
+  before it can reach a log, the report or a job summary, and the executor also scrubs the key's
+  exact value
 - `:push` still refuses to act without `--confirm` and a fresh plan bound to the manifest, target
-  organization, repository, plugin version and required scopes. Putting `steps: all` in this REST
+  organization, repository, plugin version and required scopes. Putting `steps: all` in this
   workflow is that confirmation, given once in a reviewed file — which is why it belongs on a
   protected branch with an environment, not on `pull_request`
-
-For an MCP-backed piece, generate and review the diff in the authenticated client and run its
-`:push` there. Do not copy the REST example and treat a successful CI process as proof that the MCP
-calls ran; the CI report explicitly marks that handoff `skipped`.
 
 ## A whole pipeline, end to end
 

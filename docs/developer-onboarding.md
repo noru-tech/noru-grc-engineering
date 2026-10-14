@@ -91,19 +91,16 @@ before approving it.
 
 ## 5. Publish through one protected path
 
-After approval, run `/<piece>:push`. MCP-backed pieces currently require an authenticated MCP host
-to execute the reviewed calls; emitting a call plan in headless CI does not execute those calls.
-`evidence-push` is the exception because its file upload uses REST and reads `NORU_API_KEY` from the
-job environment at the point of use.
+After approval, run `/<piece>:push`. In an authenticated MCP host the agent executes the reviewed
+calls. In CI, `steps: all` with `NORU_API_KEY` in the job environment builds the snapshot, writes
+the plan, and executes exactly the calls `:push` emitted, reporting them written only with a receipt
+that says every call succeeded ([CI mode](./ci-mode.md#the-publication-half-and-why-it-is-separate)).
+`ai-inventory` and `privacy-datamap` need a person to build their snapshot, so in CI they publish
+only from a snapshot passed with `state:`. Do not replace any of this with a direct REST call that
+bypasses the reviewed plan.
 
-There is no generic protected-publication GitHub template yet. Seven pieces publish through MCP,
-which the current headless action cannot execute, and the REST-backed evidence piece still needs a
-live queue snapshot to produce its bound plan. Approval for those pieces therefore remains in the
-authenticated MCP host. Do not replace it with a direct REST call that bypasses the reviewed plan.
-
-When supported headless MCP execution exists, put automated publication on a protected branch or
-deployment environment with human approval—never `pull_request_target`—and make that workflow the
-only writer for the source. Keep PR checks read-only. `/noru:doctor` warns when tracked code or
+Put automated publication on a protected branch or deployment environment with human
+approval—never `pull_request_target`—and make that workflow the only writer for the source. Keep PR checks read-only. `/noru:doctor` warns when tracked code or
 workflows indicate more than one privacy data-map publisher or repeat its source slug, but the
 warning is a signal to review, not proof that both paths are active.
 
