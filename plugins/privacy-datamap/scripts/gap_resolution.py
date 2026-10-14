@@ -14,6 +14,11 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
 
 
+def agent_blockers(partition):
+    """Processing meaning questions remain publication blockers while awaiting human review."""
+    return [gap for gap in partition['active_blockers'] if gap.get('kind') != 'processing_uncertainty']
+
+
 def identity(item):
     return item.get('diagnostic_id') or item.get('gap_id') or 'gap:' + digest({
         'kind': item.get('kind', item.get('format')), 'scope': item.get('scope', item.get('subject', item.get('ref', sorted({span.get('path', '') for span in item.get('evidence', [])})))),

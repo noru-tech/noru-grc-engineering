@@ -735,7 +735,8 @@ def validate_contract(document, derived, repo, require_complete=True, candidate=
         pending = [row for row in rows if row.get("status") != "proposed" and (require_complete != "agent" or row.get("resolution_owner") != "human")]
         if pending:
             errors.append(str(len(pending)) + " fields/members need plugin investigation; no acceptance or export yet.")
-        unresolved_gaps = gap_resolution.calculate(document, derived, repo)["active_blockers"]
+        partition = gap_resolution.calculate(document, derived, repo)
+        unresolved_gaps = gap_resolution.agent_blockers(partition) if require_complete == "agent" else partition["active_blockers"]
         if unresolved_gaps:
             errors.append(str(len(unresolved_gaps)) + " evidence extraction gaps remain; resolve them through plugin investigation.")
     if candidate is not None:

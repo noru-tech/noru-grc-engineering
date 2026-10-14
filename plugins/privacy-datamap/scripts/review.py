@@ -273,7 +273,7 @@ def structural_blockers(document, result, derived, repo=None):
     for error in (derived.get("relationship_mapping") or {}).get("errors", []):
         blockers.append({"kind": "relationship_graph", "detail": error,
                          "resolution_needed": "Correct the connection graph and its evidence dependencies, then recollect."})
-    for item in field_review.gap_partition(document, derived, repo)["active_blockers"]:
+    for item in field_review.gap_resolution.agent_blockers(field_review.gap_partition(document, derived, repo)):
         blockers.append({"kind": item.get("kind"), "detail": item,
                          "resolution_needed": item.get("resolution_requirement", "Investigate and record a current evidence-bound gap disposition.")})
     for item in result.get("identity_ambiguities", []):
@@ -299,7 +299,7 @@ def scan_progress(document, result, derived, errors, blockers, repo=None):
     human = [row for row in pending if row.get("resolution_owner") == "human"]
     agent = [row for row in pending if row.get("resolution_owner") != "human"]
     partition = field_review.gap_partition(document, derived, repo)
-    gaps = partition["active_blockers"]
+    gaps = field_review.gap_resolution.agent_blockers(partition)
     questions = []
     for row in human + document.get("removal_proposals", []):
         for item in [row] + row.get("processing_activities", []):

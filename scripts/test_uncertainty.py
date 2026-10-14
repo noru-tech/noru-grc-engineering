@@ -217,6 +217,13 @@ class UncertaintyTests(unittest.TestCase):
         self.resolve()
         gap = self.document['classification_review']['gaps'][0]
         self.assertEqual(gap['kind'], 'processing_uncertainty')
+        self.assertEqual(field_review.gap_resolution.agent_blockers(
+            field_review.gap_partition(self.document, self.derived, self.repo)), [])
+        self.assertTrue(field_review.gap_partition(self.document, self.derived, self.repo)['active_blockers'])
+        progress = review.scan_progress(self.document, {}, self.derived, [], [], self.repo)
+        self.assertEqual(progress['agent_investigation'], 'complete')
+        self.assertEqual(progress['publication'], 'blocked')
+        self.assertIn('Which recipient operates this deployment?', progress['missing_facts'])
         decision = self.answer(gap, 'accepted_uncertainty')
         decision.update(export_targets=['system:runtime'],
                         accepted_uncertainty=self.acceptance(gap['gap_id'], gap['evidence_ids']))
