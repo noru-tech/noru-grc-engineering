@@ -21,9 +21,10 @@ Two adoption modes are recorded in the policy:
   removed in the same reviewed change.
 
 Invalid records, tooling failures, credential exposure and expired exceptions can never be
-baselined. The action has no network step and reads no Noru credential. Merge approval is never
-permission to publish to Noru; publication stays behind each piece's own `diff`, confirmation and
-`push`.
+baselined. The action has no network step, reads no Noru credential and publishes nothing.
+Publication stays behind each piece's own `diff`, confirmation and `push`, or the narrow exception
+of a plan reviewed on the merged pull request
+([CI mode](../../docs/ci-mode.md#confirmation-by-a-reviewed-plan)).
 
 ## Usage
 

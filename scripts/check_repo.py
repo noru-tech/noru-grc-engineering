@@ -731,6 +731,34 @@ def check_supported_workflows(problems):
 
 
 
+def check_reviewed_plan_publication(problems):
+    """Confirmation by a reviewed plan stays as narrow as docs/ci-mode.md says it is."""
+    ci_mode = (ROOT / "docs" / "ci-mode.md").read_text(encoding="utf-8")
+    blocks = [b for b in ci_mode.split("```yaml")[1:] if "fetch-reviewed-plan" in b.split("```")[0]]
+    if len(blocks) != 1:
+        problems.append("docs/ci-mode.md must show exactly one reviewed-plan publication example")
+    else:
+        example = blocks[0].split("```")[0]
+        if "pull_request_target" in example:
+            problems.append("the reviewed-plan example must never use pull_request_target")
+        if "environment:" not in example:
+            problems.append("the reviewed-plan publish job must run behind an environment")
+        if "NORU_API_KEY: ${{ secrets.NORU_READ_API_KEY }}" not in example:
+            problems.append("the reviewed-plan review job must hold a read-scoped key, in env")
+        if "NORU_API_KEY: ${{ secrets.NORU_API_KEY }}" not in example:
+            problems.append("the reviewed-plan publish job must pass its key in env")
+        if "head.repo.full_name == github.repository" not in example:
+            problems.append("the reviewed-plan review job must not run for a fork")
+    apply = ROOT / "plugins" / "repo-enforcement" / "commands" / "apply.md"
+    apply_text = " ".join(apply.read_text(encoding="utf-8").split())
+    if "Never add `--confirm` based on an earlier file review or merge approval." not in apply_text:
+        problems.append("/repo-enforcement:apply must still refuse to treat merge approval as --confirm")
+    action = (ROOT / ".github" / "actions" / "noru-ci" / "action.yml").read_text(encoding="utf-8")
+    unset = action.find("unset NORU_CI_GITHUB_TOKEN")
+    if unset == -1 or unset > action.find('python3 "$root/scripts/ci_check.py"'):
+        problems.append("noru-ci must unset the GitHub token before any piece runs")
+
+
 def check_reference_files_exist(problems):
     """A piece's prose may only point at reference files that are actually there.
 
@@ -1045,6 +1073,7 @@ def main(argv):
         check_hub_routing(problems)
         check_action_references(problems)
         check_supported_workflows(problems)
+        check_reviewed_plan_publication(problems)
         check_reference_files_exist(problems)
         check_yaml_11_booleans(problems)
         check_special_categories(problems)
