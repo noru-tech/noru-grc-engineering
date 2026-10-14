@@ -6,6 +6,9 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Trace literal PostgreSQL registrations across project references and straight-line Aspire
+  PostgreSQL database wiring, keeping ambiguous or dynamic connections unresolved.
+
 - Keep C# declarations when diagnostic strings use interpolation or raw literals; resolve
   source-declared enums while retaining gaps for malformed literals and ambiguous types.
 

@@ -149,6 +149,34 @@ throw new Exception("target must not run");
         self.put('src/Types.cs', '#if FEATURE\nenum WebhookType { A }\n#endif')
         self.assertTrue(any('preprocessor' in g['reason'] for g in self.scan()['gaps']))
 
+    def test_postgres_registration_across_project_reference_and_aspire(self):
+        self.fixture()
+        self.put('src/Program.cs', '')
+        self.put('api/Api.csproj', '<Project><ItemGroup><ProjectReference Include="../src/App.csproj" /></ItemGroup></Project>')
+        self.put('api/Startup.cs', 'builder.AddNpgsqlDbContext<FirstContext>("main"); services.AddDbContext<SecondContext>(o => o.UseNpgsql(configuration.GetConnectionString("main")));')
+        report = self.scan()
+        self.assertEqual(len({r['dataset'] for r in report['relationships']}), 1)
+        self.assertTrue(all('api/Startup.cs:1' in r['refs'] for r in report['relationships']))
+        self.put('host/Host.csproj', '<Project />')
+        self.put('host/App.cs', 'var server = builder.AddPostgres("server"); var db = server.AddDatabase("main"); var api = builder.AddDotnetProject("api", "../api").WithReference(db);')
+        hosted = self.scan()
+        self.assertEqual(len({r['dataset'] for r in hosted['relationships']}), 1)
+        self.assertNotEqual(hosted['relationships'][0]['dataset'], report['relationships'][0]['dataset'])
+        self.assertTrue(all('host/App.cs:1' in r['refs'] for r in hosted['relationships']))
+        self.put('api/Startup.cs', self.files['api/Startup.cs'].replace('GetConnectionString("main")', 'GetConnectionString("other")'))
+        self.assertEqual(len({r['dataset'] for r in self.scan()['relationships']}), 2)
+
+    def test_dynamic_or_conflicting_connections_and_reassigned_host_remain_unresolved(self):
+        self.fixture()
+        self.put('src/Program.cs', 'builder.AddNpgsqlDbContext<FirstContext>($"{name}"); builder.AddNpgsqlDbContext<SecondContext>("a"); builder.AddNpgsqlDbContext<SecondContext>("b");')
+        report = self.scan()
+        self.assertTrue(any('dynamic or unsupported' in g['reason'] for g in report['gaps']))
+        self.assertTrue(any('unresolved or ambiguous' in g['reason'] for g in report['gaps']))
+        self.put('src/Program.cs', 'builder.AddNpgsqlDbContext<FirstContext>("main");')
+        self.put('host/Host.csproj', '<Project />')
+        self.put('host/App.cs', 'var server = builder.AddPostgres("server"); var db = server.AddDatabase("main"); db = Other(); var app = builder.AddDotnetProject("app", "../src").WithReference(db);')
+        self.assertFalse(any('host/App.cs:1' in r['refs'] for r in self.scan()['relationships']))
+
     def test_mongo_nested_members_and_receiver_scopes(self):
         self.put('App.csproj','<Project />')
         self.put('Models.cs','''using MongoDB.Driver;

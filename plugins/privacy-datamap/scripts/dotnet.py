@@ -18,7 +18,8 @@ PACKAGES = {"microsoft.entityframeworkcore": "entity_framework", "entityframewor
             "mongodb.driver": "mongodb", "awssdk.dynamodbv2": "dynamodb", "rabbitmq.client": "rabbitmq",
             "masstransit.rabbitmq": "rabbitmq", "serilog": "logging", "nlog": "logging",
             "elastic": "elastic", "grafana": "grafana", "openai": "openai", "azure.ai.openai": "azure_openai",
-            "microsoft.semantickernel": "semantic_kernel"}
+            "microsoft.semantickernel": "semantic_kernel", "npgsql": "postgresql",
+            "aspire.npgsql": "postgresql", "aspire.hosting.postgresql": "postgresql"}
 
 
 @dataclass
@@ -417,7 +418,7 @@ class Reader:
     def bind(self, owner, model, table, store, dialect, line, kind):
         if not model or not RESOURCE.fullmatch(table):
             self.gap(owner['path'],line,'Table/collection name is dynamic or unsupported'); return
-        identity=json.dumps([owner['project'],dialect,store],sort_keys=True)
+        identity=json.dumps([owner.get('binding_scope', owner['project']),dialect,store],sort_keys=True)
         key='dotnet_'+dialect+'_'+hashlib.sha256(identity.encode()).hexdigest()[:16]
         fields=self.fields(model,dialect)
         refs=sorted({f"{owner['path']}:{line}",f"{model['path']}:{model['line']}"})
@@ -454,8 +455,104 @@ class Reader:
                 else: i += 1
         return imports
 
+    def connection_bindings(self, model):
+        bindings = []
+        for path, source in self.sources.items():
+            if source['project'] not in self.projects: continue
+            allowed, queue = {source['project']}, [source['project']]
+            while queue:
+                for ref in self.projects.get(queue.pop(), {}).get('project_references', []):
+                    if ref not in allowed: allowed.add(ref); queue.append(ref)
+            if model['project'] not in allowed: continue
+            tokens = source['tokens']
+            for i, token in enumerate(tokens):
+                if token.kind != 'code' or token.value not in {'AddDbContext','AddDbContextPool','AddNpgsqlDbContext'}: continue
+                if values(tokens[i+1:i+4]) != '< '+model['name']+' >': continue
+                candidates = [m for m in self.models if m['name'] == model['name'] and m['project'] in allowed]
+                if len(candidates) != 1:
+                    self.gap(path, token.line, 'Context registration is ambiguous across referenced projects'); continue
+                opening = i + 4
+                if opening >= len(tokens) or tokens[opening].value != '(': continue
+                try: end = close(tokens, opening, '(', ')')
+                except ValueError: continue
+                args = tokens[opening+1:end]; key = None; provider = None
+                if token.value == 'AddNpgsqlDbContext':
+                    key = literal_arg(split(args)[0]); provider = 'postgresql'
+                else:
+                    providers = {t.value for t in args if t.kind == 'code'} & {'UseSqlServer','UseNpgsql'}
+                    if len(providers) == 1:
+                        provider = 'postgresql' if 'UseNpgsql' in providers else 'sql_server'
+                        keys = [literal_arg(args[j+2:j+3]) for j,t in enumerate(args)
+                                if t.value == 'GetConnectionString' and values(args[j+1:j+2]) == '(' and values(args[j+3:j+4]) == ')']
+                        if len(keys) == 1: key = keys[0]
+                if key and provider:
+                    refs = [f'{path}:{token.line}']; scope = source['project']
+                    host = self.aspire_bindings.get((scope, key), [])
+                    if len(host) == 1 and provider == 'postgresql':
+                        scope, resource, host_refs = host[0]; refs += host_refs
+                        identity = ['aspire_database', resource]
+                    else:
+                        if len(host) > 1: self.gap(path, token.line, 'Multiple Aspire resources match this connection; logical datastore is ambiguous')
+                        identity = ['connection_key', provider, key]
+                    bindings.append((scope, identity, refs))
+                else: self.gap(path, token.line, 'Context connection registration is dynamic or unsupported; supply a logical connection binding')
+        unique = {(scope, json.dumps(identity)) for scope,identity,_ in bindings}
+        if len(unique) == 1:
+            scope, identity, _ = bindings[0]
+            return scope, identity, sorted({ref for _,_,refs in bindings for ref in refs})
+        self.gap(model['path'],model['line'],'DbContext connection target is unresolved or ambiguous; confirm whether contexts share a physical datastore')
+        return model['project'], ['context', model['qualified'], model['path']], []
+
+    def aspire_connections(self):
+        result = {}
+        for path, source in self.sources.items():
+            tokens = source['tokens']; resources = {}; databases = {}; statements = []; start = 0
+            # Only straight-line top-level declarations establish host wiring.
+            i = 0
+            while i < len(tokens):
+                if tokens[i].kind == 'code' and tokens[i].value == '{':
+                    i = close(tokens, i) + 1; start = i; continue
+                if tokens[i].kind == 'code' and tokens[i].value == ';':
+                    statements.append(tokens[start:i]); start = i + 1
+                i += 1
+            assignments = {}
+            for statement in statements:
+                for i,t in enumerate(statement):
+                    if t.value == '=' and i: assignments[statement[i-1].value] = assignments.get(statement[i-1].value, 0) + 1
+            for statement in statements:
+                if len(statement) < 8 or values(statement[:1]) != 'var' or values(statement[2:3]) != '=': continue
+                variable = statement[1].value
+                if assignments.get(variable) != 1:
+                    self.gap(path, statement[1].line, 'Aspire resource variable is reassigned; host wiring requires investigation')
+                    continue
+                receiver = statement[3].value; method = statement[5].value
+                if values(statement[4:5]) != '.' or values(statement[6:7]) != '(': continue
+                try: end = close(statement, 6, '(', ')')
+                except ValueError: continue
+                args = split(statement[7:end]); name = literal_arg(args[0])
+                ref = f'{path}:{statement[5].line}'
+                if method == 'AddPostgres' and name: resources[variable] = (name, ref)
+                if method == 'AddDatabase' and receiver in resources and name and len(args) == 1:
+                    server, server_ref = resources[receiver]
+                    databases[variable] = (name, [server,name], [server_ref,ref])
+                if method != 'AddDotnetProject' or len(args) < 2: continue
+                target = args[1]
+                if len(target) != 1 or target[0].kind != 'string': continue
+                directory = (self.repo / pathlib.PurePosixPath(path).parent / target[0].value).resolve()
+                if not directory.is_relative_to(self.repo): continue
+                projects = [p for p in self.projects if (self.repo/p).parent == directory or self.repo/p == directory]
+                if len(projects) != 1: continue
+                for j,t in enumerate(statement[end+1:], end+1):
+                    if t.value != 'WithReference' or values(statement[j+1:j+2]) != '(' or values(statement[j+3:j+4]) != ')': continue
+                    resource = databases.get(statement[j+2].value)
+                    if resource:
+                        key, identity, refs = resource
+                        result.setdefault((projects[0], key), []).append((path, identity, refs+[ref,f'{path}:{t.line}']))
+        return result
+
     def relationships_from_source(self):
         global_imports = self.global_ef_imports()
+        self.aspire_bindings = self.aspire_connections()
         for model in self.models:
             src=self.sources[model['path']]; code=values(src['tokens']); header=values(model['header'])
             if model['project'] is None: continue
@@ -464,27 +561,8 @@ class Reader:
             global_ef = bool(import_refs) and bool(re.search(r'(?<!:):\s*DbContext\b', header))
             context = bool(re.search(r'\bDbContext\b', header)) and (local_ef or global_ef)
             if context:
-                store=['context',model['qualified'],model['path']]
-                # A common configuration key in one project is evidence of a shared logical target.
-                keys=[]
-                for path, source in self.sources.items():
-                    if source['project'] != model['project']: continue
-                    registration = source['tokens']
-                    for index, token in enumerate(registration):
-                        if token.kind != 'code' or token.value not in {'AddDbContext','AddDbContextPool'}: continue
-                        if values(registration[index+1:index+4]) != '< '+model['name']+' >': continue
-                        opening=index+4
-                        if opening >= len(registration) or registration[opening].value != '(': continue
-                        try: ending=close(registration,opening,'(',')')
-                        except ValueError: continue
-                        statement=registration[opening+1:ending]
-                        if 'UseSqlServer' not in values(statement): continue
-                        for i,t in enumerate(statement):
-                            if t.value=='GetConnectionString' and i+3<len(statement) and statement[i+2].kind=='string' and statement[i+3].value==')':
-                                key=statement[i+2].value
-                                if RESOURCE.fullmatch(key): keys.append((key,path,t.line))
-                if len({k[0] for k in keys})==1: store=['connection_key',keys[0][0]]
-                else: self.gap(model['path'],model['line'],'DbContext connection target is unresolved; confirm whether contexts share a physical datastore')
+                scope, store, connection_refs = self.connection_bindings(model)
+                owner = dict(model, binding_scope=scope)
                 for prop in self.properties(model):
                     match=re.fullmatch(r'(?:Microsoft\.EntityFrameworkCore\.)?DbSet<(.+)>',prop['type'])
                     if not match: continue
@@ -501,10 +579,10 @@ class Reader:
                             else: self.gap(target['path'],target['line'],'Unsupported table attribute arguments')
                     if attr(target['attributes'],'NotMapped') is not None: continue
                     before=len(self.observations)
-                    self.bind(model,target,table,store,'sql',prop['line'],'context_entity_table')
+                    self.bind(owner,target,table,store,'sql',prop['line'],'context_entity_table')
                     if len(self.observations)>before:
-                        self.observations[-1]['binding_refs']+= import_refs + [f'{p}:{l}' for _,p,l in keys]
-                        self.relationships[-1]['refs'] = sorted(set(self.relationships[-1]['refs'] + import_refs + [f'{p}:{l}' for _,p,l in keys]))
+                        self.observations[-1]['binding_refs']+= import_refs + connection_refs
+                        self.relationships[-1]['refs'] = sorted(set(self.relationships[-1]['refs'] + import_refs + connection_refs))
                 if any(t.value in {'OnModelCreating','OnModelCreatingPartial'} for t in model['body']):
                     self.gap(model['path'],model['line'],'Fluent model configuration may override conventions/attributes; investigate mappings before accepting')
             table=attr(model['attributes'],'DynamoDBTable')
