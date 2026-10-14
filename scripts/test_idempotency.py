@@ -775,6 +775,142 @@ def test_iac_scan(results, tmp):
     )
 
 
+def test_findings_ingest(results, tmp):
+    repo, piece, decl, manifest = prepare(tmp, "findings-ingest")
+    label = "findings-ingest"
+
+    validate_and_parse(piece, manifest, repo, results, label)
+
+    # A finding this piece filed last time that no input reports any more, and one under ANOTHER
+    # repository's slug in the same source, which must never be touched.
+    stale = {
+        "id": "NORU-FND-STALE",
+        "source": "findings-ingest",
+        "externalId": "example-org/example-app:example-sast.example.weak-hash.0123456789ab",
+        "title": "Weak hash function used for a security purpose",
+        "checkName": "example.weak-hash",
+        "description": "filed by an earlier ingest",
+        "severity": "medium",
+        "status": "open",
+        "category": "vulnerability",
+        "observedAt": "2026-06-01T00:00:00Z",
+        "assetId": None,
+        "riskId": None,
+        "ownerEmail": None,
+    }
+    other_repo = dict(
+        stale, id="NORU-FND-OTHER",
+        externalId="example-org/other-app:example-sast.example.weak-hash.aabbccddeeff",
+    )
+    write_state(repo, {"fetched_at": "2026-08-28T09:14:00Z", "security_findings": [stale, other_repo]})
+
+    first = diff(piece, repo)
+    if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
+        return
+    plan = json.loads(first.stdout)
+    results.check(
+        f"[{label}] first diff plans real writes, all through the server-side upsert",
+        plan["summary"]["create"] > 0
+        and all(op["idempotency"]["kind"] == "server_upsert" for op in plan["operations"]),
+        json.dumps(plan["summary"]),
+    )
+    closes = [
+        op for op in plan["operations"]
+        if op["effect"] != "skip" and op["arguments"].get("status") == "resolved"
+    ]
+    results.check(
+        f"[{label}] a finding no input reports any more is planned for closure",
+        len(closes) == 1 and closes[0]["arguments"]["externalId"] == stale["externalId"],
+        json.dumps([op["arguments"].get("externalId") for op in closes]),
+    )
+    results.check(
+        f"[{label}] ANOTHER repository's finding under the same source is left alone",
+        not any(op["arguments"].get("externalId") == other_repo["externalId"] for op in plan["operations"]),
+        json.dumps([op["arguments"].get("externalId") for op in plan["operations"]]),
+    )
+    files = [op for op in plan["operations"] if op["arguments"].get("status") != "resolved"]
+    code = [op for op in files if op["arguments"]["raw"]["input"] == "example-sast"]
+    deps = [op for op in files if op["arguments"]["raw"]["input"] == "osv"]
+    results.check(
+        f"[{label}] a class is filed against the risk links names, and only that class",
+        code and all(op["arguments"]["riskId"] == "EXAMPLE-RISK-ID" for op in code)
+        and deps and all(op["arguments"]["riskId"] is None for op in deps),
+        json.dumps([(op["arguments"]["raw"]["input"], op["arguments"]["riskId"]) for op in files]),
+    )
+    results.check(
+        f"[{label}] the default asset resolves to the register's own id",
+        all(op["arguments"]["assetId"] == "EXAMPLE-ASSET-ID" for op in files),
+        json.dumps([op["arguments"].get("assetId") for op in files]),
+    )
+    sent = json.dumps([op["arguments"] for op in plan["operations"]]).lower()
+    results.check(
+        f"[{label}] no write carries a due date — the deadline is the risk treatment's, in Noru",
+        not any(word in sent for word in ("duedate", "due_on", "due_at", "deadline")),
+        sent[:300],
+    )
+    results.check(
+        f"[{label}] every write carries slug, commit and branch provenance",
+        all(
+            {"slug", "commit_sha", "branch"} <= set(op["arguments"].get("raw") or {})
+            for op in plan["operations"] if op["effect"] != "skip"
+        ),
+        "",
+    )
+
+    push = piece / "scripts" / "push.mjs"
+    refused = run(["node", str(push), f"--repo={repo}"])
+    results.check(f"[{label}] push without --confirm is refused with exit 2", refused.returncode == 2, refused.stderr)
+    first_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    if not results.check(f"[{label}] first push emits the confirmed calls", first_push.returncode == 0, first_push.stderr):
+        return
+    results.check(
+        f"[{label}] no call carries a result message or snippet",
+        "example-placeholder-not-a-credential" not in first_push.stdout,
+        first_push.stdout[:200],
+    )
+
+    findings = state_after_iac_scan(plan["operations"], [stale, other_repo])
+    write_state(repo, {"fetched_at": "2026-08-28T10:00:00Z", "security_findings": findings})
+    second = diff(piece, repo)
+    if not results.check(f"[{label}] second diff succeeds", second.returncode == 0, second.stderr):
+        return
+    non_skip = [op for op in json.loads(second.stdout)["operations"] if op["effect"] != "skip"]
+    results.check(
+        f"[{label}] SECOND DIFF IS A NO-OP (every operation skipped)",
+        len(non_skip) == 0,
+        "; ".join(f"{op['operation']} {op['effect']} {op['subject']}" for op in non_skip),
+    )
+    second_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    results.check(
+        f"[{label}] SECOND PUSH MAKES NO CALLS",
+        second_push.returncode == 0 and len(json.loads(second_push.stdout)["calls"]) == 0,
+        second_push.stdout[:200],
+    )
+
+    target = code[0]["arguments"]["externalId"]
+    drifted = [dict(row, severity="low") if row["externalId"] == target else row for row in findings]
+    write_state(repo, {"fetched_at": "2026-08-28T11:00:00Z", "security_findings": drifted})
+    third = diff(piece, repo)
+    plan3 = json.loads(third.stdout) if third.returncode == 0 else {"operations": []}
+    updates = [op for op in plan3["operations"] if op["effect"] == "update"]
+    results.check(
+        f"[{label}] a field changed in Noru plans an update on the same key, not a new finding",
+        len(updates) == 1 and "severity" in updates[0]["reason"]
+        and not any(op["effect"] == "create" for op in plan3["operations"]),
+        json.dumps([f"{op['effect']} {op['reason']}" for op in plan3["operations"]])[:300],
+    )
+    write_state(repo, {"fetched_at": "2026-08-28T10:00:00Z", "security_findings": findings})
+
+    diff(piece, repo)
+    manifest.write_text(manifest.read_text(encoding="utf-8") + "\n# edited after the plan\n", encoding="utf-8")
+    stale_plan = run(["node", str(push), f"--repo={repo}", "--confirm"])
+    results.check(
+        f"[{label}] editing the manifest invalidates the plan",
+        stale_plan.returncode == 1 and "manifest changed" in stale_plan.stderr,
+        stale_plan.stderr,
+    )
+
+
 def state_after_audit_pack(operations):
     """Build the org snapshot that would exist if every planned write had succeeded."""
     evidence = []
@@ -1578,6 +1714,7 @@ IDEMPOTENCY_TESTS = {
     "governance-records": test_governance_records,
     "review-signoff": test_review_signoff,
     "iac-scan": test_iac_scan,
+    "findings-ingest": test_findings_ingest,
     "audit-pack": test_audit_pack,
     "privacy-datamap": test_privacy_datamap,
     "change-control": test_change_control,

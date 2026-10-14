@@ -29,6 +29,7 @@ collect locally  →  validate against a bundled vocabulary  →  push once, ide
 | `review-signoff` | a periodic review of machine output, and the human decision about it | a named, dated, expiring sign-off as evidence | MCP |
 | `audit-pack` | the local artifacts, the sampling and the workpapers for one framework over one audit window | the tested conclusion for each control, as evidence | MCP |
 | `iac-scan` | compliance-relevant misconfiguration in Terraform, CloudFormation, Kubernetes and pipeline configuration | security findings, keyed and closed by the same call | MCP |
+| `findings-ingest` | SARIF and OSV-Scanner results that never reach a forge alert store | security findings filed against existing risks, keyed and closed by the same call | MCP |
 | `privacy-datamap` | repository schemas, migrations and API contracts, and the personal data they define | a Fides privacy data map | MCP |
 | `change-control` | forge history and settings: who authored, approved, merged and deployed each change | security findings plus the reviewed window as evidence | MCP |
 
@@ -102,8 +103,9 @@ rotate it.
 **5. Never invent a control id, evidence item, risk, asset, MCP tool name or scope.** A piece asks
 Noru what is needed and works that queue. For the evidence pieces that is `getOrganizationControls`,
 `getControlContext`, `getEvidenceItems` and `getEvidenceForControl`; for `iac-scan` it is
-`getSecurityFindings`, `getOrganizationAssets` and `getOrganizationRisks`, and a manifest may only
-name an asset or a risk the organization already carries. This repository ships no framework
+`getSecurityFindings`, `getOrganizationAssets` and `getOrganizationRisks` (and, for
+`findings-ingest`, `getRiskTreatments` for due dates), and a manifest may only name an asset or a
+risk the organization already carries. This repository ships no framework
 catalogue, for licensing reasons and because a vendored catalogue drifts from the framework it
 claims to serve.
 

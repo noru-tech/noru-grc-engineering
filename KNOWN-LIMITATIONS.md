@@ -30,6 +30,10 @@ From [docs/verification.md, "Maturity"](./docs/verification.md#maturity):
 - **`iac-scan` rules are text-and-block matchers, not a parser.** They miss misconfiguration
   expressed through module inputs, variable defaults or generated templates, and can fire on a
   resource a later override makes safe.
+- **`findings-ingest` cannot see what else imports a report.** `reaches_forge_alert_store: false`
+  is a statement a person makes; nothing checks it against the organization's integrations, so a
+  wrong one files results twice. It reads SARIF 2.1.0 and OSV-Scanner JSON only, and a result in a
+  file that is not in the checkout is counted, not filed.
 - **`change-control` exporters are tested against a canned server, not a live forge.** An admin
   merge is inferred from its shape, and nothing can discover who ran an agent: `agent_operator` is
   left for a human to fill in.
@@ -44,6 +48,7 @@ From [docs/verification.md, "Known gaps"](./docs/verification.md#known-gaps-stat
 - **`audit-pack`'s rendered pack is not described by the contract**, so nothing machine-readable
   checks it.
 - **`iac-scan` closes a finding when no rule reproduces it**, which is not the same as fixed.
+  `findings-ingest` does the same when no input reports it.
 - **`review-signoff` sets its expiry in a second, dependent call**; an interrupted push leaves a
   sign-off without its expiry until the piece is re-run.
 - **`governance-records` creates rather than updates** when an account is rewritten.

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "findings-ingest",
+  "displayName": "Noru Findings Ingest",
+  "version": "0.12.2",
+  "description": "Ingest the SARIF and OSV-Scanner results that never reach a forge alert store, decide with the user what each one means here, and land them in Noru as security findings filed against risks the organization already carries — closing the ones no longer reported.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "sarif",
+    "osv",
+    "sast",
+    "dependencies",
+    "security-findings",
+    "mcp"
+  ]
+}

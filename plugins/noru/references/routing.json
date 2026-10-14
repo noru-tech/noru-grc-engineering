@@ -61,6 +61,21 @@
       "caveat": "A file's presence does not show that Noru needs it or that it satisfies an expectation; ask Noru and require human interpretation."
     },
     {
+      "name": "findings-ingest",
+      "summary": "Turn SARIF and OSV-Scanner results that never reach a forge alert store into reviewed security findings.",
+      "signals": [
+        "A committed .noru/findings-ingest.inputs.json",
+        "CI that writes SARIF or OSV-Scanner JSON as a build artifact without uploading it anywhere",
+        "Scanner configuration such as osv-scanner.toml or a SAST step whose results are not tracked"
+      ],
+      "inspect": [
+        "CI workflow steps that run scanners and where their reports are written",
+        "Whether any report is uploaded to a forge alert store",
+        "Noru risks, treatment due dates, assets and existing findings needed to interpret results"
+      ],
+      "caveat": "A report that also reaches a forge alert store is already importable and must not be ingested twice; a scanner result is a candidate finding, not a conclusion."
+    },
+    {
       "name": "governance-records",
       "summary": "File attributed records of governance decisions and assigned actions.",
       "signals": [

@@ -1,0 +1,173 @@
+{
+  "$schema": "../../contract/piece.schema.json",
+  "piece": "findings-ingest",
+  "contract_version": "0.1.0",
+  "artifact": ".noru/findings-ingest.yml",
+  "manifest_schema": "contract/findings-ingest.schema.json",
+  "commands": {
+    "scan": "commands/scan.md",
+    "diff": "commands/diff.md",
+    "push": "commands/push.md"
+  },
+  "skill": "skills/findings-ingest/SKILL.md",
+  "collector": {
+    "entrypoint": "scripts/collect.mjs",
+    "deterministic": true,
+    "network": false,
+    "inputs": [".noru/findings-ingest.inputs.json", ".noru/.cache/findings-queue.json"]
+  },
+  "validator": {
+    "entrypoint": "scripts/validate_manifest.py",
+    "runtime": "python3-stdlib",
+    "vocabulary": ["references/vocabulary.json"],
+    "suggestions": true,
+    "exit_codes": {
+      "0": "manifest is valid; warnings may be present",
+      "1": "manifest has validation errors, including a judgement already expired at --as-of",
+      "2": "usage error, unreadable file, or unparseable YAML"
+    },
+    "fixtures": {
+      "valid": ["fixtures/valid.findings-ingest.yml"],
+      "invalid": [
+        {
+          "path": "fixtures/invalid-missing-interpretation.findings-ingest.yml",
+          "expect_message": "missing required `interpretation`"
+        },
+        {
+          "path": "fixtures/invalid-forge-alert-store.findings-ingest.yml",
+          "expect_message": "would file every one of its results twice"
+        },
+        {
+          "path": "fixtures/invalid-unknown-input.findings-ingest.yml",
+          "expect_message": "is not one of the declared inputs"
+        },
+        {
+          "path": "fixtures/invalid-off-queue-risk.findings-ingest.yml",
+          "expect_message": "would invent a register entry"
+        },
+        {
+          "path": "fixtures/invalid-off-queue-class-risk.findings-ingest.yml",
+          "expect_message": "would invent a register entry"
+        },
+        {
+          "path": "fixtures/invalid-off-queue-asset.findings-ingest.yml",
+          "expect_message": "the thing the register already holds"
+        },
+        {
+          "path": "fixtures/invalid-queue-source-mismatch.findings-ingest.yml",
+          "expect_message": "would close findings this piece never wrote"
+        },
+        {
+          "path": "fixtures/invalid-no-expiry.findings-ingest.yml",
+          "expect_message": "missing required `expires_at`"
+        },
+        {
+          "path": "fixtures/invalid-expiry-beyond-horizon.findings-ingest.yml",
+          "expect_message": "may stand for at most"
+        },
+        {
+          "path": "fixtures/invalid-accepted-without-reasoning.findings-ingest.yml",
+          "expect_message": "has to be written down"
+        },
+        {
+          "path": "fixtures/invalid-due-date.findings-ingest.yml",
+          "expect_message": "never sets a deadline"
+        },
+        {
+          "path": "fixtures/invalid-duplicate-key.findings-ingest.yml",
+          "expect_message": "would overwrite each other on every push"
+        },
+        {
+          "path": "fixtures/invalid-needs-review.findings-ingest.yml",
+          "expect_message": "still true"
+        }
+      ]
+    }
+  },
+  "push": {
+    "entrypoint": "scripts/push.mjs",
+    "mode": "keyed_upsert",
+    "collapses_to": {
+      "tool": "a batch form of the same keyed upsert — many findings for one source in a single request, plus the set of externalIds that should now be resolved — so a lockfile with two hundred advisories is one call rather than two hundred. Nothing about idempotency would change: the key is already documented and already server-side, so this is a throughput and rate-limit question rather than a correctness one",
+      "tracked_at": "https://github.com/noru-tech/noru-grc-engineering/issues"
+    },
+    "operations": [
+      {
+        "name": "createSecurityFinding",
+        "transport": "mcp",
+        "scope": "write:risks",
+        "idempotency": {
+          "kind": "server_upsert",
+          "key": ["source", "externalId"],
+          "verified_at": "The \"Idempotency/Upsert Behavior\" section of https://api.noru.tech/llms.txt states that for `POST /v1/security-findings`, if `source + externalId` already exists in the organization the request returns 200 and updates the existing finding, and otherwise returns 201 and creates one. The endpoint's own \"Behavior\" note repeats it and documents `externalId` as \"Source-native unique ID. Create is idempotent per (source, externalId)\". The createSecurityFinding tool description published by https://api.noru.tech/v1/mcp says the same thing and adds that it uses the write:risks scope, matching REST."
+        }
+      }
+    ],
+    "provenance": {
+      "slug": true,
+      "commit_sha": true,
+      "branch": true
+    },
+    "diff_required": true,
+    "requires_confirmation": true
+  },
+  "scopes": {
+    "read": ["read:organization", "read:risks", "read:assets"],
+    "write": ["write:risks"]
+  },
+  "queue": {
+    "source": [
+      {
+        "kind": "mcp_tool",
+        "tool": "getSecurityFindings",
+        "note": "Every finding this piece already has open in the organization. A scanner result that stopped appearing has left a finding open somewhere, and only Noru knows it is still open."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getOrganizationAssets",
+        "note": "The organization's own asset inventory, so a finding attaches to an asset the register already holds, by that register's external id. This plugin ships no asset list and never creates one."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getOrganizationRisks",
+        "note": "The organization's own risk register. A class of findings, or one finding, may be filed against a risk it already carries; this plugin never opens a risk and never links one that is not in the snapshot."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getRiskTreatments",
+        "note": "The treatments of a risk the manifest files findings against, read only for their due dates. A remediation deadline is whatever the organization's own treatment says; this plugin ships no remediation windows and computes none."
+      }
+    ],
+    "hardcoded_expectations": false
+  },
+  "state": {
+    "headless": true,
+    "reads": [
+      {
+        "into": "security_findings",
+        "tool": "getSecurityFindings",
+        "arguments": {
+          "source": "findings-ingest"
+        },
+        "result": "findings"
+      }
+    ]
+  },
+  "interpretation": {
+    "required": true,
+    "level": "per_claim",
+    "unattributed": "error"
+  },
+  "ci": {
+    "output_json": true,
+    "quiet": true,
+    "validate": { "runtime": "python3", "entrypoint": "scripts/validate_manifest.py", "arguments": ["{manifest}", "--output=json", "--quiet"] },
+    "drift_check": { "runtime": "node", "entrypoint": "scripts/collect.mjs", "arguments": ["--repo={repo}", "--check", "--output=json", "--quiet"] },
+    "watch_paths": [".noru/findings-ingest.inputs.json", ".noru/findings-ingest.yml"],
+    "exit_codes": {
+      "0": "success",
+      "1": "drift, validation failure, an expired judgement under --as-of, an input that declares it reaches a forge alert store, missing prerequisite input, or a stale plan",
+      "2": "usage error, including a push without --confirm"
+    }
+  }
+}

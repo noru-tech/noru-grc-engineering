@@ -4888,6 +4888,239 @@ def entry_points():
                 yield path
 
 
+FINDINGS_INGEST = ROOT / "plugins" / "findings-ingest"
+FI_COLLECTOR = FINDINGS_INGEST / "scripts" / "collect.mjs"
+FI_PLACEHOLDER = "example-placeholder-not-a-credential"
+
+EMPTY_FI_QUEUE = {
+    "fetched_at": "2026-08-27T09:14:00Z",
+    "via": ["getSecurityFindings", "getOrganizationAssets", "getOrganizationRisks"],
+    "source": "findings-ingest",
+    "open_findings": [],
+    "assets": [],
+    "risks": [],
+}
+
+
+def fi_input(input_id="sast", path=".noru/.cache/findings/sast.sarif", fmt="sarif", klass="code",
+             **extra):
+    return {
+        "id": input_id, "path": path, "format": fmt, "class": klass,
+        "reaches_forge_alert_store": False, **extra,
+    }
+
+
+def fi_sarif(results, version="1.0.0"):
+    return {
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "example-sast", "version": version, "rules": [
+                {"id": "example.sql", "shortDescription": {"text": "SQL built from input"},
+                 "properties": {"security-severity": "8.1"}},
+                {"id": "example.secret", "shortDescription": {"text": "Credential in source"},
+                 "defaultConfiguration": {"level": "error"}},
+            ]}},
+            "results": results,
+        }],
+    }
+
+
+def fi_result(rule, uri, line, logical=None, message="matched", **extra):
+    location = {"physicalLocation": {"artifactLocation": {"uri": uri}, "region": {"startLine": line}}}
+    if logical:
+        location["logicalLocations"] = [{"fullyQualifiedName": logical}]
+    return {"ruleId": rule, "message": {"text": message}, "locations": [location], **extra}
+
+
+def fi_osv(ids, aliases=(), records=None, path="/home/runner/work/app/app/requirements.txt"):
+    records = records if records is not None else ids[:1]
+    return {"results": [{"source": {"path": path, "type": "lockfile"}, "packages": [{
+        "package": {"name": "jinja2", "version": "2.10.1", "ecosystem": "PyPI"},
+        "vulnerabilities": [{"id": r, "summary": "Example escape"} for r in records],
+        "groups": [{"ids": list(ids), "aliases": list(aliases), "max_severity": "7.5"}],
+    }]}]}
+
+
+def fi_scan(tmp, name, reports, inputs=None, files=None):
+    """A throwaway repository with reports and an inputs file; runs the real collector over it."""
+    repo = pathlib.Path(tmp) / f"fi-{name}"
+    write_files(repo, {
+        "store/models.py": "def find_accounts(q):\n    return q\n" * 10,
+        "requirements.txt": "jinja2==2.10.1\n",
+        **(files or {}),
+    })
+    cache = repo / ".noru" / ".cache"
+    for rel, doc in reports.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(doc), encoding="utf-8")
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "findings-queue.json").write_text(json.dumps(EMPTY_FI_QUEUE), encoding="utf-8")
+    (repo / ".noru" / "findings-ingest.inputs.json").write_text(
+        json.dumps({"inputs": inputs if inputs is not None else [fi_input()]}), encoding="utf-8"
+    )
+    result = run(["node", str(FI_COLLECTOR), f"--repo={repo}", "--output=json", "--quiet"])
+    derived_path = cache / "findings-ingest.derived.json"
+    manifest = repo / ".noru" / "findings-ingest.yml"
+    return (
+        result,
+        json.loads(derived_path.read_text(encoding="utf-8")) if derived_path.is_file() else None,
+        manifest.read_text(encoding="utf-8") if manifest.is_file() else "",
+    )
+
+
+def test_findings_ingest_never_copies_a_result(results, tmp):
+    """A secret scanner's message holds the secret. Nothing of a result's text may be recorded."""
+    secret = fi_result(
+        "example.secret", "store/models.py", 3, message=f"Found '{FI_PLACEHOLDER}' in API_TOKEN",
+    )
+    secret["locations"][0]["physicalLocation"]["region"]["snippet"] = {"text": FI_PLACEHOLDER}
+    completed, derived, manifest = fi_scan(
+        tmp, "secret", {".noru/.cache/findings/sast.sarif": fi_sarif([secret])}
+    )
+    results.check(
+        "[findings-ingest] a result is collected from a SARIF report",
+        completed.returncode == 0 and derived and len(derived["findings"]) == 1,
+        completed.stderr or derived,
+    )
+    results.check(
+        "[findings-ingest] neither the message nor the snippet reaches the derived facts or the manifest",
+        FI_PLACEHOLDER not in json.dumps(derived) and FI_PLACEHOLDER not in manifest,
+        "the collector copied a result's text — that is how an ingest commits a secret",
+    )
+    finding = derived["findings"][0]
+    results.check(
+        "[findings-ingest] the title is the rule's own and the evidence is a citation",
+        finding["title"] == "Credential in source" and finding["refs"] == ["store/models.py:3"]
+        and finding["scanner_severity"] == "high",
+        finding,
+    )
+
+
+def test_findings_ingest_refuses_double_ingest(results, tmp):
+    """A report that reaches a forge alert store is somebody else's to import."""
+    report = {".noru/.cache/findings/sast.sarif": fi_sarif([fi_result("example.sql", "store/models.py", 1)])}
+    for name, row in (
+        ("forge-true", fi_input(reaches_forge_alert_store=True)),
+        ("forge-missing", {k: v for k, v in fi_input().items() if k != "reaches_forge_alert_store"}),
+    ):
+        completed, derived, manifest = fi_scan(tmp, name, report, inputs=[row])
+        results.check(
+            f"[findings-ingest] an input that does not declare reaches_forge_alert_store: false is refused ({name})",
+            completed.returncode == 1 and "twice" in completed.stderr and derived is None and manifest == "",
+            completed.stderr,
+        )
+
+
+def test_findings_ingest_missing_report_is_not_empty(results, tmp):
+    """Reading nothing would close every finding the input ever produced."""
+    completed, derived, manifest = fi_scan(tmp, "missing", {})
+    results.check(
+        "[findings-ingest] a declared report that does not exist stops the run",
+        completed.returncode == 1 and "never read as an empty one" in completed.stderr
+        and derived is None and manifest == "",
+        completed.stderr,
+    )
+    completed, derived, _ = fi_scan(
+        tmp, "not-sarif", {".noru/.cache/findings/sast.sarif": {"results": []}}
+    )
+    results.check(
+        "[findings-ingest] a report in the wrong format stops the run",
+        completed.returncode == 1 and "is not SARIF" in completed.stderr and derived is None,
+        completed.stderr,
+    )
+
+
+def test_findings_ingest_identity(results, tmp):
+    """Keyed on what a result is about, never on where it sat or how the scanner hashed the line."""
+    def keys(name, sarif_results, version="1.0.0"):
+        _, derived, _ = fi_scan(tmp, name, {".noru/.cache/findings/sast.sarif": fi_sarif(sarif_results, version)})
+        return derived
+
+    before = keys("id-before", [fi_result("example.sql", "store/models.py", 2, "store.models.find_accounts")])
+    moved = keys("id-moved", [fi_result(
+        "example.sql", "/home/runner/work/app/app/store/models.py", 9, "store.models.find_accounts",
+        partialFingerprints={"primaryLocationLineHash": "changed:1"},
+    )])
+    results.check(
+        "[findings-ingest] a result that moved lines, reported by an absolute CI path, keeps its key",
+        before["findings"][0]["key"] == moved["findings"][0]["key"]
+        and moved["findings"][0]["refs"] == ["store/models.py:9"],
+        (before["findings"], moved["findings"]),
+    )
+    elsewhere = keys("id-elsewhere", [fi_result("example.sql", "store/models.py", 2, "store.models.other")])
+    results.check(
+        "[findings-ingest] the same rule in another function is another finding",
+        elsewhere["findings"][0]["key"] != before["findings"][0]["key"],
+        elsewhere["findings"],
+    )
+    twice = keys("id-twice", [
+        fi_result("example.sql", "store/models.py", 2, "store.models.find_accounts"),
+        fi_result("example.sql", "store/models.py", 4, "store.models.find_accounts"),
+    ])
+    results.check(
+        "[findings-ingest] one rule firing twice in one function is one finding with two citations",
+        len(twice["findings"]) == 1
+        and twice["findings"][0]["refs"] == ["store/models.py:2", "store/models.py:4"],
+        twice["findings"],
+    )
+    upgraded = keys("id-upgraded", [fi_result("example.sql", "store/models.py", 2, "store.models.find_accounts")], "2.0.0")
+    first = run(["node", str(FI_COLLECTOR), f"--repo={pathlib.Path(tmp) / 'fi-id-before'}", "--output=json", "--quiet"])
+    second = run(["node", str(FI_COLLECTOR), f"--repo={pathlib.Path(tmp) / 'fi-id-upgraded'}", "--output=json", "--quiet"])
+    results.check(
+        "[findings-ingest] a scanner upgrade reporting the same results is not drift",
+        json.loads(first.stdout)["derived_digest"] == json.loads(second.stdout)["derived_digest"]
+        and upgraded["coverage"]["inputs"][0]["tools"] == ["example-sast 2.0.0"],
+        (first.stdout[:200], second.stdout[:200]),
+    )
+    outside = keys("id-outside", [fi_result("example.sql", "/elsewhere/not-here.py", 2)])
+    results.check(
+        "[findings-ingest] a result in a file this checkout does not have is counted, not filed",
+        outside["findings"] == []
+        and outside["coverage"]["inputs"][0]["skipped"]["outside_repository"] == 1,
+        outside["coverage"],
+    )
+
+    def osv(name, doc):
+        _, derived, _ = fi_scan(
+            tmp, name, {".noru/.cache/findings/osv.json": doc},
+            inputs=[fi_input("osv", ".noru/.cache/findings/osv.json", "osv", "dependency")],
+        )
+        return derived["findings"]
+
+    plain = osv("osv-plain", fi_osv(["GHSA-aaaa-0001"], ["GHSA-aaaa-0001"]))
+    aliased = osv("osv-aliased", fi_osv(["GHSA-aaaa-0001", "CVE-0000-1"], ["CVE-0000-1", "GHSA-aaaa-0001"]))
+    results.check(
+        "[findings-ingest] an alias published later does not change which advisory a finding is",
+        plain[0]["key"] == aliased[0]["key"] and plain[0]["rule"] == "GHSA-aaaa-0001"
+        and aliased[0]["aliases"] == ["CVE-0000-1"] and plain[0]["file"] == "requirements.txt"
+        and plain[0]["scanner_severity"] == "high",
+        (plain, aliased),
+    )
+
+
+def test_findings_ingest_skeleton_round_trips(results, tmp):
+    """What the collector writes, the validator reads, with versions kept as strings."""
+    doc = fi_osv(["GHSA-aaaa-0002"])
+    doc["results"][0]["packages"][0]["package"]["version"] = "1.0"
+    _, _, manifest = fi_scan(
+        tmp, "skeleton", {".noru/.cache/findings/osv.json": doc},
+        inputs=[fi_input("osv", ".noru/.cache/findings/osv.json", "osv", "dependency")],
+    )
+    spec = importlib.util.spec_from_file_location(
+        "fi_validator", FINDINGS_INGEST / "scripts" / "validate_manifest.py"
+    )
+    validator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validator)
+    parsed, _ = validator.load_yaml(manifest)
+    fallback = validator._fallback_load(manifest)
+    results.check(
+        "[findings-ingest] a package version that looks like a number stays a string under both loaders",
+        parsed["findings"][0]["package"]["version"] == "1.0" and parsed == fallback,
+        parsed["findings"][0].get("package"),
+    )
+
+
 def test_entry_point_runs_from_a_symlinked_path(results, tmp):
     """A collector reached through a symlink must still collect.
 
@@ -5073,6 +5306,11 @@ def main(argv):
             test_change_control_rules_agree_across_languages(results, tmp)
             test_change_control_reads_acc(results, tmp)
             test_change_control_export_survives_a_forbidden_setting(results, tmp)
+            test_findings_ingest_never_copies_a_result(results, tmp)
+            test_findings_ingest_refuses_double_ingest(results, tmp)
+            test_findings_ingest_missing_report_is_not_empty(results, tmp)
+            test_findings_ingest_identity(results, tmp)
+            test_findings_ingest_skeleton_round_trips(results, tmp)
             test_iac_never_copies_the_line(results, tmp)
             test_iac_identity_survives_a_move(results, tmp)
             test_iac_absence_is_detectable(results, tmp)
