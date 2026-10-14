@@ -486,6 +486,28 @@ def decision_template(row):
             "semantic_review": copy.deepcopy(row.get("semantic_review")) or {key: {"finding": "", "evidence_ids": []} for key in SEMANTIC_REVIEW_QUESTIONS}}
 
 
+def category_meaning_errors(row):
+    """Flag a narrow contradiction in the reviewed meaning, never infer from a field name.
+
+    This is a consistency check on the agent's claim, not a semantic classifier.
+    Unknown meanings still need source investigation rather than a default category.
+    """
+    meaning = row.get("meaning", "")
+    if not isinstance(meaning, str):
+        return []
+    states = re.finditer(r"\b(?:delivery|queue|queued|sending|dispatch)(?:[- ](?:audience|membership|processing|message|email))*[- ](?:state|status)\b", meaning, re.I)
+    # A reviewer may contrast a supported profile with a rejected state interpretation.
+    state = any(not re.search(r"\b(?:not|rather than|instead of)\s+(?:(?:a|an|the|email|message)\s+)*$",
+                              meaning[:match.start()], re.I) for match in states)
+    demographic = any(c == "user.demographic" or c.startswith("user.demographic.")
+                      for c in row.get("categories", []))
+    if state and demographic:
+        return ["category/meaning mismatch: declared delivery or queue state does not establish "
+                "demographic information; revisit producer/consumer evidence and category fit, "
+                "or leave the classification unresolved (no replacement category inferred)"]
+    return []
+
+
 def row_errors(row, contract, structural_only=False):
     if not isinstance(row, dict):
         return ["Classification field must be an object."]
@@ -556,6 +578,7 @@ def row_errors(row, contract, structural_only=False):
             if any(other.get("person_association", {}).get("kind") in {"organization", "service", "none"} and other.get("status") == "proposed" for other in linked):
                 errors.append("person identifier claim contradicts the classified foreign-key target")
     if row.get("status") == "proposed":
+        errors.extend(category_meaning_errors(row))
         if row.get("uncertainty") or row.get("resolution_owner") or row.get("personal_data") == "unknown":
             errors.append("unresolved evidence cannot be marked proposed")
         if not row.get("meaning") or not row.get("rationale") or not row.get("investigation"):

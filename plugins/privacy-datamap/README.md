@@ -431,8 +431,13 @@ run `--check`, or export. Acceptance records the reviewed graph and decisions in
 normal collection and validation then establish the accepted observation baseline.
 
 Extraction and identity are separate: framework adapters discover evidence, while the common graph
-records relationships. Automatic client/import tracing is not implemented yet. Existing parsers
-and static migration configuration provide discovery; the agent traces client wrappers and records
+records relationships. A bounded Python reader recognizes top-level literal instances of a local
+frozen dataclass with exactly two string fields, `destination` and `schema_path`, and no custom
+constructor. It records separate datastore keys and binding citations without importing target code.
+Dynamic arguments, wrappers and imported constructors still need agent investigation. Explicit
+relationship graphs take precedence over these discovered bindings. This models declarations,
+not deployed persistence or transfers. General client/import tracing is not implemented. Existing
+parsers and static migration configuration also provide discovery; the agent traces wrappers and records
 missing bindings. Without an explicit graph, the legacy directory grouping remains provisional.
 A graph does not create payload fields: unsupported structures still require supplemental evidence.
 
