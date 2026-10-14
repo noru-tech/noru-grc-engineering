@@ -176,7 +176,7 @@ Keep the reports separate:
   An unresolved item also identifies the missing answer and its decision impact.
 - `control_changes`: baseline edits, taxonomy changes or observation-format upgrades. These need
   maintenance, not a claim that repository privacy behavior changed.
-- `coverage_gaps`: incomplete extraction, kept visible and separate from confirmed changes.
+- `coverage_gaps`: active extraction blockers after evidence-bound resolutions; `extraction_diagnostics` also retains observed and resolved findings.
 
 Unique identical evidence moved to a new file permits a mechanical citation/path refresh in the
 candidate. Missing or multiple possible matches require investigation. After acceptance, update the
@@ -336,8 +336,9 @@ collection identities and relationships against actual client and connection bin
 location and matching schemas do not establish a shared datastore. Do not treat a mistaken database
 identity as a privacy classification question. Record an unresolved structural problem in
 `structural_errors` with `kind`, `detail`, and `resolution_needed`. Correct the source or collector,
-then rerun collection and reconciliation. Schema conflicts, migration gaps and ambiguous identities
-also block review readiness. While blocked, the renderer defers privacy decisions and retains all
+then rerun collection and reconciliation. Active schema conflicts, migration gaps and ambiguous identities
+also block review readiness. Investigate extraction diagnostics using the resolution workflow below;
+raw observations remain visible after a valid disposition. While blocked, the renderer defers privacy decisions and retains all
 independent analysis in evidence. Missing payload evidence can remain an explicit coverage gap;
 a known incorrect structure cannot be accepted away.
 
@@ -622,3 +623,21 @@ construction/configuration and actual transfers. A directory or neighboring user
 boundary nor meaning. Maintenance retains supported accepted decisions and investigates relevant
 changes. Fresh assessment excludes earlier classifications as evidence; compare only afterward.
 Human acceptance records a decision; it cannot supply missing facts or close an extraction gap.
+
+## Resolve extraction diagnostics through investigation
+
+After collection and reconciliation, rebuild current evidence with `field_review.py --repo=<repo>`.
+Use `investigate.py --repo=<repo>` to obtain diagnostic templates and all covered occurrence IDs.
+Investigate each occurrence; submit `modeled`, `not_applicable` or `unresolved` decisions through
+`investigate.py --repo=<repo> --gaps=<decisions.json>`. Do not edit diagnostic status flags.
+
+Modeled decisions reference current evidenced canonical field IDs, including validated supplemental
+structures where appropriate. They do not create fields or accept privacy meaning. Not-applicable
+decisions require an evidenced explanation of why represented data is unaffected. Grouped findings
+require explicit coverage of every occurrence. Migration findings require separate evidence for
+context/datastore identity and current schema completeness; directory proximity is insufficient.
+
+Rerun review and validation before requesting acceptance. The shared gate retains raw observations,
+uses only current valid resolutions, and reopens changed evidence or structure while preserving the
+prior rationale. Read [extraction-resolutions.md](../references/extraction-resolutions.md) for the
+contract, compatibility behavior, supplemental-schema requirements and end-to-end demonstration.

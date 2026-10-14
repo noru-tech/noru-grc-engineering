@@ -17,6 +17,7 @@ import sys
 import analysis_storage
 import dependencies
 import shape_investigation
+import gap_resolution
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -103,7 +104,7 @@ def structure_digest(derived):
 
 
 def taxonomy_digest():
-    paths = [path for path in (HERE / "field_review.py", HERE / "dotnet.py", HERE / "dotnet_syntax.py", HERE / "dotnet_model.py", HERE / "dotnet_diagnostics.py", HERE / "dotnet_adapters.py", ROOT / "references/dotnet-framework-contracts.json", ROOT / "references/dotnet-diagnostics.json", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
+    paths = [path for path in (HERE / "field_review.py", HERE / "dotnet.py", HERE / "dotnet_syntax.py", HERE / "dotnet_model.py", HERE / "dotnet_diagnostics.py", HERE / "gap_resolution.py", HERE / "migration_coverage.py", HERE / "dotnet_adapters.py", ROOT / "references/dotnet-framework-contracts.json", ROOT / "references/dotnet-diagnostics.json", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
     return digest({"policy": POLICY, "categories": TAXONOMY, "implementation": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}})
 
 
@@ -431,15 +432,40 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
                    for gap in derived.get("dotnet", {}).get("gaps", [])]
     for gap in report.get("gaps", []) + dotnet_gaps:
         spans = [span for span in gap.get("evidence", []) if not migration(span.get("path", ""))]
-        contract["gaps"].append({**gap, "evidence_ids": register_evidence(contract, spans, repo), "status": "unresolved", "gap_id": gap.get("diagnostic_id") or "gap:" + digest(gap)})
-    if prior.get("binding") == contract["binding"]:
-        if prior.get("accepted_certificate"):
-            contract["accepted_certificate"] = prior["accepted_certificate"]
-        for gap in contract["gaps"]:
-            previous = prior_gaps.get(gap.get("gap_id"), {})
-            for key in ("status", "resolution", "resolution_binding"):
-                if key in previous:
-                    gap[key] = copy.deepcopy(previous[key])
+        contract["gaps"].append({**gap, "evidence_ids": register_evidence(contract, spans, repo), "status": "unresolved", "gap_id": gap_resolution.identity(gap)})
+    # Every collector coverage finding enters the same decision registry. Preserve the raw
+    # collector payload separately; classification never erases an observed diagnostic.
+    known = {gap_resolution.identity(gap) for gap in contract["gaps"]}
+    for gap in gap_resolution.observations(derived):
+        if gap["gap_id"] in known:
+            for existing in contract["gaps"]:
+                if gap_resolution.identity(existing) == gap["gap_id"]:
+                    existing["coverage_key"] = gap["coverage_key"]
+                    existing["collector_observation_digest"] = gap["collector_observation_digest"]
+            continue
+        spans = gap.get("evidence") or ([span] if (span := span_from_ref(repo, gap.get("ref"), exclusions)) else [])
+        gap["evidence_ids"] = register_evidence(contract, [span for span in spans if not migration(span.get("path", ""))], repo)
+        contract["gaps"].append(gap)
+    contract["resolution_contract_version"] = gap_resolution.VERSION
+    contract["diagnostic_history"] = copy.deepcopy(prior.get("diagnostic_history", []))
+    current_ids = {gap["gap_id"] for gap in contract["gaps"]}
+    for old in prior.get("gaps", []):
+        if old.get("gap_id") not in current_ids and old not in contract["diagnostic_history"]:
+            contract["diagnostic_history"].append(copy.deepcopy(old))
+    if prior.get("binding") == contract["binding"] and prior.get("accepted_certificate"):
+        contract["accepted_certificate"] = prior["accepted_certificate"]
+    for gap in contract["gaps"]:
+        previous = prior_gaps.get(gap.get("gap_id"), {})
+        if previous.get("resolution"):
+            for key in ("status", "resolution", "resolution_binding", "resolution_history", "reopened_reason"):
+                if key in previous: gap[key] = copy.deepcopy(previous[key])
+            for key in gap.get("resolution", {}).get("evidence_ids", []):
+                if key in prior.get("evidence", {}) and not evidence_errors(prior["evidence"][key], repo, exclusions):
+                    contract["evidence"][key] = copy.deepcopy(prior["evidence"][key])
+            if gap.get("status") == "resolved" and gap_resolution.resolution_errors(gap, contract, repo):
+                gap.setdefault("resolution_history", []).append(copy.deepcopy(previous["resolution"]))
+                gap["status"] = "unresolved"
+                gap["reopened_reason"] = "Resolution evidence, occurrences, scope or represented structure changed; reinvestigate."
     if not fresh and not prior:
         restore_accepted_decisions(contract, derived, repo)
     aggregate_members(contract)
@@ -677,7 +703,7 @@ def validate_contract(document, derived, repo, require_complete=True, candidate=
     for gap in contract.get("gaps", []):
         if gap.get("resolution", {}).get("outcome") == "accepted_certificate" and (not contract.get("accepted_certificate") or gap["resolution"].get("certificate_digest") != contract.get("accepted_certificate")):
             errors.append("Restored extraction gap requires its sealed accepted certificate: " + str(gap.get("gap_id")))
-        if gap.get("status") == "resolved" and (not gap.get("resolution") or gap.get("resolution_binding") != gap_binding(gap, contract)):
+        if gap.get("status") == "resolved" and gap_resolution.resolution_errors(gap, contract, repo):
             errors.append("Extraction gap resolution is unbound: " + str(gap.get("gap_id")))
     if contract.get("accepted_certificate"):
         errors.extend(restored_certificate_errors(contract, derived, repo))
@@ -685,7 +711,7 @@ def validate_contract(document, derived, repo, require_complete=True, candidate=
         pending = [row for row in rows if row.get("status") != "proposed" and (require_complete != "agent" or row.get("resolution_owner") != "human")]
         if pending:
             errors.append(str(len(pending)) + " fields/members need plugin investigation; no acceptance or export yet.")
-        unresolved_gaps = [gap for gap in contract.get("gaps", []) if gap.get("status") != "resolved"]
+        unresolved_gaps = gap_resolution.calculate(document, derived, repo)["active_blockers"]
         if unresolved_gaps:
             errors.append(str(len(unresolved_gaps)) + " evidence extraction gaps remain; resolve them through plugin investigation.")
     if candidate is not None:
@@ -754,8 +780,7 @@ def apply_decisions(document, decisions, repo):
 
 
 def gap_binding(gap, contract):
-    return digest({"gap": {key: value for key, value in gap.items() if key not in {"resolution", "status", "resolution_binding"}},
-                   "resolution": gap.get("resolution"), "policy": contract["binding"]["taxonomy_digest"]})
+    return gap_resolution.binding(gap, contract)
 
 
 def apply_gap_decisions(document, decisions, repo):
@@ -785,7 +810,7 @@ def apply_gap_decisions(document, decisions, repo):
         # Adapter reports can repeat an observation. A single disposition must
         # cover every copy, but a reused ID must not hide a different source gap.
         observation = lambda gap: {key: value for key, value in gap.items()
-                                   if key not in {"resolution", "status", "resolution_binding"}}
+                                   if key not in gap_resolution.MUTABLE}
         if any(observation(gap) != observation(matches[0]) for gap in matches[1:]):
             errors.append(str(identity) + ": duplicate gap ID has conflicting observations")
             continue
@@ -801,29 +826,41 @@ def apply_gap_decisions(document, decisions, repo):
         if decision.get("outcome") not in {"modeled", "not_applicable", "unresolved"}:
             errors.append(str(identity) + ": use modeled, not_applicable or unresolved")
             continue
+        expected_occurrences = gap_resolution.occurrence_ids(matches[0])
+        if len(expected_occurrences) > 1 and decision.get("covered_occurrence_ids") != expected_occurrences:
+            errors.append(str(identity) + ": explicitly cover every grouped occurrence")
+            continue
+        decision = copy.deepcopy(decision)
+        decision.setdefault("covered_occurrence_ids", expected_occurrences)
+        provenance = decision.setdefault("provenance", {"method": "plugin-gap-investigation"})
+        if not isinstance(provenance, dict) or not isinstance(provenance.get("method"), str) or not provenance["method"].strip():
+            errors.append(str(identity) + ": resolution provenance requires an investigation method")
+            continue
+        provenance.update(contract_version=gap_resolution.VERSION,
+                          observation_digest=gap_resolution.digest(observation(matches[0])),
+                          structural_digest=contract["binding"]["structural_digest"],
+                          evidence={key:copy.deepcopy(contract["evidence"][key]) for key in cited})
         targets = decision.get("field_ids", [])
         def modeled(target):
             row = rows.get(target)
-            if not row:
-                return False
-            if row["status"] == "proposed":
-                return True
-            # A known scalar can have unresolved privacy meaning without an extraction gap.
-            return (matches[0].get("kind") == "write_value" and not row.get("composite")
-                    and row.get("decision_origin") == "agent-evidence-review"
-                    and row.get("resolution_owner") == "human" and bool(row.get("investigation"))
-                    and not semantic_review_errors(row))
+            # Structure may be complete while privacy meaning is still under investigation.
+            return bool(row and row.get("evidence_ids") and row.get("observation_digest"))
         if decision["outcome"] == "modeled" and (not targets or any(not modeled(target) for target in targets)):
-            errors.append(str(identity) + ": modeled gaps must reference investigated canonical fields/members; open structure remains unresolved")
+            errors.append(str(identity) + ": modeled gaps must reference evidenced canonical fields/members; open structure remains unresolved")
             continue
         if decision["outcome"] == "not_applicable" and not decision.get("scope_rationale"):
             errors.append(str(identity) + ": explain why this extraction limitation does not affect represented runtime data")
             continue
         for gap in matches:
+            if gap.get("resolution"):
+                gap.setdefault("resolution_history", []).append(copy.deepcopy(gap["resolution"]))
+            gap.pop("reopened_reason", None)
             gap["resolution"] = {key: copy.deepcopy(value) for key, value in decision.items() if key not in {"additional_evidence", "gap_id"}}
             gap["resolution"]["evidence_ids"] = list(cited)
             gap["status"] = "unresolved" if decision["outcome"] == "unresolved" else "resolved"
             gap["resolution_binding"] = gap_binding(gap, contract)
+            if gap["status"] == "resolved":
+                errors.extend(str(identity) + ": " + error for error in gap_resolution.resolution_errors(gap, contract, repo))
     if errors:
         return sorted(set(errors))
     document["classification_review"] = contract
@@ -1003,7 +1040,15 @@ def classification_certificate(document, derived, repo, manifest):
     return {"version": VERSION, "policy_digest": taxonomy_digest(), "structural_digest": structure_digest(derived),
             "source_inventory_digest": digest(source_inventory(repo, contract.get("migration_exclusions"))), "inventory_digest": contract["inventory_digest"], "migration_exclusions": contract.get("migration_exclusions", {}),
             "manifest_semantics_digest": digest(manifest_semantics(manifest)), "gap_inventory_digest": gap_inventory_digest(contract),
-            "shape_observations": copy.deepcopy(contract.get("shape_observations", {}))}
+            "coverage_digest": coverage_digest(derived),
+            "shape_observations": copy.deepcopy(contract.get("shape_observations", {})),
+            "gap_resolutions": copy.deepcopy(contract.get("gaps", [])),
+            "diagnostic_history": copy.deepcopy(contract.get("diagnostic_history", [])),
+            "gap_evidence": {key:copy.deepcopy(contract["evidence"][key]) for gap in contract.get("gaps", []) for key in gap.get("resolution", {}).get("evidence_ids", [])}}
+
+
+def coverage_digest(derived):
+    return digest({key:derived.get("coverage", {}).get(key, []) for key in (*gap_resolution.COVERAGE_KEYS, "migration_coverage")})
 
 
 def accepted_certificate_errors(derived, repo, candidate=None):
@@ -1021,6 +1066,10 @@ def accepted_certificate_errors(derived, repo, candidate=None):
         expected = {"version": VERSION, "policy_digest": taxonomy_digest(), "structural_digest": structure_digest(derived),
                     "source_inventory_digest": digest(source_inventory(repo, certificate.get("migration_exclusions"))), "manifest_semantics_digest": digest(manifest_semantics(manifest))}
         errors = []
+        for observation in certificate.get("gap_resolutions", []) + derived.get("coverage", {}).get("migration_coverage", {}).get("records", []):
+            errors.extend(gap_resolution.observation_errors(observation, repo))
+        if certificate.get("coverage_digest") != coverage_digest(derived) and (certificate.get("coverage_digest") or any(derived.get("coverage", {}).get(key) for key in gap_resolution.COVERAGE_KEYS)):
+            errors.append("Sealed extraction coverage changed or requires an audited resolution contract.")
         if lock.get("accepted_manifest_sha256") != hashlib.sha256(manifest_path.read_bytes()).hexdigest():
             errors.append("Accepted classification manifest changed after sealing.")
         if any(certificate.get(key) != value for key, value in expected.items()) or not certificate.get("inventory_digest") or not certificate.get("gap_inventory_digest"):
@@ -1030,6 +1079,26 @@ def accepted_certificate_errors(derived, repo, candidate=None):
         return errors
     except (OSError, ValueError, TypeError, KeyError) as error:
         return ["Cannot verify sealed classification certificate: " + str(error)]
+
+
+def gap_partition(document, derived, repo=None):
+    # Cache deletion may use the sealed, audited dispositions, only while the whole
+    # accepted certificate remains current. A present unfinished review takes precedence.
+    if repo is not None and not document.get("classification_review") and not accepted_certificate_errors(derived, repo):
+        certificate = json.loads((pathlib.Path(repo) / ".noru/privacy-datamap.lock.json").read_text())["classification_review"]
+        contract = {"binding": {"structural_digest": structure_digest(derived),
+                    "source_inventory": source_inventory(repo, certificate.get("migration_exclusions"))},
+                    "migration_exclusions": certificate.get("migration_exclusions", {}),
+                    "gaps": copy.deepcopy(certificate.get("gap_resolutions", [])),
+                    "evidence": certificate.get("gap_evidence", {}), "fields": []}
+        # The complete snapshot binds both target definitions and recorded dispositions.
+        for gap in contract["gaps"]:
+            gap.setdefault("resolution_history", []).append(copy.deepcopy(gap.get("resolution", {})))
+            gap["resolution"] = {"outcome": "accepted_certificate", "certificate_digest": digest(certificate)}
+            contract["accepted_certificate"] = digest(certificate)
+            gap["resolution_binding"] = gap_binding(gap, contract)
+        return gap_resolution.calculate({"classification_review":contract}, derived, repo)
+    return gap_resolution.calculate(document, derived, repo)
 
 
 def validate_repository(document, derived, repo, require_complete=True, candidate=None):
@@ -1077,6 +1146,7 @@ def restore_accepted_decisions(contract, derived, repo):
     if set(represented) != {row["entity_id"] for row in rows} or inventory != certificate.get("inventory_digest") or gap_inventory_digest(contract) != certificate.get("gap_inventory_digest"):
         return
     contract["accepted_certificate"] = digest(certificate)
+    contract["diagnostic_history"] = copy.deepcopy(certificate.get("diagnostic_history", []))
     # The certificate attests prior completion; do not invent the discarded investigation or
     # claim that a particular runtime validator was inspected during this cache reconstruction.
     for row in reversed(rows):
@@ -1099,6 +1169,9 @@ def restore_accepted_decisions(contract, derived, repo):
                 "rationale": "Prior complete content coverage is attested by the unchanged sealed snapshot; original investigation details were in the deleted cache.", "evidence_ids": row["evidence_ids"]}
         row["decision_binding"] = decision_binding(row, contract)
     for gap in contract.get("gaps", []):
+        audited = next((old for old in certificate.get("gap_resolutions", []) if old.get("gap_id")==gap.get("gap_id")), None)
+        if audited:
+            gap["resolution_history"] = copy.deepcopy(audited.get("resolution_history", [])) + [copy.deepcopy(audited["resolution"])]
         gap["status"] = "resolved"
         gap["resolution"] = {"outcome": "accepted_certificate", "certificate_digest": digest(certificate),
             "rationale": "Prior resolution of this exact extraction gap is attested by the unchanged sealed snapshot; original investigation details were in the deleted cache."}

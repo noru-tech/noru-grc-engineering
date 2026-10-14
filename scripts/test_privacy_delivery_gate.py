@@ -19,7 +19,7 @@ class PrivacyDeliveryGateTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.repo = pathlib.Path(self.temp.name)
-        write_files(self.repo, {'db/schema.sql': SQL_FIXTURE, 'writer.ts': 'export const producerVersion = 1;\n', '.gitignore': '.noru/\n.fides/\n'})
+        write_files(self.repo, {'db/schema.sql': SQL_FIXTURE, 'writer.ts': 'export const producerVersion = 1;\n', 'storage.toml': 'schema = "db/schema.sql"\nmigrations = "history/migrations"\n', '.gitignore': '.noru/\n.fides/\n'})
         self.command(['git', 'init', '-q', '-b', 'main'])
         self.command(['git', 'add', '.'])
         self.command(['git', '-c', 'user.name=Synthetic Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture'])
@@ -40,6 +40,59 @@ class PrivacyDeliveryGateTests(unittest.TestCase):
 
     def script(self, name, expected=0, *args):
         return self.command(['node', str(SCRIPTS / name), f'--repo={self.repo}', '--output=json', '--quiet', *args], expected)
+
+    def test_investigated_migration_gap_reaches_seal_export_and_preflight(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import analysis_storage
+        import field_review
+        import gap_resolution
+        import review
+        migration = self.repo / 'history/migrations/001.sql'
+        migration.parent.mkdir(parents=True)
+        migration.write_text('CREATE TABLE obsolete_history (old_value TEXT);\n')
+        (self.repo/'storage.toml').write_text('schema = "db/schema.sql"\nmigrations = "history/migrations"\n')
+        self.command(['git', 'add', 'history', 'storage.toml'])
+        datamap_scan(self.repo)
+        self.command([sys.executable, str(SCRIPTS / 'reconcile.py'), f'--repo={self.repo}', '--output=json', '--quiet'])
+        document = seed_fixture_classification(self.repo)
+        derived = field_review.derived_for(document, self.repo)
+        gaps = gap_resolution.calculate(document, derived, self.repo)['active_blockers']
+        self.assertEqual(len(gaps), 1)
+        self.command([sys.executable, str(SCRIPTS / 'reconcile.py'), f'--repo={self.repo}', '--seal', '--quiet'], 1)
+        self.script('collect.mjs', 2, '--export')
+        rows = list(field_review.all_rows(document['classification_review']['fields']))
+        binding_span = field_review.span_from_ref(self.repo, 'storage.toml:1')
+        binding_span['end_line'] = 2
+        binding_span['end_column'] = len((self.repo/'storage.toml').read_text().splitlines()[1])+1
+        binding_id = 'evidence:' + field_review.digest(binding_span)
+        decisions = [{'gap_id': gaps[0]['gap_id'], 'outcome':'modeled',
+            'covered_occurrence_ids':gap_resolution.occurrence_ids(gaps[0]),
+            'field_ids':[row['entity_id'] for row in rows],
+            'evidence_ids': sorted({key for row in rows for key in row['evidence_ids']}),
+            'rationale':'The current declarative schema is the complete represented storage contract.',
+            'identity_rationale':'The explicit storage.toml contract links the current db/schema.sql and history/migrations paths.',
+            'additional_evidence':[binding_span],
+            'coverage_binding':{'datastore':'db','migration_paths':['history/migrations/001.sql'],
+                'field_ids':[row['entity_id'] for row in rows], 'evidence_ids':[binding_id]},
+            'coverage_rationale':'Inspected all current schema declarations and represented each current column; historical columns are not used.',
+            'investigation':[{'question':'Is current storage represented independently of historical DDL?', 'outcome':'All current definitions were checked against the map.'}]}]
+        decision_path = self.repo / '.noru/.cache/gap-decisions.json'
+        decision_path.write_text(json.dumps(decisions))
+        self.command([sys.executable, str(SCRIPTS / 'investigate.py'), f'--repo={self.repo}', f'--gaps={decision_path}'])
+        document=analysis_storage.load(self.repo/'.noru/.cache/privacy-datamap.analysis.json')
+        self.assertEqual(review.structural_blockers(document,{},derived), [])
+        self.command([sys.executable, str(SCRIPTS / 'validate_manifest.py'), str(self.repo/'.noru/privacy-datamap.yml'), '--quiet'])
+        self.command([sys.executable, str(SCRIPTS / 'reconcile.py'), f'--repo={self.repo}', '--seal', '--quiet'])
+        self.script('collect.mjs', 0, '--export')
+        self.script('diff.mjs')
+        partition = field_review.gap_partition({},derived,self.repo)
+        self.assertEqual(len(partition['resolved_diagnostics']),1)
+        self.assertEqual(partition['active_blockers'],[])
+        migration.write_text('CREATE TABLE different_history (different_value TEXT);\n')
+        self.assertTrue(field_review.accepted_certificate_errors(derived,self.repo), 'Deleted-cache acceptance must also reject changed diagnostic evidence')
+        self.command([sys.executable, str(SCRIPTS / 'validate_manifest.py'), str(self.repo/'.noru/privacy-datamap.yml'), '--quiet'], 1)
+        self.script('collect.mjs', 2, '--export')
+        self.script('diff.mjs', 1)
 
     def test_valid_current_review_emits_the_validated_payload(self):
         result = json.loads(self.script('push.mjs', 0, '--confirm').stdout)

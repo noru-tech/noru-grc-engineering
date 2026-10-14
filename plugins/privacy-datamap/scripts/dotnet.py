@@ -587,6 +587,7 @@ class Reader(ModelDiscovery):
             if record not in self.entity_relationships: self.entity_relationships.append(record)
         refs=sorted({f"{owner['path']}:{line}",f"{model['path']}:{model['line']}", *(mapping['refs'] if mapping else [])})
         self.relationships.append({'dataset':key,'collection':table,'model':model['qualified'],'kind':kind,
+                                   'context':{'symbol':owner['qualified'],'project':owner['project'],'path':owner['path']} if kind in {'context_entity_table','identity_user_model'} else None,
                                    'schema_path':model['path'],'identity_basis':'modeled_reference','physical_identity':'unverified','refs':refs,
                                    'registrations':mapping.get('registrations',[]) if mapping else []})
         if fields:
@@ -898,7 +899,7 @@ class Reader(ModelDiscovery):
             if path.endswith('.cs') and len(bindings)>1:
                 self.gap(path,1,'Multiple reviewed bindings for one C# model need per-relationship investigation.',code='DOTNET_REVIEWED_BINDING')
         self.gaps = finalize_diagnostics(self)
-        return {'diagnostic_summary':diagnostic_summary(self.gaps),'runtime_bindings':self.runtime_bindings,'entity_relationships':self.entity_relationships,'solutions':self.solutions,'projects':list(self.projects.values()),'technologies':sorted(self.technologies,key=lambda r:(r['ref'],r['technology'])),
+        return {'type_symbols':[{'name':m['name'],'qualified':m['qualified'],'project':m['project'],'path':m['path']} for m in self.models], 'diagnostic_summary':diagnostic_summary(self.gaps),'runtime_bindings':self.runtime_bindings,'entity_relationships':self.entity_relationships,'solutions':self.solutions,'projects':list(self.projects.values()),'technologies':sorted(self.technologies,key=lambda r:(r['ref'],r['technology'])),
                 'relationships':self.relationships,'observations':self.observations,'tables':self.tables,
                 'gaps':sorted(self.gaps,key=lambda r:(r['ref'],r['reason']))}
 

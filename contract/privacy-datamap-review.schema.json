@@ -281,6 +281,38 @@
         },
         "relationship_mapping": {
           "type": "object"
+        },
+        "extraction_diagnostics": {
+          "type": "object",
+          "required": [
+            "version",
+            "observed_diagnostics",
+            "resolved_diagnostics",
+            "active_blockers"
+          ],
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "observed_diagnostics": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "resolved_diagnostics": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "active_blockers": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
         }
       }
     },

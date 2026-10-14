@@ -1387,19 +1387,13 @@ export function collectFacts(repo, { candidate = false } = {}) {
     needsReview += normalized.counts.needsReview;
     specialRefs.push(...normalized.specialRefs);
   }
-  const migrationBoundaries = new Map();
-  for (const path of excludedMigrations) {
-    const topology = drizzleTopology.byPath.get(path);
-    const boundary = topology?.boundary ?? datastoreBoundary(path);
-    if (!migrationBoundaries.has(boundary)) migrationBoundaries.set(boundary, path);
-  }
-  for (const [boundary, path] of migrationBoundaries) {
-    if (!observations.some((item) => item.boundary === boundary
-      || (drizzleTopology.byPath.get(item.path)?.boundary ?? datastoreBoundary(item.path)) === boundary)) {
-      migrationGaps.push({format: "excluded_migrations", ref: `${path}:1`,
-        reason: "Migration files are excluded; supply a current ORM or declarative schema for this boundary."});
-    }
-  }
+  const migrationCoverage = JSON.parse(execFileSync("python3", [join(HERE, "migration_coverage.py"), repo], {
+    input: JSON.stringify({ migrations: excludedMigrations, dotnet, observations, datastore_keys: Object.fromEntries(datasets.map((d) => [d.name, d.fides_key])),
+      current_schema_claims: Object.fromEntries([...drizzleTopology.byPath].filter(([, claim]) => claim.role === "canonical")),
+      topology: Object.fromEntries(excludedMigrations.filter((path) => drizzleTopology.byPath.has(path)).map((path) => [path, drizzleTopology.byPath.get(path)])),
+      source_gaps: [...compilerGaps, ...sourceReadGaps, ...schemaConflicts] }), encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
+  }));
+  migrationGaps.push(...migrationCoverage.gaps);
   for (const store of supplementalDatasets) {
     parsedFiles.add(MANIFEST_INPUT_PATH);
     const normalized = normalizedDataset(
@@ -1539,9 +1533,10 @@ export function collectFacts(repo, { candidate = false } = {}) {
           .map((path) => ({ format: "relationship_payload", ref: `${path}:1`, reason: "Bound schema/payload has no supported extracted structure; supply typed supplemental evidence." })),
         ...Object.values(relationships.flows).flat().filter((key) => !systems.some((s) => s.fides_key === key))
           .map((key) => ({ format: "relationship_runtime", ref: ".noru/privacy-datamap.yml:1", reason: `Runtime '${key}' is not discovered; supply runtime evidence.` })),
-      ].map((item) => [`${item.format}\0${item.ref}`, item])).values()].sort((a, b) =>
+      ].map((item) => [`${item.format}\0${item.ref}\0${item.diagnostic_id ?? item.reason}`, item])).values()].sort((a, b) =>
         a.ref === b.ref ? BY_PATH(a.format, b.format) : BY_PATH(a.ref, b.ref)
       ),
+      migration_coverage: migrationCoverage,
       migration_gaps: migrationGaps.sort((a, b) => BY_PATH(a.ref, b.ref)),
       schema_conflicts: schemaConflicts.sort((a, b) => BY_PATH(a.ref, b.ref)),
     },
@@ -1923,7 +1918,7 @@ function main(argv) {
           ? `special-category data at: ${derived.special_category_refs.join(", ")}`
           : "",
         summary.coverage_gaps > 0
-          ? `coverage gaps: ${summary.coverage_gaps} (see ${summary.derived_facts})`
+          ? `observed coverage diagnostics: ${summary.coverage_gaps} (see ${summary.derived_facts})`
           : "",
         `derived facts: ${summary.derived_facts}`,
         wroteSkeleton ? `wrote skeleton: ${summary.manifest}` : "",

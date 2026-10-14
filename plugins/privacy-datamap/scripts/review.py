@@ -4,6 +4,7 @@
 import json
 import analysis_storage
 import field_review
+import gap_resolution
 import pathlib
 import re
 import sys
@@ -266,15 +267,14 @@ def validate_removals(document, result, candidate, repo, accepting=False):
     return errors
 
 
-def structural_blockers(document, result, derived):
+def structural_blockers(document, result, derived, repo=None):
     blockers = []
     for error in (derived.get("relationship_mapping") or {}).get("errors", []):
         blockers.append({"kind": "relationship_graph", "detail": error,
                          "resolution_needed": "Correct the connection graph and its evidence dependencies, then recollect."})
-    for key in ("schema_conflicts", "migration_gaps"):
-        for item in derived.get("coverage", {}).get(key, []):
-            blockers.append({"kind": key, "detail": item,
-                             "resolution_needed": "Correct the structural source or collector and rerun collection and reconciliation."})
+    for item in field_review.gap_partition(document, derived, repo)["active_blockers"]:
+        blockers.append({"kind": item.get("kind"), "detail": item,
+                         "resolution_needed": item.get("resolution_requirement", "Investigate and record a current evidence-bound gap disposition.")})
     for item in result.get("identity_ambiguities", []):
         blockers.append({"kind": "identity_ambiguity", "detail": item,
                          "resolution_needed": "Establish the datastore identity from repository evidence and reconcile again."})
@@ -291,13 +291,13 @@ def effective_proposal(row, document):
     return {**group, **decision, **{k: v for k, v in row.items() if v not in (None, "", {})}}
 
 
-def scan_progress(document, result, derived, errors, blockers):
+def scan_progress(document, result, derived, errors, blockers, repo=None):
     contract = document.get("classification_review", {})
     pending = [row for row in field_review.all_rows(contract.get("fields", []))
                if row.get("status") != "proposed"]
     human = [row for row in pending if row.get("resolution_owner") == "human"]
     agent = [row for row in pending if row.get("resolution_owner") != "human"]
-    gaps = [gap for gap in contract.get("gaps", []) if gap.get("status") != "resolved"]
+    gaps = field_review.gap_partition(document, derived, repo)["active_blockers"]
     questions = []
     for row in human + document.get("system_proposals", []) + document.get("removal_proposals", []):
         for item in [row] + row.get("processing_activities", []):
@@ -348,8 +348,8 @@ def member_coverage(row):
             "pending_members": pending, "member_count": len(members)}
 
 
-def build_outputs(document, result, derived, candidate, errors):
-    blockers = structural_blockers(document, result, derived)
+def build_outputs(document, result, derived, candidate, errors, repo=None):
+    blockers = structural_blockers(document, result, derived, repo)
     status = "enrichment incomplete" if errors or blockers else "accepted" if result.get("accepted_current") and not document.get("relationship_proposal") else "ready for human review"
     proposals = {row["entity_id"]: effective_proposal(row, document) for row in document.get("proposals", [])}
     _, _, candidate_fields, _ = workflow.manifest_indexes(candidate)
@@ -435,7 +435,7 @@ def build_outputs(document, result, derived, candidate, errors):
         group["proposal_kinds"] = sorted(set(group["proposal_kinds"]) | {proposal.get("proposal_kind") or "requested"})
         group["data_categories"] = sorted(set(group["data_categories"]) | set(field["classification"]))
     return {"version": "1.0.0", "status": status,
-            "progress": scan_progress(document, result, derived, errors, blockers),
+            "progress": scan_progress(document, result, derived, errors, blockers, repo),
             "observation_digest": result["observation_digest"],
             "collection_mode": "candidate" if result.get("candidate_context") else "manifest",
             "data_map": {"dotnet": {"diagnostic_summary": derived.get("dotnet", {}).get("diagnostic_summary", {}), **{key: derived.get("dotnet", {}).get(key, []) for key in ("projects", "solutions", "technologies", "relationships", "runtime_bindings", "entity_relationships", "gaps")}}, "system_flows": [{"system": s["fides_key"], "direction": k, "resources": s[k]} for s in candidate.get("system", []) for k in ("ingress", "egress") if s.get(k)], "stores": stores, "processing_activities": activities, "monitoring_scope": result.get("monitoring_scope", {}), "connection_questions": (derived.get("relationship_mapping") or {}).get("questions", []), "relationship_proposal": document.get("relationship_proposal")},
@@ -446,7 +446,7 @@ def build_outputs(document, result, derived, candidate, errors):
                              "changes": result["actions"], "collection_decisions": result["collection_review_required"],
                              "dependency_decisions": document.get("dependency_proposals", []),
                              "control_changes": result.get("control_changes", []), "system_changes": result.get("system_changes", [])},
-            "evidence_record": {"fields": inventory, "reasoning_groups": document.get("reasoning_groups", {}),
+            "evidence_record": {"extraction_diagnostics": field_review.gap_partition(document, derived, repo), "fields": inventory, "reasoning_groups": document.get("reasoning_groups", {}),
                                 "agent_analysis": {k: v for k, v in document.items() if k not in {"evidence", "preview", "candidate", "reconciliation"}}, "reconciliation": result, "candidate_manifest": candidate, "coverage": derived.get("coverage", {}),
                                 "special_category_refs": result.get("special_category_refs", []), "relationship_mapping": derived.get("relationship_mapping", {})}}
 
@@ -621,7 +621,7 @@ def render_outputs(outputs):
             review.append(f"- **{activity['system']}: {activity.get('decision_summary') or 'Analysis required'}**")
             question(review, activity)
         findings = outputs["evidence_record"]["agent_analysis"].get("store_investigation", {}).get("findings", [])
-        gaps = outputs["evidence_record"]["coverage"].get("unparsed_candidates", [])
+        gaps = outputs["evidence_record"].get("extraction_diagnostics", {}).get("active_blockers", [])
         if gaps or any(finding.get("status") == "gap" for finding in findings):
             review.extend(["", "## Coverage and identity questions", ""])
         for finding in findings:
@@ -680,7 +680,7 @@ def main(argv):
         if document is None:
             raise ValueError("Run reconciliation before enrichment")
         errors = validate(document, result, candidate, repo)
-        outputs = build_outputs(document, result, derived, candidate, errors)
+        outputs = build_outputs(document, result, derived, candidate, errors, repo)
         data_map, report = render_outputs(outputs)
         report = data_map + "\n" + report
         analysis_storage.save(cache / "privacy-datamap.analysis.json", document)

@@ -8,6 +8,7 @@ import sys
 
 import analysis_storage
 import field_review
+import gap_resolution
 
 HINTS = json.loads((pathlib.Path(__file__).resolve().parent.parent / "references/classification.json").read_text())
 
@@ -49,7 +50,7 @@ def category_candidates(row, facts):
             for key in sorted(keys) if key in field_review.TAXONOMY]
 
 
-def prepare_batch(document, limit):
+def prepare_batch(document, limit, repo=None):
     contract = document.get('classification_review')
     if not isinstance(contract, dict):
         raise ValueError('Run field_review.py after collection and reconciliation to build current evidence.')
@@ -88,7 +89,12 @@ def prepare_batch(document, limit):
         'counts': {'agent_pending': len(agent_requests), 'human_pending': len(human_requests), 'included': len(batch), 'remaining_agent': max(0, len(agent_requests) - len(batch))},
         'requests': batch,
         'human_questions': human_requests,
-        'extraction_gaps': [gap for gap in contract.get('gaps', []) if gap.get('status') != 'resolved'],
+         'extraction_gaps': [{**gap, 'decision_template': {'gap_id': gap.get('gap_id'), 'outcome': 'unresolved',
+            'covered_occurrence_ids': gap_resolution.occurrence_ids(gap), 'evidence_ids': gap.get('evidence_ids', []),
+            'rationale': '', 'investigation': [], 'field_ids': [], 'scope_rationale': '',
+            'identity_rationale': '', 'coverage_rationale': '',
+            'coverage_binding': {'datastore': '', 'migration_paths': [], 'field_ids': [], 'evidence_ids': []}}}
+            for gap in field_review.gap_partition(document, field_review.derived_for(document, repo) or {}, repo)['active_blockers']],
     }
 
 
@@ -145,7 +151,7 @@ def main(argv=None):
             if errors:
                 raise ValueError('; '.join(str(error) for error in errors))
             document = updated
-        result = prepare_batch(document, args.limit)
+        result = prepare_batch(document, args.limit, repo)
         if document is not original:
             analysis_storage.save(path, document)
         print(json.dumps(result, ensure_ascii=False, indent=2))

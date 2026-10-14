@@ -6,6 +6,12 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Honor evidence-bound extraction-gap dispositions consistently across review, validation, sealing,
+  export, publication preflight and CI. Preserve observed diagnostics, resolution history and active
+  blockers; reopen stale or incomplete evidence instead of clearing acceptance safeguards.
+- Replace migration directory-proximity coverage with explicit context/configuration adapters and
+  separate datastore-identity and current-schema checks, including cross-project EF models.
+
 - Discover .NET entities through explicit model-builder registrations and bounded source extension
   calls, retaining provenance and diagnosing cycles, ambiguity and conditional bindings. Separate
   CLR, storage and serialization facts, source/adapter-backed inheritance and entity relationships.

@@ -204,6 +204,24 @@
               }
             }
           }
+        },
+        "coverage_digest": {
+          "type": "string"
+        },
+        "gap_resolutions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "gap_evidence": {
+          "type": "object"
+        },
+        "diagnostic_history": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         }
       }
     }

@@ -1090,6 +1090,15 @@
         },
         "accepted_certificate": {
           "$ref": "#/$defs/digest"
+        },
+        "resolution_contract_version": {
+          "const": 1
+        },
+        "diagnostic_history": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         }
       }
     },

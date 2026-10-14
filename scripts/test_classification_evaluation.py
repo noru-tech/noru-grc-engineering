@@ -172,7 +172,7 @@ class ClassificationEvaluation(unittest.TestCase):
         self.assertFalse((repo / ".noru/privacy-datamap.lock.json").exists())
         self.assertFalse((repo / ".fides/datamap.yml").exists())
 
-    def test_complete_investigation_resolves_code_supported_gold_and_keeps_only_real_questions(self):
+    def test_complete_field_investigation_preserves_unbound_migration_blockers(self):
         reviewed = json.loads((FIXTURES / "reviewed-decisions.json").read_text())["fixtures"]
         for fixture in ("relational-app", "sql-app"):
             with self.subTest(fixture=fixture):
@@ -250,12 +250,18 @@ class ClassificationEvaluation(unittest.TestCase):
                         self.assertEqual(current[key]["personal_data"], gold["personal_data"], key)
                         self.assertEqual(current[key]["status"], "needs_investigation", key)
                         self.assertEqual(current[key]["categories"], [], key)
-                self.assertFalse(self.engine.validate_contract(document, derived, repo, require_complete="agent"))
+                # These fixtures deliberately contain unbound historical migrations. Completing
+                # field meaning must not dismiss their separate current-schema coverage question.
+                self.assertEqual(self.engine.validate_contract(document, derived, repo, require_complete="agent"),
+                    ["1 evidence extraction gaps remain; resolve them through plugin investigation."])
+                partition = self.engine.gap_partition(document, derived, repo)
+                self.assertEqual([gap.get("coverage_key") for gap in partition["active_blockers"]], ["migration_gaps"])
                 self.assertTrue(self.gate(document, derived, repo), "Unavailable business facts still prevent acceptance")
                 batch = command("python3", SCRIPTS / "investigate.py", f"--repo={repo}", "--limit=200")
                 self.assertEqual(batch.returncode, 0, batch.stderr)
                 counts = json.loads(batch.stdout)["counts"]
                 self.assertEqual(counts["agent_pending"], 0)
+                self.assertEqual(len(json.loads(batch.stdout)["extraction_gaps"]), 1)
                 self.assertGreater(counts["human_pending"], 0)
                 self.assertFalse((repo / ".fides/datamap.yml").exists())
 

@@ -3568,6 +3568,7 @@ def test_datamap_canonical_schema_makes_migration_replay_non_blocking(results, t
         tmp,
         "canonical-with-unsupported-migration",
         {
+            "drizzle.config.ts": 'export default {schema: "./db/schema/accounts.ts", out: "./db/migrations"};\n',
             "db/schema/accounts.ts": (
                 'export const accounts = pgTable("accounts", {\n'
                 '  id: uuid("id"),\n'
@@ -3583,7 +3584,7 @@ def test_datamap_canonical_schema_makes_migration_replay_non_blocking(results, t
         },
     )
     results.check(
-        "[privacy-datamap] canonical-backed migration replay failures are not coverage gaps",
+        "[privacy-datamap] explicitly bound current schemas make historical replay unnecessary",
         derived["coverage"]["migration_gaps"] == []
         and set(fields_of(derived, "accounts")) == {"id", "email"},
         derived["coverage"],
@@ -4884,7 +4885,7 @@ def main(argv):
         return 2
 
     results = Results()
-    for suite in ("test_field_review.py", "test_typescript_evidence.py", "test_classification_evaluation.py", "test_privacy_investigation.py", "test_privacy_delivery_gate.py", "test_static_bindings.py", "test_dotnet.py", "test_dotnet_generic.py"):
+    for suite in ("test_field_review.py", "test_typescript_evidence.py", "test_classification_evaluation.py", "test_privacy_investigation.py", "test_privacy_delivery_gate.py", "test_static_bindings.py", "test_dotnet.py", "test_dotnet_generic.py", "test_gap_resolution.py"):
         checks = run([sys.executable, str(ROOT / "scripts" / suite)])
         results.check("[privacy-datamap] " + suite, checks.returncode == 0, checks.stderr)
 
