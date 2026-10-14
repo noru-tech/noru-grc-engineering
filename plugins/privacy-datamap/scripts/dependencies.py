@@ -9,7 +9,7 @@ import sys
 import typescript
 
 MAX_BYTES = 2_000_000
-EXCLUDED = {".git", ".noru", ".fides", "node_modules", ".venv", "venv", "__pycache__"}
+EXCLUDED = {".git", ".noru", ".fides", "node_modules", ".venv", "venv", "__pycache__", "bin", "obj"}
 METHODS = {"python_ast", "typescript_ast", "json", "text"}
 
 

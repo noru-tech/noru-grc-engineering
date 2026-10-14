@@ -1090,6 +1090,47 @@
         },
         "accepted_certificate": {
           "$ref": "#/$defs/digest"
+        },
+        "resolution_contract_version": {
+          "const": 1
+        },
+        "diagnostic_history": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "runtime_definitions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "definition",
+              "observation_digest",
+              "evidence_ids"
+            ],
+            "properties": {
+              "definition": {
+                "type": "object"
+              },
+              "observation_digest": {
+                "$ref": "#/$defs/digest"
+              },
+              "evidence_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "uncertainty_history": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         }
       }
     },
@@ -1316,6 +1357,12 @@
               }
             }
           }
+        },
+        "accepted_uncertainty": {
+          "type": [
+            "object",
+            "null"
+          ]
         }
       }
     }

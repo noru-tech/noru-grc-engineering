@@ -100,6 +100,57 @@
           "items": {
             "type": "object"
           }
+        },
+        "dotnet": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "projects": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "solutions": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "technologies": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "relationships": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "diagnostic_summary": {
+              "type": "object"
+            },
+            "runtime_bindings": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "entity_relationships": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "gaps": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
         }
       }
     },
@@ -230,6 +281,38 @@
         },
         "relationship_mapping": {
           "type": "object"
+        },
+        "extraction_diagnostics": {
+          "type": "object",
+          "required": [
+            "version",
+            "observed_diagnostics",
+            "resolved_diagnostics",
+            "active_blockers"
+          ],
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "observed_diagnostics": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "resolved_diagnostics": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "active_blockers": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
         }
       }
     },
@@ -288,6 +371,22 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "technical_questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "accepted_uncertainty_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "accepted_uncertainties": {
+          "type": "array",
+          "items": {
+            "type": "object"
           }
         }
       }

@@ -387,7 +387,7 @@ def drift_message(manifest_path, decl):
     return "the committed manifest no longer matches the repository"
 
 
-def check_coverage(report, repo, summary, decl):
+def check_coverage(report, repo, summary, decl, reconciliation=None):
     """Did the collector actually read anything, and did it miss something it could see was there?
 
     An empty manifest and a repository with no personal data in it are the same file, and only one
@@ -415,12 +415,17 @@ def check_coverage(report, repo, summary, decl):
         *(coverage.get("migration_gaps") or []),
         *(coverage.get("schema_conflicts") or []),
     ]
+    partition = (reconciliation or {}).get("extraction_diagnostics")
+    if isinstance(partition, dict) and partition.get("version") == 1 and isinstance(partition.get("active_blockers"), list):
+        # Canonical semantic/write investigations still block the validator. Only collector
+        # coverage failures establish that extraction produced no safe schema here.
+        candidates = [gap for gap in partition["active_blockers"] if gap.get("coverage_key") in {"unparsed_candidates", "migration_gaps", "schema_conflicts"}]
     parsed = coverage.get("files_parsed", 0)
     safe_datasets = (derived.get("counts") or {}).get("datasets", 0)
     if not candidates:
         return "ok"
 
-    formats = sorted({c.get("format") for c in candidates if isinstance(c, dict)})
+    formats = sorted({c.get("format", c.get("kind", "extraction")) for c in candidates if isinstance(c, dict)})
     shown = [c.get("ref") for c in candidates[:MAX_EXPLAINED_ITEMS] if isinstance(c, dict)]
 
     if safe_datasets == 0:
@@ -462,10 +467,6 @@ def step_scan(report, piece_dir, decl, repo, manifest_path, on_missing_prereq):
         return "tooling"
 
     summary = parse_child_json(completed)
-    coverage_outcome = check_coverage(report, repo, summary, decl)
-    if coverage_outcome == "tooling":
-        return "tooling"
-
     # A piece may declare a second, finer deterministic comparison. The collector still owns the
     # global freshness gate; a reconciler explains drift per entity so CI and an agent see the same
     # bounded queue. It is deliberately a local process, never a model call.
@@ -496,6 +497,10 @@ def step_scan(report, piece_dir, decl, repo, manifest_path, on_missing_prereq):
         if not isinstance(reconciliation, dict):
             report.step("scan", "error", detail="reconciler did not return a JSON object")
             return "tooling"
+
+    coverage_outcome = check_coverage(report, repo, summary, decl, reconciliation)
+    if coverage_outcome == "tooling":
+        return "tooling"
 
     if reconciliation is not None:
         investigations = reconciliation.get("investigation_required") or []

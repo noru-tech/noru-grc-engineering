@@ -172,6 +172,18 @@ def main(argv):
             payload,
         )
 
+        (repo / 'Library.csproj').write_text('<Project><ItemGroup><PackageReference Include="Microsoft.SemanticKernel" /></ItemGroup></Project>')
+        (repo / 'Storage.cs').write_text('using Microsoft.EntityFrameworkCore; class Store : DbContext {}')
+        git(repo, 'add', 'Library.csproj', 'Storage.cs')
+        dotnet_run, dotnet_payload = review(repo, '--scope=local-code')
+        dotnet_pieces = dispositions(dotnet_payload)
+        results.check('.NET projects and source select privacy and AI investigation',
+            dotnet_run.returncode == 0 and dotnet_pieces['privacy-datamap']['disposition'] == 'selected'
+            and dotnet_pieces['ai-inventory']['disposition'] == 'selected')
+        git(repo, 'reset', '--', 'Library.csproj', 'Storage.cs')
+        (repo / 'Library.csproj').unlink()
+        (repo / 'Storage.cs').unlink()
+
         git(repo, "switch", "-c", "feature")
         (repo / "db").mkdir()
         (repo / "db" / "schema.sql").write_text(
