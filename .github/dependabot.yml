@@ -1,6 +1,14 @@
-# This repository has no package manifests on purpose: runtime code is Node built-ins and the
+# This repository has no package manifests of its own: runtime code is Node built-ins and the
 # Python standard library only (CONTRIBUTING.md, "Ground rules"). The only third-party code it runs
 # is the GitHub Actions its workflows pin by commit SHA, so that is the only ecosystem watched.
+#
+# tests/fixture-repo/store/requirements.txt looks like a manifest but is not a dependency of
+# anything. It is the file the committed OSV-Scanner report under
+# tests/fixture-repo/.noru/.cache/findings/ was produced from, and its pins are old on purpose:
+# that is what gives the report findings for the findings-ingest tests to ingest. Nothing installs
+# it. A security update would re-pin it to versions the report does not describe, so every
+# dependency in that directory is ignored; scripts/check_repo.py asserts the pins and the report
+# still agree.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -9,3 +17,10 @@ updates:
       interval: weekly
     commit-message:
       prefix: ci
+  - package-ecosystem: pip
+    directory: /tests/fixture-repo/store
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
