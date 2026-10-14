@@ -128,6 +128,27 @@
               "items": {
                 "type": "object"
               }
+            },
+            "diagnostic_summary": {
+              "type": "object"
+            },
+            "runtime_bindings": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "entity_relationships": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "gaps": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
             }
           }
         }

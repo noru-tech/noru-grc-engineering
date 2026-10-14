@@ -103,7 +103,7 @@ def structure_digest(derived):
 
 
 def taxonomy_digest():
-    paths = [path for path in (HERE / "field_review.py", HERE / "dotnet.py", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
+    paths = [path for path in (HERE / "field_review.py", HERE / "dotnet.py", HERE / "dotnet_syntax.py", HERE / "dotnet_model.py", HERE / "dotnet_diagnostics.py", HERE / "dotnet_adapters.py", ROOT / "references/dotnet-framework-contracts.json", ROOT / "references/dotnet-diagnostics.json", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
     return digest({"policy": POLICY, "categories": TAXONOMY, "implementation": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}})
 
 
@@ -340,6 +340,9 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
         type_info = compact_type(extracted.get("type") or {"kind": "unknown", "name": shape})
         definition = add_fact(contract, "field_definition", identity, {"shape": shape, "type": type_info, "source_symbol": extracted.get("field_id")}, evidence_ids)
         fact_ids = [definition]
+        if extracted.get("clr_type"):
+            fact_ids.append(add_fact(contract, "persistence_representation", identity,
+                {key: extracted.get(key) for key in ("clr_type", "storage_type", "serialization", "framework_contract")}, evidence_ids))
         if extracted.get("_shape_observation"):
             fact_ids.append(add_fact(contract, "investigated_shape", identity,
                 {"rationale": extracted["_shape_observation"]["rationale"], "original_type": extracted.get("_original_type")}, evidence_ids))
@@ -423,11 +426,12 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
     # Adapter gaps stay explicit; resolving the associated field must account for them.
     prior_gaps = {gap.get("gap_id"): gap for gap in prior.get("gaps", [])}
     dotnet_gaps = [{"kind": "dotnet_extraction", "subject": gap["ref"], "message": gap["reason"],
-                    "evidence": [span] if (span := span_from_ref(repo, gap["ref"], exclusions)) else []}
+                    "evidence": gap.get("evidence") or ([span] if (span := span_from_ref(repo, gap["ref"], exclusions)) else []),
+                    **{key: gap[key] for key in ("diagnostic_id", "code", "category", "scope", "resolution_requirement", "occurrences", "details") if key in gap}}
                    for gap in derived.get("dotnet", {}).get("gaps", [])]
     for gap in report.get("gaps", []) + dotnet_gaps:
         spans = [span for span in gap.get("evidence", []) if not migration(span.get("path", ""))]
-        contract["gaps"].append({**gap, "evidence_ids": register_evidence(contract, spans, repo), "status": "unresolved", "gap_id": "gap:" + digest(gap)})
+        contract["gaps"].append({**gap, "evidence_ids": register_evidence(contract, spans, repo), "status": "unresolved", "gap_id": gap.get("diagnostic_id") or "gap:" + digest(gap)})
     if prior.get("binding") == contract["binding"]:
         if prior.get("accepted_certificate"):
             contract["accepted_certificate"] = prior["accepted_certificate"]

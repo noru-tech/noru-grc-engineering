@@ -473,6 +473,7 @@ public record Detail(string Name, string? Other);
         derived=json.loads(result.stdout)
         self.assertEqual([d['fides_key'] for d in derived['datasets']],['reviewed_store'])
         self.assertEqual({t['dataset'] for t in derived['dotnet']['tables']},{'reviewed_store'})
+        self.assertEqual({b['datastore'] for b in derived['dotnet']['runtime_bindings']},{'reviewed_store'})
         import field_review
         contract=field_review.build_contract({'observation_digest':'fixture'},self.repo,compiler_report={'tables':[],'gaps':[]},derived=derived)
         self.assertEqual(len(contract['fields']),2)

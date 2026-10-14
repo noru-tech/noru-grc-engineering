@@ -1274,24 +1274,51 @@ export function collectFacts(repo, { candidate = false } = {}) {
   }));
   const dotnet = files.some((path) => /\.(?:cs|csproj|slnx?|props|targets)$/.test(path))
     ? JSON.parse(execFileSync("python3", [join(HERE, "dotnet.py"), repo],
-      { input: JSON.stringify({ files, excluded: excludedNonRuntime }), encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }))
+      { input: JSON.stringify({ files, excluded: excludedNonRuntime, reviewed_bindings: relationships.bindings }), encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }))
     : { projects: [], technologies: [], relationships: [], observations: [], tables: [], gaps: [] };
+  const resolvedDotnetStores = new Map();
   const observations = dotnet.observations.map((observation) => {
     const bindings = relationships.bindings[observation.path];
+    const targets = resolvedDotnetStores.get(observation.boundary) ?? new Set();
+    targets.add(bindings?.length === 1 ? bindings[0] : observation.boundary);
+    resolvedDotnetStores.set(observation.boundary, targets);
     if (bindings?.length === 1) {
       for (const table of dotnet.tables) {
         if (table.dataset === observation.boundary && table.schema_path === observation.path) table.dataset = bindings[0];
       }
-      for (const edge of dotnet.relationships) {
+      for (const edge of [...dotnet.relationships, ...(dotnet.entity_relationships ?? [])]) {
         if (edge.dataset === observation.boundary && edge.schema_path === observation.path) edge.dataset = bindings[0];
       }
       return { ...observation, boundary: bindings[0] };
     }
-    if (bindings?.length > 1) dotnet.gaps.push({ format: "dotnet", ref: `${observation.path}:1`,
-      reason: "Multiple reviewed bindings for one C# model need per-relationship investigation." });
     return observation;
   });
-  dotnet.tables = [...new Map(dotnet.tables.map((table) => [JSON.stringify(table), table])).values()];
+  for (const binding of dotnet.runtime_bindings ?? []) {
+    const targets = resolvedDotnetStores.get(binding.datastore);
+    if (targets) {
+      binding.modeled_datastore = binding.datastore;
+      binding.datastores = [...targets].sort();
+      binding.datastore = targets.size === 1 ? [...targets][0] : null;
+    }
+  }
+  const structuralValue = (value) => Array.isArray(value) ? value.map(structuralValue)
+    : value && typeof value === "object" ? Object.fromEntries(Object.entries(value)
+      .filter(([key]) => !["evidence", "line"].includes(key)).map(([key, item]) => [key, structuralValue(item)])) : value;
+  const canonicalTables = new Map();
+  const mergeEvidence = (target, source) => {
+    target.evidence = [...new Map([...(target.evidence ?? []), ...(source.evidence ?? [])].map((span) => [JSON.stringify(span), span])).values()];
+    for (const member of source.members ?? []) {
+      const existing = (target.members ?? []).find((row) => row.name === member.name);
+      if (existing) mergeEvidence(existing, member);
+    }
+  };
+  for (const table of dotnet.tables) {
+    const key = JSON.stringify(structuralValue(table));
+    const existing = canonicalTables.get(key);
+    if (existing) table.fields.forEach((field, index) => mergeEvidence(existing.fields[index], field));
+    else canonicalTables.set(key, table);
+  }
+  dotnet.tables = [...canonicalTables.values()];
   const parsedFiles = new Set();
   const parsedByKind = {};
   const sourceReadGaps = [];

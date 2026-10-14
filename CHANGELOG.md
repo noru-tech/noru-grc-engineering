@@ -6,6 +6,13 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Discover .NET entities through explicit model-builder registrations and bounded source extension
+  calls, retaining provenance and diagnosing cycles, ambiguity and conditional bindings. Separate
+  CLR, storage and serialization facts, source/adapter-backed inheritance and entity relationships.
+- Carry stable categorized .NET diagnostics and all grouped source occurrences through collection
+  and canonical review; show extraction counts separately from classification and acceptance.
+  Add synthetic feature tests and a repeatable multi-repository before/after comparison tool.
+
 - Apply bounded, explicitly registered EF configurations for stored names, exclusions, backing
   and typed shadow fields, simple owned-object columns and enum-to-string conversions. Keep
   conditional mappings, custom converters and unsupported configuration as review gaps.

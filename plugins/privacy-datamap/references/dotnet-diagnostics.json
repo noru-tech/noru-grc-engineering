@@ -1,0 +1,257 @@
+{
+  "version": 1,
+  "rules": {
+    "DbContext connection target is unresolved or ambiguous; confirm whether contexts share a physical datastore": {
+      "code": "DOTNET_05B75CF30C",
+      "category": "ambiguous_binding"
+    },
+    "SQL client target and query coverage require investigation; literal result mappings do not establish the complete database schema": {
+      "code": "DOTNET_AA033BF51B",
+      "category": "unsupported_semantics"
+    },
+    "SQL usage has no supported literal typed query mapping; supply current DDL or investigate queries": {
+      "code": "DOTNET_1D89B290D3",
+      "category": "missing_structure"
+    },
+    "No project boundary established; confirm source membership and logical connection scope": {
+      "code": "DOTNET_AB53712253",
+      "category": "source_membership_uncertainty"
+    },
+    "Multiple projects share this source directory; source membership requires investigation": {
+      "code": "DOTNET_B30A75FDA8",
+      "category": "source_membership_uncertainty"
+    },
+    "Using aliases may affect type or attribute identity; investigate bindings": {
+      "code": "DOTNET_56D556BB0F",
+      "category": "ambiguous_binding"
+    },
+    "Referenced model is missing or ambiguous; resolve its namespace/project mapping": {
+      "code": "DOTNET_9BDA8600A8",
+      "category": "ambiguous_binding"
+    },
+    "Multiple configurations target one entity; mapping precedence requires investigation": {
+      "code": "DOTNET_D2CBEA475B",
+      "category": "ambiguous_binding"
+    },
+    "Cyclic or deep inheritance requires investigation": {
+      "code": "DOTNET_E15513590B",
+      "category": "unsupported_semantics"
+    },
+    "Recursive or deep nested model requires shape investigation": {
+      "code": "DOTNET_8906F50742",
+      "category": "unsupported_semantics"
+    },
+    "Partial or generic model requires investigation beyond declared members": {
+      "code": "DOTNET_556AEC4773",
+      "category": "unsupported_semantics"
+    },
+    "Mapped model has no extracted persisted fields": {
+      "code": "DOTNET_52719341A8",
+      "category": "missing_structure"
+    },
+    "Table/collection name is dynamic or unsupported": {
+      "code": "DOTNET_32E7E6D59D",
+      "category": "unsupported_semantics"
+    },
+    "Source is unreadable or exceeds the inspection limit": {
+      "code": "DOTNET_3063A70725",
+      "category": "source_membership_uncertainty"
+    },
+    "Solution references a missing or external project; repository coverage is incomplete": {
+      "code": "DOTNET_D36D067659",
+      "category": "source_membership_uncertainty"
+    },
+    "Unsupported or malformed member declaration requires source investigation": {
+      "code": "DOTNET_32707607F1",
+      "category": "unsupported_semantics"
+    },
+    "Malformed or unsupported fluent configuration requires investigation": {
+      "code": "DOTNET_36D240C42A",
+      "category": "unsupported_semantics"
+    },
+    "Generic inherited model requires type substitution; base members remain unresolved": {
+      "code": "DOTNET_315A8DC0CD",
+      "category": "unsupported_semantics"
+    },
+    "External or unresolved inherited model: base fields and framework storage definitions are not synthesized": {
+      "code": "DOTNET_8CD46F256D",
+      "category": "missing_structure"
+    },
+    "Unsupported member attribute may change stored shape; investigate serializer/converter semantics": {
+      "code": "DOTNET_3B0F78CF15",
+      "category": "unsupported_semantics"
+    },
+    "Multiple properties map to the same stored name": {
+      "code": "DOTNET_97AD21AC2B",
+      "category": "ambiguous_binding"
+    },
+    "Custom mapping, convention or table override requires investigation; declared model names may differ from runtime storage": {
+      "code": "DOTNET_C25A0C1019",
+      "category": "unsupported_semantics"
+    },
+    "SQL projection and typed result differ; investigate column/member mapping": {
+      "code": "DOTNET_5307F89B38",
+      "category": "unsupported_semantics"
+    },
+    "Local type shadows a recognized framework symbol; investigate symbol identity": {
+      "code": "DOTNET_D9E8807582",
+      "category": "ambiguous_binding"
+    },
+    "Table-attributed model has no resolved datastore binding": {
+      "code": "DOTNET_6815D69501",
+      "category": "missing_structure"
+    },
+    "Project XML cannot be inspected safely": {
+      "code": "DOTNET_957622B884",
+      "category": "source_membership_uncertainty"
+    },
+    "Conditional/imported MSBuild settings are not evaluated; confirm source membership and package configuration": {
+      "code": "DOTNET_D34D1372E8",
+      "category": "source_membership_uncertainty"
+    },
+    "Explicit Compile items require source-membership investigation": {
+      "code": "DOTNET_5BCF5C0146",
+      "category": "source_membership_uncertainty"
+    },
+    "Default C# source inclusion is disabled; confirm included sources": {
+      "code": "DOTNET_4C74C36553",
+      "category": "source_membership_uncertainty"
+    },
+    "Record parameter has unsupported mapping or default": {
+      "code": "DOTNET_CF2EE9B5C5",
+      "category": "unsupported_semantics"
+    },
+    "Public member is not a supported auto-property; investigate persisted fields, computed accessors or read-only mapping": {
+      "code": "DOTNET_2D1D8BB521",
+      "category": "unsupported_semantics"
+    },
+    "Conditional, reassigned or unsupported fluent builder requires investigation": {
+      "code": "DOTNET_7BB580BE3F",
+      "category": "ambiguous_binding"
+    },
+    "Relationship foreign-key and navigation mapping requires review beyond scalar fields": {
+      "code": "DOTNET_A7D4525055",
+      "category": "unsupported_semantics"
+    },
+    "Key/index configuration requires review beyond scalar field mapping": {
+      "code": "DOTNET_CD5DE4BBAC",
+      "category": "unsupported_semantics"
+    },
+    "Unsupported fluent mapping or selector requires investigation": {
+      "code": "DOTNET_62FD2D5F9C",
+      "category": "unsupported_semantics"
+    },
+    "Repeated property configuration requires precedence investigation": {
+      "code": "DOTNET_C70EF27CE7",
+      "category": "unsupported_semantics"
+    },
+    "Hidden or overridden inherited member requires mapping investigation": {
+      "code": "DOTNET_6A7144F2EF",
+      "category": "unsupported_semantics"
+    },
+    "Dynamic or dictionary content has unknown additional members; supply a content contract": {
+      "code": "DOTNET_50D2CA6156",
+      "category": "unsupported_semantics"
+    },
+    "String conversion source is not a resolved enum; stored representation requires investigation": {
+      "code": "DOTNET_C567F5BDD7",
+      "category": "unsupported_semantics"
+    },
+    "Context registration is ambiguous across referenced projects": {
+      "code": "DOTNET_0909A84191",
+      "category": "ambiguous_binding"
+    },
+    "Context connection registration is dynamic or unsupported; supply a logical connection binding": {
+      "code": "DOTNET_E39DD8900E",
+      "category": "ambiguous_binding"
+    },
+    "Aspire resource variable is reassigned; host wiring requires investigation": {
+      "code": "DOTNET_1E8D323798",
+      "category": "ambiguous_binding"
+    },
+    "Identity framework table names and inherited framework fields require source or schema evidence; custom user fields are provisional": {
+      "code": "DOTNET_7F082DE20F",
+      "category": "missing_structure"
+    },
+    "Fluent model configuration may override conventions/attributes; investigate mappings before accepting": {
+      "code": "DOTNET_8DFFF11201",
+      "category": "unsupported_semantics"
+    },
+    "DynamoDB attribute namespace is not established": {
+      "code": "DOTNET_F861F106D8",
+      "category": "unsupported_semantics"
+    },
+    "Project reference is external, dynamic, or missing from the scanned inventory": {
+      "code": "DOTNET_3DC6171DA5",
+      "category": "source_membership_uncertainty"
+    },
+    "Persistence dependency declared; investigate runtime usage and model coverage before accepting an empty or partial map": {
+      "code": "DOTNET_375B4B58DF",
+      "category": "missing_structure"
+    },
+    "Dynamic or conflicting table mapping requires investigation": {
+      "code": "DOTNET_5AB424F8F5",
+      "category": "ambiguous_binding"
+    },
+    "Nonliteral or configured property mapping requires investigation": {
+      "code": "DOTNET_606138E735",
+      "category": "unsupported_semantics"
+    },
+    "Owned member conflicts with another stored column; resolve mapping": {
+      "code": "DOTNET_AF751EC665",
+      "category": "ambiguous_binding"
+    },
+    "DynamoDB table attribute is not a supported literal": {
+      "code": "DOTNET_67D67A73F9",
+      "category": "unsupported_semantics"
+    },
+    "MongoDB collection name is dynamic": {
+      "code": "DOTNET_3088392F58",
+      "category": "unsupported_semantics"
+    },
+    "MongoDB database receiver is unresolved or reassigned; investigate database identity": {
+      "code": "DOTNET_6D4626D4FF",
+      "category": "ambiguous_binding"
+    },
+    "Persistence usage has no extracted binding; inspect its models, serializer and resource configuration": {
+      "code": "DOTNET_6B23FF0B68",
+      "category": "missing_structure"
+    },
+    "Dynamic column or backing-field mapping requires investigation": {
+      "code": "DOTNET_93FB948933",
+      "category": "unsupported_semantics"
+    },
+    "Configured property has no resolved declaration or explicit type": {
+      "code": "DOTNET_BC096D6E2C",
+      "category": "missing_structure"
+    },
+    "Unsupported enum underlying type requires investigation": {
+      "code": "DOTNET_26C23D9AFF",
+      "category": "unsupported_semantics"
+    },
+    "Navigation, owned or converted property needs an explicit relational mapping": {
+      "code": "DOTNET_6F5063A871",
+      "category": "unsupported_semantics"
+    },
+    "Multiple Aspire resources match this connection; logical datastore is ambiguous": {
+      "code": "DOTNET_F58E4ADEAD",
+      "category": "ambiguous_binding"
+    },
+    "Table name is not a supported literal; resolve mapping before collection": {
+      "code": "DOTNET_6349C806DF",
+      "category": "unsupported_semantics"
+    },
+    "Custom conversion requires explicit stored-type investigation": {
+      "code": "DOTNET_DB4CD5B05F",
+      "category": "unsupported_semantics"
+    },
+    "Unsupported property configuration may change stored shape": {
+      "code": "DOTNET_C756777F89",
+      "category": "unsupported_semantics"
+    },
+    "Unsupported table attribute arguments": {
+      "code": "DOTNET_5C4DE322EC",
+      "category": "unsupported_semantics"
+    }
+  }
+}

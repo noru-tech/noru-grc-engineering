@@ -39,7 +39,8 @@ binding do not become datasets.
 Properties with initializers retain their declared types; initializer values are not exported.
 Source-defined base members retain their origin evidence. Simple field-backed get/set accessors
 are supported. Identity contexts expose custom user fields provisionally under their model name;
-framework fields and physical table names require source/schema evidence and are not synthesized.
+framework fields require source or a supported version-specific contract; physical table names
+require separate mapping evidence.
 Partial/generic models, ambiguous or external inheritance, other custom accessors, unsupported attributes, converters, aliases,
 shadowed framework symbols and custom serialization/convention configuration produce gaps.
 Explicit `ApplyConfiguration(new T())` registrations support one `IEntityTypeConfiguration<T>`
@@ -75,3 +76,70 @@ handling is outside this feature.
 Extraction is only the first validation stage. Fields still need classification, processing-purpose
 and data-flow review, resolution of actual uncertainties, and named-owner acceptance. Successful
 extraction does not validate preserved draft manifests, and acceptance does not close extraction gaps.
+
+## Registration traversal and adapters
+
+Entity discovery is rooted in a recognized EF context. It combines `DbSet<T>`,
+`ModelBuilder.Entity<T>()` (including simple entity callbacks), and explicitly applied
+`IEntityTypeConfiguration<T>` implementations. Source-defined context inheritance and explicit
+`base.OnModelCreating` calls retain provenance. Unused configuration classes cannot create datasets.
+The walker follows unambiguous, explicitly called static extension methods whose only parameter is
+`this ModelBuilder`; it follows evidenced project references and namespace imports. It retains the
+registration/call chain, detects cycles, and limits traversal to 16 levels and 128 calls per context.
+Overloads, conditional statements, unsupported arguments and unresolved symbols remain diagnostics.
+This does not evaluate arbitrary helper methods or runtime control flow.
+
+`dotnet_adapters.py` defines registration adapters separately from discovery. EF options registrations
+and Aspire Npgsql registrations produce runtime-project → context → logical-connection → datastore
+traces. Runtime-conditional registrations retain their conditions and remain unresolved; they are not
+assumed to describe the production branch. Preprocessor/build-source uncertainty has a separate
+category. Conditional project references do not establish source membership. Unsupported configuration
+still needs evidence; logical names never verify physical database identity.
+
+Source-defined generic base parameters are substituted where they can be bound unambiguously.
+External model metadata requires available source or an explicit version-specific contract. The
+bundled IdentityUser contracts cover exactly versions 8.0.0 and 10.0.0, identified by literal package
+references or an unambiguous nearest Directory.Packages.props declaration. Conditional definitions,
+other versions, unresolved imports and conflicting versions do not select a contract. The metadata
+records the public source URL, source hash and MIT license; it supplies CLR fields, not classifications
+or a complete Identity storage schema. Framework table mapping and other unavailable definitions
+remain review gaps. The contracts are data, not assemblies or executable target dependencies.
+
+Fields distinguish `clr_type`, modeled `storage_type`, and serialization attribute observations.
+Literal supported `HasColumnType` declarations supply an explicit database type; otherwise native
+provider types remain unestablished. A custom converter leaves the stored representation unknown.
+Validation and JSON serialization attributes do not rename or remove relational columns.
+Explicit navigation/foreign-key and owned-object relationships are reported separately from scalar
+columns; foreign-key member references identify CLR members. Unsupported relationship semantics,
+conflicting inclusions/exclusions, owned callbacks and separate owned tables remain diagnostics.
+
+## Diagnostic and review accounting
+
+Each .NET diagnostic has a stable rule code and diagnostic ID, source evidence, an affected scope,
+and a resolution requirement. Categories distinguish missing structure, ambiguous binding,
+unsupported semantics, and source-membership uncertainty. Repeated occurrences of the same rule in
+the same scope are grouped, with every occurrence and source span retained. Grouping is not resolution.
+IDs do not incorporate line numbers or source hashes; evidence and freshness bindings do.
+
+`diagnostic_summary.diagnostics` counts grouped items; `occurrences` counts their underlying source
+occurrences, and `by_category` partitions the grouped count. The collector coverage list and canonical
+review use the same diagnostic IDs. Review-gate totals also include non-.NET and semantic issues, so
+those totals are not interchangeable with .NET extraction counts. Classification and human acceptance
+remain separate; new structure and changed evidence cannot be accepted by clearing extraction flags.
+
+## Integration comparison
+
+Use small synthetic tests for feature guarantees (`scripts/test_dotnet_generic.py`) and more than one
+repository for integration checks. The comparison tool accepts arbitrary repository paths and compares
+their checked-out source against a specified toolkit revision, without running target code:
+
+```bash
+python3 scripts/compare_dotnet_extraction.py --baseline-ref <toolkit-commit> \
+  --repo /path/to/first-repository --repo /path/to/second-repository \
+  --output /tmp/dotnet-comparison.json
+```
+
+The report records repository revisions, source digests, extraction counts, before/after diagnostic
+and relationship evidence, and repeat-run determinism. It excludes generated/test/migration source
+and reports excluded or unavailable paths as a count. Sparse checkouts cover only available files.
+No fields, model names or connections from an integration repository are extraction rules.

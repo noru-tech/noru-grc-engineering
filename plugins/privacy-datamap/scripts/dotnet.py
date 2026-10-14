@@ -5,7 +5,10 @@ import pathlib
 import re
 import sys
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dotnet_syntax import Token, lex, values, close, split, attrs, attr, literal_arg
+from dotnet_model import ModelDiscovery
+from dotnet_adapters import REGISTRATIONS, registration_call, runtime_conditions, external_properties, VALIDATION_ATTRIBUTES, SERIALIZATION_ATTRIBUTES
+from dotnet_diagnostics import finalize as finalize_diagnostics, summary as diagnostic_summary
 
 MAX_BYTES = 1_000_000
 SKIP = {"bin", "obj", ".git", ".noru", "node_modules", "vendor", "packages"}
@@ -22,161 +25,31 @@ PACKAGES = {"microsoft.entityframeworkcore": "entity_framework", "entityframewor
             "aspire.npgsql": "postgresql", "aspire.hosting.postgresql": "postgresql"}
 
 
-@dataclass
-class Token:
-    value: str
-    line: int
-    kind: str = "code"
-
-
-def string_end(text, start, depth=0):
-    """Skip literals and interpolation holes without treating their contents as declarations."""
-    if depth > 64: raise ValueError('String nesting exceeds inspection limit')
-    match = re.match(r'(\$+)?(@)?("{3,}|"|\')|(@\$)(")', text[start:])
-    if not match: return None
-    prefix = match.group(); interpolated = '$' in prefix; verbatim = '@' in prefix
-    quote = "'" if prefix.endswith("'") else '"'
-    width = len(prefix) - len(prefix.rstrip('"')) if quote == '"' else 1
-    raw = width >= 3; dollars = prefix.count('$'); pos = start + len(prefix)
-    while pos < len(text):
-        if raw and text.startswith('"' * width, pos): return pos + width
-        if not raw and text[pos] == quote:
-            if verbatim and text.startswith('""', pos): pos += 2; continue
-            return pos + 1
-        if not raw and not verbatim and text[pos] == '\\': pos += 2; continue
-        if interpolated and text[pos] == '{':
-            if not raw and text.startswith('{{', pos): pos += 2; continue
-            count = len(text[pos:]) - len(text[pos:].lstrip('{'))
-            opening = dollars if raw else 1
-            if count < opening: pos += count; continue
-            pos += count; nesting = 1
-            while pos < len(text):
-                if text.startswith('//', pos):
-                    end = text.find('\n', pos); pos = len(text) if end < 0 else end; continue
-                if text.startswith('/*', pos):
-                    end = text.find('*/', pos + 2)
-                    if end < 0: raise ValueError('Unterminated interpolation comment')
-                    pos = end + 2; continue
-                nested = string_end(text, pos, depth + 1)
-                if nested is not None: pos = nested; continue
-                if text[pos] == '{': nesting += 1
-                if text[pos] == '}':
-                    nesting -= 1
-                    if nesting == 0:
-                        if not text.startswith('}' * opening, pos): raise ValueError('Unbalanced interpolation')
-                        pos += opening; break
-                pos += 1
-            else: raise ValueError('Unterminated interpolation')
-            continue
-        pos += 1
-    raise ValueError('Unterminated string')
-
-
-def lex(text):
-    tokens, pos, line = [], 0, 1
-    while pos < len(text):
-        ch = text[pos]
-        if ch.isspace():
-            line += ch == '\n'; pos += 1; continue
-        if text.startswith('//', pos):
-            end = text.find('\n', pos); pos = len(text) if end < 0 else end; continue
-        if text.startswith('/*', pos):
-            end = text.find('*/', pos + 2)
-            if end < 0: raise ValueError('Unterminated comment')
-            line += text[pos:end + 2].count('\n'); pos = end + 2; continue
-        if ch == '#' and not re.match(r'#(?:nullable\b|pragma\s+warning\b|region\b|endregion\b)', text[pos:]):
-            raise ValueError('Conditional or preprocessor source requires investigation')
-        if ch == '#':
-            end = text.find('\n', pos); pos = len(text) if end < 0 else end; continue
-        if ch == '$' or text.startswith('@$', pos) or text.startswith('"""', pos):
-            end = string_end(text, pos)
-            if end is None: raise ValueError('Unsupported string prefix')
-            tokens.append(Token('', line, 'computed_string'))
-            line += text[pos:end].count('\n'); pos = end; continue
-        start = line
-        verbatim = text.startswith('@"', pos)
-        if ch in '\"\'' or verbatim:
-            quote = '"' if verbatim else ch
-            pos += 2 if verbatim else 1
-            value = ''
-            while pos < len(text):
-                if text[pos] == quote:
-                    if verbatim and text.startswith('""', pos): value += '"'; pos += 2; continue
-                    pos += 1; break
-                if not verbatim and text[pos] == '\\':
-                    if pos + 1 >= len(text): raise ValueError('Unterminated string')
-                    escape = text[pos + 1]
-                    value += {'n': '\n', 'r': '\r', 't': '\t', '"': '"', "'": "'", '\\': '\\'}.get(escape, '\\' + escape)
-                    pos += 2; continue
-                line += text[pos] == '\n'; value += text[pos]; pos += 1
-            else: raise ValueError('Unterminated string')
-            tokens.append(Token(value, start, 'string' if quote == '"' else 'char')); continue
-        match = LEX.match(text, pos)
-        value = match.group(); tokens.append(Token(value.lstrip('@'), line)); pos += len(value)
-    return tokens
-
-
-def values(tokens):
-    return ' '.join(t.value if t.kind == 'code' else '<literal>' for t in tokens)
-
-
-def close(tokens, start, left='{', right='}'):
-    depth = 0
-    for i in range(start, len(tokens)):
-        if tokens[i].kind != 'code': continue
-        if tokens[i].value == left: depth += 1
-        if tokens[i].value == right:
-            depth -= 1
-            if depth == 0: return i
-    raise ValueError('Unbalanced declaration')
-
-
-def split(tokens, separator=','):
-    parts, start, stack = [], 0, []
-    for i, token in enumerate(tokens):
-        if token.kind != 'code': continue
-        if token.value in ('(', '[', '<', '{'): stack.append(token.value)
-        elif token.value in (')', ']', '>', '}') and stack: stack.pop()
-        elif token.value == separator and not stack: parts.append(tokens[start:i]); start = i + 1
-    return parts + [tokens[start:]]
-
-
-def attrs(tokens, start):
-    result, i = [], start
-    while i < len(tokens) and tokens[i].value == '[':
-        end = close(tokens, i, '[', ']')
-        for part in split(tokens[i+1:end]):
-            if len(part) > 1 and part[1].value == ':': part = part[2:]
-            paren = next((j for j, t in enumerate(part) if t.value == '('), len(part))
-            name = ''.join(t.value for t in part[:paren])
-            result.append((name.removesuffix('Attribute'), part[paren+1:-1] if paren < len(part) else []))
-        i = end + 1
-    return result, i
-
-
-def attr(attributes, name):
-    return next((args for key, args in attributes if key.split('.')[-1] == name), None)
-
-
-def literal_arg(args):
-    if args and len(args) == 1 and args[0].kind == 'string' and RESOURCE.fullmatch(args[0].value):
-        return args[0].value
-    return None
-
-
-class Reader:
-    def __init__(self, repo, files, excluded=()):
+class Reader(ModelDiscovery):
+    def __init__(self, repo, files, excluded=(), reviewed_bindings=None):
         self.repo = pathlib.Path(repo).resolve()
         self.files = sorted(set(files))
         self.excluded = set(excluded)
+        self.reviewed_bindings = reviewed_bindings or {}
         self.projects, self.sources, self.models = {}, {}, []
         self.gaps, self.technologies, self.observations, self.relationships = [], [], [], []
         self.tables = []
         self.solutions = []
         self.inspected_configurations = set()
+        self.entity_registry = {}
+        self.runtime_bindings = []
+        self.central_packages = {}
+        self.entity_relationships = []
 
-    def gap(self, path, line, reason):
+    def gap(self, path, line, reason, code=None, column=None, details=None):
         row = {'format': 'dotnet', 'ref': f'{path}:{line}', 'reason': reason}
+        if code: row['code'] = code
+        if details: row['details'] = details
+        position = getattr(self,'_active_position',None)
+        if column is not None: row['_column'] = column
+        elif position and position['path']==path and position['line']==line: row['_column'] = position['column']
+        scope = getattr(self,'_active_scope',None)
+        if scope and scope['path']==path: row['_scope'] = {'kind':'type','path':path,'symbol':scope['qualified'],'project':scope['project']}
         if row not in self.gaps: self.gaps.append(row)
 
     def read(self, path):
@@ -231,30 +104,47 @@ class Reader:
                 targets = [node.get('Path', '') for node in root.iter() if node.tag.split('}')[-1] == 'Project']
                 self.solutions.append({'path': path, 'project_references': self.solution_targets(path, targets)})
                 continue
-            project = {'path': path, 'refs': [f'{path}:1'], 'project_references': []}
+            project = {'path': path, 'refs': [f'{path}:1'], 'project_references': [], 'packages': []}
+            tag_offsets = {}
             for node in root.iter():
                 tag = node.tag.split('}')[-1]
+                positions = list(re.finditer(r'<(?:[\w]+:)?'+re.escape(tag)+r'(?=[\s>])',text))
+                offset = tag_offsets.get(tag,0); tag_offsets[tag] = offset+1
+                node_line = text.count('\n',0,positions[offset].start())+1 if offset<len(positions) else 1
                 if 'Condition' in node.attrib or tag in {'Import', 'Choose', 'Target'} or '$(' in ''.join(node.attrib.values()):
-                    self.gap(path, 1, 'Conditional/imported MSBuild settings are not evaluated; confirm source membership and package configuration')
+                    self.gap(path, node_line, 'Conditional/imported MSBuild settings are not evaluated; confirm source membership and package configuration')
                 if tag == 'Compile':
-                    self.gap(path, 1, 'Explicit Compile items require source-membership investigation')
+                    self.gap(path, node_line, 'Explicit Compile items require source-membership investigation')
                 if tag == 'EnableDefaultCompileItems' and (node.text or '').strip().lower() == 'false':
-                    self.gap(path, 1, 'Default C# source inclusion is disabled; confirm included sources')
+                    self.gap(path, node_line, 'Default C# source inclusion is disabled; confirm included sources')
                 if tag == 'ProjectReference':
                     target = node.get('Include', '').replace('\\', '/')
                     resolved = (self.repo / pathlib.PurePosixPath(path).parent / target).resolve()
-                    if target and resolved.is_relative_to(self.repo) and resolved.relative_to(self.repo).as_posix() in self.files:
+                    conditional = any('Condition' in ancestor.attrib for ancestor in root.iter() if node in list(ancestor.iter()))
+                    if conditional:
+                        self.gap(path,node_line,'Conditional project reference does not establish source membership',code='DOTNET_BUILD_MEMBERSHIP')
+                    elif target and resolved.is_relative_to(self.repo) and resolved.relative_to(self.repo).as_posix() in self.files:
                         project['project_references'].append(resolved.relative_to(self.repo).as_posix())
-                    else: self.gap(path, 1, 'Project reference is external, dynamic, or missing from the scanned inventory')
+                    else: self.gap(path, node_line, 'Project reference is external, dynamic, or missing from the scanned inventory')
                 if tag in {'PackageReference', 'PackageVersion'}:
                     package = node.get('Include', node.get('Update', ''))
+                    project['packages'].append({'name':package,'version':node.get('Version'),'conditional':any('Condition' in ancestor.attrib for ancestor in root.iter() if node in list(ancestor.iter())), 'ref':f'{path}:{node_line}'})
                     for prefix, technology in PACKAGES.items():
                         if package.lower() == prefix or package.lower().startswith(prefix + '.'):
-                            self.technologies.append({'technology': technology, 'evidence_kind': 'dependency', 'ref': f'{path}:1'})
+                            self.technologies.append({'technology': technology, 'evidence_kind': 'dependency', 'ref': f'{path}:{node_line}'})
                             break
                     if package.lower().startswith(('microsoft.entityframeworkcore', 'entityframework', 'dapper', 'mongodb', 'awssdk.dynamodb', 'microsoft.data.sqlclient', 'system.data.sqlclient')):
-                        self.gap(path, 1, 'Persistence dependency declared; investigate runtime usage and model coverage before accepting an empty or partial map')
+                        self.gap(path, node_line, 'Persistence dependency declared; investigate runtime usage and model coverage before accepting an empty or partial map')
             if path.endswith('.csproj'): self.projects[path] = project
+            elif pathlib.PurePosixPath(path).name=='Directory.Packages.props': self.central_packages[path] = project['packages']
+        for project in self.projects.values():
+            candidates = [p for p in self.central_packages if pathlib.PurePosixPath(project['path']).is_relative_to(pathlib.PurePosixPath(p).parent)]
+            nearest = max(candidates,key=lambda p:len(pathlib.PurePosixPath(p).parts)) if candidates else None
+            for package in project['packages']:
+                if package['version'] is not None or nearest is None: continue
+                definitions = [p for p in self.central_packages[nearest] if p['name'].lower()==package['name'].lower()]
+                if len(definitions)==1 and not definitions[0]['conditional']:
+                    package['version'] = definitions[0]['version']; package['version_ref'] = definitions[0]['ref']
 
     def parse(self, path, text):
         tokens = lex(text)
@@ -301,28 +191,47 @@ class Reader:
                 pending, modifiers = [], []
         declarations(0,len(tokens))
 
-    def resolve(self, name, owner):
+    def resolve(self, name, owner, required=True):
         name = name.replace('global::','').rstrip('?')
-        allowed, queue = {owner['project']}, [owner['project']]
-        while queue:
-            for target in self.projects.get(queue.pop(), {}).get('project_references', []):
-                if target not in allowed: allowed.add(target); queue.append(target)
-        matches = [m for m in self.models if m['project'] in allowed and m['qualified'] in {name, owner['namespace']+'.'+name}]
-        if not matches: matches = [m for m in self.models if m['project'] in allowed and m['name'] == name]
+        type_args = None
+        if '<' in name and name.endswith('>'):
+            root_name, argument_text = name.split('<',1)
+            try: type_args = [''.join(t.value for t in part) for part in split(lex(argument_text[:-1]))]
+            except ValueError: type_args = None
+            if type_args: name = root_name
+        matches = self.source_type_candidates(name,owner)
         if len(matches) != 1:
-            self.gap(owner['path'],owner['line'],'Referenced model is missing or ambiguous; resolve its namespace/project mapping')
+            if required: self.gap(owner['path'],owner['line'],'Referenced model is missing or ambiguous; resolve its namespace/project mapping',code='DOTNET_TYPE_MISSING' if not matches else 'DOTNET_TYPE_AMBIGUOUS',details={'requested_type':name,'candidate_definitions':[f"{m['path']}:{m['line']}" for m in matches]})
             return None
-        return matches[0]
+        target = matches[0]
+        if type_args is not None:
+            header = target['header']
+            if not header or header[0].value!='<': return None
+            end = close(header,0,'<','>')
+            parameters = [values(part) for part in split(header[1:end])]
+            if len(parameters)!=len(type_args) or not all(IDENT.fullmatch(p) for p in parameters):
+                if required: self.gap(owner['path'],owner['line'],'Generic type arguments cannot be bound to source parameters',code='DOTNET_GENERIC_BINDING')
+                return None
+            substitutions = dict(zip(parameters,type_args))
+            target = dict(target, qualified=target['qualified']+'<'+','.join(type_args)+'>',
+                          header=[Token(substitutions.get(t.value,t.value),t.line,t.kind) for t in header[end+1:]], type_arguments=substitutions)
+        return target
 
     def span(self, model, line):
-        text = self.sources[model['path']]['text']; lines=text.splitlines()
+        text = self.sources.get(model['path'],{}).get('text')
+        if text is None: text = self.read(model['path']) or ''
+        lines=text.splitlines()
         return {'path':model['path'],'start_line':line,'end_line':line,'start_column':1,
                 'end_column':len(lines[line-1])+1,'sha256':hashlib.sha256((self.repo/model['path']).read_bytes()).hexdigest(),
                 'extractor':'dotnet-structural@1'}
 
     def properties(self, model):
         try:
-            return self._properties(model)
+            properties = self._properties(model)
+            for prop in properties:
+                for parameter, argument in model.get('type_arguments',{}).items():
+                    prop['type'] = re.sub(r'\b'+re.escape(parameter)+r'\b',argument,prop['type'])
+            return properties
         except (ValueError, IndexError, RecursionError):
             self.gap(model['path'], model['line'], 'Unsupported or malformed member declaration requires source investigation')
             return []
@@ -335,7 +244,7 @@ class Reader:
                 attributes,j=attrs(param,0)
                 words=param[j:]
                 if len(words)>=2 and all(t.value != '=' for t in words):
-                    props.append({'name':words[-1].value,'type':''.join(t.value for t in words[:-1]),'line':words[-1].line,'attributes':attributes})
+                    props.append({'name':words[-1].value,'type':''.join(t.value for t in words[:-1]),'line':words[-1].line,'attributes':attributes,'column':words[-1].column})
                 else: self.gap(model['path'],model['line'],'Record parameter has unsupported mapping or default')
         while i < len(body):
             attributes,i=attrs(body,i)
@@ -351,7 +260,7 @@ class Reader:
                 backing = re.fullmatch(r'get \{ return (\w+) ; \} (?:(?:private|protected|internal) )?set \{ (\w+) = value ; \}', access)
                 backed = backing and backing[1] == backing[2] and re.search(r'\b'+re.escape(' '.join(t.value for t in words[:-1]))+r' '+re.escape(backing[1])+r' ;', values(body))
                 if IDENT.fullmatch(words[-1].value) and (re.fullmatch(r'get ; (?:(?:private|protected|internal) )?(?:set|init) ;',access) or backed):
-                    props.append({'name':words[-1].value,'type':''.join(t.value for t in words[:-1]),'line':words[-1].line,'attributes':attributes})
+                    props.append({'name':words[-1].value,'type':''.join(t.value for t in words[:-1]),'line':words[-1].line,'attributes':attributes,'column':words[-1].column})
                 else: self.gap(model['path'],head[0].line,'Public member is not a supported auto-property; investigate persisted fields, computed accessors or read-only mapping')
             i=end+1
             # Auto-property initializers do not change the declared shape; never emit their values.
@@ -400,44 +309,23 @@ class Reader:
 
     def _fluent_mapping(self, context, model):
         mapping = {'properties': {}, 'ignore': set(), 'navigation': set(), 'owned': set(), 'refs': [], 'table': None, 'schema': None}
-        body = self.method_body(context, 'OnModelCreating')
-        configurations = []
-        for statement in split(body, ';'):
-            if not statement: continue
-            chain = self.fluent_chain(statement)
-            if not chain:
-                self.gap(context['path'],statement[0].line,'Conditional or unsupported model-builder statement requires investigation'); continue
-            _, calls = chain
-            if len(calls) == 1 and calls[0][0] == 'HasDefaultSchema':
-                name = literal_arg(calls[0][2])
-                if name: mapping['schema'] = name; mapping['refs'].append(f"{context['path']}:{calls[0][3]}")
-                else: self.gap(context['path'],calls[0][3],'Dynamic default schema requires investigation')
-            elif len(calls) == 1 and calls[0][0] == 'ApplyConfiguration':
-                args = calls[0][2]
-                if values(args[:1]) == 'new' and values(args[-2:]) == '( )':
-                    config = self.resolve(''.join(t.value for t in args[1:-2]), context)
-                    if config:
-                        match = re.search(r'IEntityTypeConfiguration\s*<\s*([\w.]+)\s*>', values(config['header']))
-                        target = self.resolve(match[1], config) if match else None
-                        if target and target['qualified'] == model['qualified'] and target['project'] == model['project']:
-                            configurations.append(config)
-                            mapping['refs'].append(f"{context['path']}:{calls[0][3]}")
-                else: self.gap(context['path'],calls[0][3],'Dynamic configuration application requires investigation')
-            elif calls[0][0] != 'OnModelCreating':
-                self.gap(context['path'],calls[0][3],'Unsupported model-builder call may change storage; investigate mapping')
-        if len(configurations) > 1:
-            self.gap(context['path'],context['line'],'Multiple configurations target one entity; mapping precedence requires investigation')
+        discovered = self.discover_entities(context)
+        entry = discovered['entities'].get((model['project'],model['qualified']))
+        mapping['schema'] = discovered['schema']; mapping['refs'] = list(discovered['refs'])
+        if not entry: return mapping
+        mapping['registrations'] = entry['registrations']
+        for registration in entry['registrations']: mapping['refs'] += registration['refs']
+        if len(entry['configs']) > 1:
+            self.gap(context['path'],context['line'],'Multiple configurations target one entity; mapping precedence requires investigation', code='DOTNET_CONFIGURATION_PRECEDENCE')
             return mapping
-        for config in configurations:
+        for block in entry['blocks']:
+            config = block['owner']; body = block['body']; parameter = block['receiver']
             self.inspected_configurations.add((config['path'],config['qualified']))
-            body = self.method_body(config, 'Configure')
-            parameter = re.search(r'Configure \( EntityTypeBuilder < [\w .]+ > (\w+) \)', values(config['body']))
-            if not parameter:
-                self.gap(config['path'],config['line'],'Configuration builder parameter is unresolved'); continue
+            mapping['refs'] += block['refs']
             for statement in split(body, ';'):
                 if not statement: continue
                 chain = self.fluent_chain(statement)
-                if not chain or chain[0] != parameter[1]:
+                if not chain or chain[0] != parameter:
                     self.gap(config['path'],statement[0].line,'Conditional, reassigned or unsupported fluent builder requires investigation'); continue
                 _, calls = chain; method, generic, args, line = calls[0]
                 ref = f"{config['path']}:{line}"; mapping['refs'].append(ref)
@@ -453,7 +341,33 @@ class Reader:
                 if method == 'OwnsOne' and member and len(calls) == 1: mapping['owned'].add(member); continue
                 if method in {'HasOne','HasMany'}:
                     if member: mapping['navigation'].add(member)
-                    self.gap(config['path'],line,'Relationship foreign-key and navigation mapping requires review beyond scalar fields')
+                    target_name = ''.join(t.value for t in generic)
+                    if not target_name and member:
+                        declaration = next((p for p in self.inherited_properties(model) if p['name']==member),None)
+                        if declaration:
+                            target_name = declaration['type'].rstrip('?')
+                            collection = re.fullmatch(r'(?:ICollection|IReadOnlyCollection|List|IEnumerable)<(.+)>',target_name)
+                            if collection: target_name = collection[1]
+                    target = self.resolve(target_name,model,required=False) if target_name else None
+                    foreign_keys = []
+                    unsupported = False
+                    inverse = None
+                    for operation, dependent_type, arguments, _ in calls[1:]:
+                        if operation == 'HasForeignKey':
+                            if dependent_type and ''.join(t.value for t in dependent_type) not in {model['name'],model['qualified']}: unsupported=True
+                            selector = self.member_selector(arguments)
+                            if selector: foreign_keys.append(selector)
+                            else: unsupported = True
+                        elif operation in {'WithOne','WithMany'}:
+                            inverse = 'one' if operation=='WithOne' else 'many'
+                            if arguments and not self.member_selector(arguments): unsupported=True
+                        elif operation not in {'OnDelete','IsRequired'}: unsupported = True
+                    edge = {'source_model':model['qualified'],'target_model':target['qualified'] if target else None,
+                            'navigation':member,'kind':'many' if method=='HasMany' else 'one','foreign_key_members':foreign_keys,
+                            'cardinality':{'source_to_target':'many' if method=='HasMany' else 'one','target_to_source':inverse},'foreign_key_representation':'clr_members',
+                            'refs':sorted(set(mapping['refs']+[ref])),'status':'unresolved' if unsupported or not target else 'modeled'}
+                    mapping.setdefault('entity_relationships',[]).append(edge)
+                    if unsupported or not target: self.gap(config['path'],line,'Relationship target or foreign-key mapping is unresolved',code='DOTNET_RELATIONSHIP_BINDING')
                     continue
                 if method in {'HasKey','HasIndex'}:
                     self.gap(config['path'],line,'Key/index configuration requires review beyond scalar field mapping'); continue
@@ -467,16 +381,25 @@ class Reader:
                         name = literal_arg(arguments)
                         if name: prop[operation] = name
                         else: self.gap(config['path'],operation_line,'Dynamic column or backing-field mapping requires investigation')
+                    elif operation == 'HasColumnType':
+                        if len(arguments)==1 and arguments[0].kind=='string' and re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*(?:\([0-9]+(?:,[0-9]+)?\))?(?:\[\])?',arguments[0].value): prop['database_type']=arguments[0].value
+                        else: self.gap(config['path'],operation_line,'Database type declaration is dynamic or unsupported',code='DOTNET_DATABASE_TYPE')
                     elif operation == 'HasConversion':
                         converted = ''.join(t.value for t in type_args)
                         if converted == 'string' and not arguments: prop['conversion'] = converted
-                        else: self.gap(config['path'],operation_line,'Custom conversion requires explicit stored-type investigation')
+                        else:
+                            prop['conversion_unresolved'] = True
+                            self.gap(config['path'],operation_line,'Custom conversion requires explicit stored-type investigation')
                     elif operation not in {'HasMaxLength','IsRequired','UseHiLo','ValueGeneratedNever','ValueGeneratedOnAdd','HasPrecision'}:
                         self.gap(config['path'],operation_line,'Unsupported property configuration may change stored shape')
                 mapping['properties'][member] = prop
+        for member in mapping['ignore'] & (set(mapping['properties']) | mapping['owned']):
+            self.gap(context['path'],context['line'],'Excluded member also has explicit persistence mapping; resolve precedence',code='DOTNET_MEMBER_PRECEDENCE')
         return mapping
 
-    def declared_backing_fields(self, model):
+    def declared_backing_fields(self, model, seen=()):
+        key = (model['project'],model['qualified'])
+        if key in seen or len(seen)>=16: return {}
         fields = {}; tokens = model['body']; i = 0
         while i < len(tokens):
             attributes, i = attrs(tokens, i); start = i
@@ -488,7 +411,19 @@ class Reader:
             head = head[:next((j for j,t in enumerate(head) if t.value == '='),len(head))]
             words = [t for t in head if t.value not in {'public','private','protected','internal','readonly','volatile'}]
             if len(words) < 2 or not IDENT.fullmatch(words[-1].value) or any(t.value == 'static' for t in words): continue
-            fields[words[-1].value] = {'name':words[-1].value,'type':''.join(t.value for t in words[:-1]),'line':words[-1].line,'attributes':attributes,'owner':model}
+            fields[words[-1].value] = {'name':words[-1].value,'type':''.join(t.value for t in words[:-1]),'line':words[-1].line,'attributes':attributes,'owner':model,'column':words[-1].column}
+        for field in fields.values():
+            for parameter, argument in model.get('type_arguments',{}).items(): field['type']=re.sub(r'\b'+re.escape(parameter)+r'\b',argument,field['type'])
+        colon = next((i for i,t in enumerate(model['header']) if t.value==':'),None)
+        if colon is not None:
+            for part in split(model['header'][colon+1:]):
+                base = self.resolve(''.join(t.value for t in part),model,required=False)
+                if base and base['kind'] != 'interface':
+                    for name, field in self.declared_backing_fields(base,(*seen,key)).items():
+                        if name in fields:
+                            fields.pop(name,None)
+                            self.gap(model['path'],model['line'],'Inherited backing-field name is ambiguous',code='DOTNET_BACKING_BINDING')
+                        else: fields[name] = field
         return fields
 
     def inherited_properties(self, model, seen=()):
@@ -502,8 +437,12 @@ class Reader:
         for part in split(header[colon+1:]):
             name = ''.join(t.value for t in part)
             if name in {'object','System.Object'}: continue
-            if '<' in name:
-                self.gap(model['path'],model['line'],'Generic inherited model requires type substitution; base members remain unresolved'); continue
+            framework = external_properties(self,name,model) if not self.source_type_candidates(name,model) else None
+            if framework is not None:
+                for prop in framework:
+                    if any(p['name'] == prop['name'] for p in props): self.gap(model['path'],model['line'],'Source member conflicts with framework contract; resolve storage mapping',code='DOTNET_EXTERNAL_SHADOW')
+                    else: props.append(prop)
+                continue
             base = self.resolve(name, model)
             if base is None:
                 self.gap(model['path'],model['line'],'External or unresolved inherited model: base fields and framework storage definitions are not synthesized'); continue
@@ -516,15 +455,29 @@ class Reader:
         return props
 
     def fields(self, model, dialect, seen=(), mapping=None):
+        previous = getattr(self,'_active_scope',None)
+        position = getattr(self,'_active_position',None)
+        self._active_scope = model; self._active_position = None
+        try: return self._fields(model,dialect,seen,mapping)
+        finally: self._active_scope = previous; self._active_position = position
+
+    def _fields(self, model, dialect, seen=(), mapping=None):
         if model['qualified'] in seen or len(seen)>=8:
             self.gap(model['path'],model['line'],'Recursive or deep nested model requires shape investigation'); return []
-        if 'partial' in model['modifiers'] or any(t.value == '<' for t in model['header']):
+        if 'partial' in model['modifiers'] or (model['header'] and model['header'][0].value=='<'):
             self.gap(model['path'],model['line'],'Partial or generic model requires investigation beyond declared members')
         out=[]
         props = self.inherited_properties(model)
         if mapping:
             backing = self.declared_backing_fields(model)
             for name, config in mapping['properties'].items():
+                if config.get('HasField'):
+                    field = backing.get(config['HasField'])
+                    declaration = next((p for p in props if p['name']==name),None)
+                    if field is None or (declaration and field['type']!=declaration['type']):
+                        config['backing_unresolved']=True
+                        self.gap(model['path'],model['line'],'Backing field is missing or its type conflicts with the mapped property',code='DOTNET_BACKING_BINDING')
+                    elif field: config['backing_evidence']=[self.span(field['owner'],field['line'])]
                 if not any(p['name'] == name for p in props):
                     field = backing.get(config.get('HasField', name))
                     if field: props.append(dict(field, name=name))
@@ -536,6 +489,7 @@ class Reader:
             config = mapping['properties'].get(prop['name'], {}) if mapping else {}
 
             origin = prop['owner']
+            self._active_position = {'path':origin['path'],'line':prop['line'],'column':prop.get('column',1)}
             attributes=prop['attributes']
             ignored={'sql':'NotMapped','mongo':'BsonIgnore','dynamo':'DynamoDBIgnore','query':'__none__'}[dialect]
             if attr(attributes,ignored) is not None: continue
@@ -549,13 +503,17 @@ class Reader:
                     mapped=literal_arg(args)
                     if mapped: name=mapped
                     else: self.gap(model['path'],prop['line'],'Nonliteral or configured property mapping requires investigation')
-            known={ignored,rename,'Key','Required','MaxLength','StringLength','BsonId','BsonIgnoreIfNull','BsonIgnoreIfDefault','DynamoDBHashKey','DynamoDBRangeKey','DynamoDBVersion'}
+            known=VALIDATION_ATTRIBUTES | SERIALIZATION_ATTRIBUTES | {ignored,rename,'Key','Required','MaxLength','StringLength','BsonId','BsonIgnoreIfNull','BsonIgnoreIfDefault','DynamoDBHashKey','DynamoDBRangeKey','DynamoDBVersion'}
             if any(key.split('.')[-1] not in known for key,_ in attributes):
                 self.gap(model['path'],prop['line'],'Unsupported member attribute may change stored shape; investigate serializer/converter semantics')
             if config.get('HasColumnName'): name = config['HasColumnName']
             shape=prop['type']; base=shape.rstrip('?'); optional=shape.endswith('?')
             if mapping and prop['name'] in mapping['owned']:
                 child = self.resolve(base, origin)
+                if child and attr(child['attributes'],'Table') is not None:
+                    self.gap(child['path'],child['line'],'Owned type declares a separate table; table splitting needs an explicit adapter',code='DOTNET_OWNED_TABLE')
+                    continue
+                mapping.setdefault('entity_relationships',[]).append({'source_model':model['qualified'],'target_model':child['qualified'] if child else None,'navigation':prop['name'],'kind':'owned','refs':mapping['refs'],'status':'modeled' if child else 'unresolved'})
                 nested = self.fields(child, dialect, (*seen,model['qualified'])) if child else []
                 for field in nested:
                     field['name'] = prop['name'] + '_' + field['name']
@@ -599,8 +557,16 @@ class Reader:
                 else: self.gap(model['path'],prop['line'],'String conversion source is not a resolved enum; stored representation requires investigation')
             if item: info={'kind':'array','name':shape,'items':[info], 'open':info.get('open',False)}
             if members: info['members']=[{'name':member['name']} for member in members]
+            serialization = [{'attribute':key, 'name':literal_arg(args)} for key,args in attributes if key.split('.')[-1] in SERIALIZATION_ATTRIBUTES]
             field={'name':name,'line':prop['line'],'shape':shape,'type':info,'optional':optional,
-                   'evidence':[self.span(origin,prop['line']), *enum_evidence], 'members':members}
+                   'evidence':[self.span(origin,prop['line']), *enum_evidence, *config.get('backing_evidence',[])], 'members':members,
+                   'clr_type':prop['type'],'storage_type':{'kind':'unknown','reason':'custom_conversion'} if config.get('conversion_unresolved') or config.get('backing_unresolved') else {**info,'database_type':config.get('database_type'),'verification':'modeled'},
+                   'serialization':{'status':'attributes_only' if serialization else 'unestablished','attributes':serialization}}
+            if prop.get('framework_contract'):
+                field['framework_contract'] = prop['framework_contract']
+                for ref in prop['framework_contract']['package_refs']:
+                    path,line = ref.rsplit(':',1)
+                    field['evidence'].append(self.span({'path':path},int(line)))
             if mapping:
                 for ref in mapping['refs']:
                     path, line = ref.rsplit(':', 1)
@@ -616,9 +582,13 @@ class Reader:
         identity=json.dumps([owner.get('binding_scope', owner['project']),dialect,store],sort_keys=True)
         key='dotnet_'+dialect+'_'+hashlib.sha256(identity.encode()).hexdigest()[:16]
         fields=self.fields(model,dialect,mapping=mapping)
+        for edge in (mapping or {}).get('entity_relationships',[]):
+            record = dict(edge, dataset=key, collection=table, schema_path=model['path'])
+            if record not in self.entity_relationships: self.entity_relationships.append(record)
         refs=sorted({f"{owner['path']}:{line}",f"{model['path']}:{model['line']}", *(mapping['refs'] if mapping else [])})
         self.relationships.append({'dataset':key,'collection':table,'model':model['qualified'],'kind':kind,
-                                   'schema_path':model['path'],'identity_basis':'modeled_reference','physical_identity':'unverified','refs':refs})
+                                   'schema_path':model['path'],'identity_basis':'modeled_reference','physical_identity':'unverified','refs':refs,
+                                   'registrations':mapping.get('registrations',[]) if mapping else []})
         if fields:
             self.observations.append({'path':model['path'],'boundary':key,'relationship_bound':True,'binding_refs':refs,
                                      'kind':'dotnet','role':'canonical','collections':[{'name':table,'refs':refs,
@@ -651,7 +621,7 @@ class Reader:
         return imports
 
     def connection_bindings(self, model):
-        bindings = []
+        bindings = []; conditional = False
         for path, source in self.sources.items():
             if source['project'] not in self.projects: continue
             allowed, queue = {source['project']}, [source['project']]
@@ -661,18 +631,25 @@ class Reader:
             if model['project'] not in allowed: continue
             tokens = source['tokens']
             for i, token in enumerate(tokens):
-                if token.kind != 'code' or token.value not in {'AddDbContext','AddDbContextPool','AddNpgsqlDbContext'}: continue
-                if values(tokens[i+1:i+4]) != '< '+model['name']+' >': continue
-                candidates = [m for m in self.models if m['name'] == model['name'] and m['project'] in allowed]
+                call = registration_call(tokens,i)
+                if not call: continue
+                typename, args, adapter = call
+                if typename not in {model['name'],model['qualified']}: continue
+                if i>=2 and tokens[i-1].value=='.':
+                    owner={'path':path,'line':token.line,'project':source['project'],'namespace':''}
+                    if self.source_type_candidates(tokens[i-2].value,owner):
+                        self.gap(path,token.line,'Registration receiver is source-defined; trace its implementation before using a framework adapter',code='DOTNET_REGISTRATION_BINDING')
+                        continue
+                candidates = [m for m in self.models if (m['name'] == typename or m['qualified'] == typename) and m['project'] in allowed]
                 if len(candidates) != 1:
                     self.gap(path, token.line, 'Context registration is ambiguous across referenced projects'); continue
-                opening = i + 4
-                if opening >= len(tokens) or tokens[opening].value != '(': continue
-                try: end = close(tokens, opening, '(', ')')
-                except ValueError: continue
-                args = tokens[opening+1:end]; key = None; provider = None
-                if token.value == 'AddNpgsqlDbContext':
-                    key = literal_arg(split(args)[0]); provider = 'postgresql'
+                conditions = runtime_conditions(tokens,i)
+                if conditions:
+                    conditional = True
+                    self.gap(path,token.line,'Runtime-conditional context registration requires branch-specific binding evidence',code='DOTNET_RUNTIME_BRANCH')
+                key = None; provider = None
+                if adapter['connection'] == 'literal':
+                    key = literal_arg(split(args)[0]); provider = adapter['provider']
                 else:
                     providers = {t.value for t in args if t.kind == 'code'} & {'UseSqlServer','UseNpgsql'}
                     if len(providers) == 1:
@@ -690,9 +667,13 @@ class Reader:
                         if len(host) > 1: self.gap(path, token.line, 'Multiple Aspire resources match this connection; logical datastore is ambiguous')
                         identity = ['connection_key', provider, key]
                     bindings.append((scope, identity, refs))
-                else: self.gap(path, token.line, 'Context connection registration is dynamic or unsupported; supply a logical connection binding')
+                    trace = {'adapter_id':adapter['adapter_id'],'runtime_project':source['project'],'client':model['qualified'],'logical_connection':{'provider':provider,'key':key},'conditions':conditions,'refs':refs,'physical_identity':'unverified','binding_scope':scope,'status':'conditional' if conditions else 'candidate','datastore':None}
+                    if trace not in self.runtime_bindings: self.runtime_bindings.append(trace)
+                else:
+                    self.runtime_bindings.append({'adapter_id':adapter['adapter_id'],'runtime_project':source['project'],'client':model['qualified'],'logical_connection':{'provider':provider,'key':None},'conditions':conditions,'refs':[f'{path}:{token.line}'],'physical_identity':'unverified','binding_scope':source['project'],'status':'unresolved','datastore':None})
+                    self.gap(path, token.line, 'Context connection registration is dynamic or unsupported; supply a logical connection binding')
         unique = {(scope, json.dumps(identity)) for scope,identity,_ in bindings}
-        if len(unique) == 1:
+        if len(unique) == 1 and not conditional:
             scope, identity, _ = bindings[0]
             return scope, identity, sorted({ref for _,_,refs in bindings for ref in refs})
         self.gap(model['path'],model['line'],'DbContext connection target is unresolved or ambiguous; confirm whether contexts share a physical datastore')
@@ -755,10 +736,14 @@ class Reader:
             local_ef = 'EntityFrameworkCore' in code or 'System . Data . Entity' in code
             global_ef = bool(import_refs) and bool(re.search(r'(?<!:):\s*DbContext\b', header))
             identity_context = re.search(r':\s*IdentityDbContext\s*<\s*([\w.]+)\s*>', header)
-            context = (bool(re.search(r'\bDbContext\b', header)) and (local_ef or global_ef)) or bool(identity_context and (local_ef or import_refs))
+            context = self.context_kind(model)
             if context:
                 scope, store, connection_refs = self.connection_bindings(model)
                 owner = dict(model, binding_scope=scope)
+                for trace in self.runtime_bindings:
+                    if trace['client']==model['qualified'] and trace['binding_scope']==scope:
+                        trace['datastore'] = 'dotnet_sql_'+hashlib.sha256(json.dumps([scope,'sql',store],sort_keys=True).encode()).hexdigest()[:16]
+                        trace['status'] = 'conditional' if trace['conditions'] else ('unresolved' if store[0]=='context' else 'modeled')
                 if identity_context:
                     target = self.resolve(identity_context[1], model)
                     self.gap(model['path'],model['line'],'Identity framework table names and inherited framework fields require source or schema evidence; custom user fields are provisional')
@@ -768,11 +753,10 @@ class Reader:
                         if len(self.observations) > before:
                             self.observations[-1]['binding_refs'] += import_refs + connection_refs
                             self.relationships[-1]['refs'] = sorted(set(self.relationships[-1]['refs'] + import_refs + connection_refs))
-                for prop in self.properties(model):
-                    match=re.fullmatch(r'(?:Microsoft\.EntityFrameworkCore\.)?DbSet<(.+)>',prop['type'])
-                    if not match: continue
-                    target=self.resolve(match[1],model)
-                    if not target: continue
+                discovered = self.discover_entities(model)
+                for entry in discovered['entities'].values():
+                    target = entry['target']
+                    prop = {'name':entry['table'],'line':model['line']}
                     table=prop['name']; annotation=attr(target['attributes'],'Table')
                     if annotation is not None:
                         parts=split(annotation); table=literal_arg(parts[0])
@@ -782,7 +766,9 @@ class Reader:
                         if len(parts)>1:
                             if len(parts)==2 and values(parts[1][:2])=='Schema =' and literal_arg(parts[1][2:]): table=literal_arg(parts[1][2:])+'.'+table
                             else: self.gap(target['path'],target['line'],'Unsupported table attribute arguments')
-                    if attr(target['attributes'],'NotMapped') is not None: continue
+                    if attr(target['attributes'],'NotMapped') is not None:
+                        if any(r['kind']!='dbset' for r in entry['registrations']): self.gap(target['path'],target['line'],'Explicit entity registration conflicts with NotMapped; resolve precedence',code='DOTNET_MEMBER_PRECEDENCE')
+                        continue
                     mapping = self.fluent_mapping(model, target)
                     if mapping['table']: table = mapping['table']
                     if mapping['schema'] and '.' not in table: table = mapping['schema'] + '.' + table
@@ -887,8 +873,8 @@ class Reader:
             try: self.parse(path,text)
             except (ValueError,IndexError,RecursionError) as exc:
                 del self.models[before:]; self.sources.pop(path,None)
-                self.gap(path,1,'C# extraction limitation: ' + str(exc) + '; inspect declarations before claiming coverage')
-        shadowed = {'DbContext','DbSet','TableAttribute','ColumnAttribute','NotMappedAttribute','DynamoDBTableAttribute','DynamoDBPropertyAttribute','BsonElementAttribute','BsonIgnoreAttribute'}
+                self.gap(path,getattr(exc,'line',1),'C# extraction limitation: ' + str(exc) + '; inspect declarations before claiming coverage',code='DOTNET_BUILD_MEMBERSHIP' if 'preprocessor' in str(exc) else 'DOTNET_SOURCE_SYNTAX')
+        shadowed = {'DbContext','DbSet','TableAttribute','ColumnAttribute','NotMappedAttribute','ModelBuilder','IEntityTypeConfiguration','EntityTypeBuilder','DynamoDBTableAttribute','DynamoDBPropertyAttribute','BsonElementAttribute','BsonIgnoreAttribute'}
         for model in self.models:
             if model['name'] in shadowed:
                 self.gap(model['path'],model['line'],'Local type shadows a recognized framework symbol; investigate symbol identity')
@@ -908,15 +894,19 @@ class Reader:
         self.gaps = [gap for gap in self.gaps if not (gap['reason'].startswith('Persistence dependency declared')
                      and any((gap['ref'].rsplit(':',1)[0], tech['technology']) in mapped
                              for tech in self.technologies if tech['ref'] == gap['ref']))]
-        return {'solutions':self.solutions,'projects':list(self.projects.values()),'technologies':sorted(self.technologies,key=lambda r:(r['ref'],r['technology'])),
+        for path, bindings in self.reviewed_bindings.items():
+            if path.endswith('.cs') and len(bindings)>1:
+                self.gap(path,1,'Multiple reviewed bindings for one C# model need per-relationship investigation.',code='DOTNET_REVIEWED_BINDING')
+        self.gaps = finalize_diagnostics(self)
+        return {'diagnostic_summary':diagnostic_summary(self.gaps),'runtime_bindings':self.runtime_bindings,'entity_relationships':self.entity_relationships,'solutions':self.solutions,'projects':list(self.projects.values()),'technologies':sorted(self.technologies,key=lambda r:(r['ref'],r['technology'])),
                 'relationships':self.relationships,'observations':self.observations,'tables':self.tables,
                 'gaps':sorted(self.gaps,key=lambda r:(r['ref'],r['reason']))}
 
 
-def discover(repo,files,excluded=()):
-    return Reader(repo,files,excluded).run()
+def discover(repo,files,excluded=(),reviewed_bindings=None):
+    return Reader(repo,files,excluded,reviewed_bindings).run()
 
 
 if __name__=='__main__':
     request = json.load(sys.stdin)
-    print(json.dumps(discover(sys.argv[1], request['files'], request.get('excluded', [])), sort_keys=True))
+    print(json.dumps(discover(sys.argv[1], request['files'], request.get('excluded', []), request.get('reviewed_bindings')), sort_keys=True))

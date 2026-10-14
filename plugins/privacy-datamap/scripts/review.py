@@ -438,7 +438,7 @@ def build_outputs(document, result, derived, candidate, errors):
             "progress": scan_progress(document, result, derived, errors, blockers),
             "observation_digest": result["observation_digest"],
             "collection_mode": "candidate" if result.get("candidate_context") else "manifest",
-            "data_map": {"dotnet": {key: derived.get("dotnet", {}).get(key, []) for key in ("projects", "solutions", "technologies", "relationships")}, "system_flows": [{"system": s["fides_key"], "direction": k, "resources": s[k]} for s in candidate.get("system", []) for k in ("ingress", "egress") if s.get(k)], "stores": stores, "processing_activities": activities, "monitoring_scope": result.get("monitoring_scope", {}), "connection_questions": (derived.get("relationship_mapping") or {}).get("questions", []), "relationship_proposal": document.get("relationship_proposal")},
+            "data_map": {"dotnet": {"diagnostic_summary": derived.get("dotnet", {}).get("diagnostic_summary", {}), **{key: derived.get("dotnet", {}).get(key, []) for key in ("projects", "solutions", "technologies", "relationships", "runtime_bindings", "entity_relationships", "gaps")}}, "system_flows": [{"system": s["fides_key"], "direction": k, "resources": s[k]} for s in candidate.get("system", []) for k in ("ingress", "egress") if s.get(k)], "stores": stores, "processing_activities": activities, "monitoring_scope": result.get("monitoring_scope", {}), "connection_questions": (derived.get("relationship_mapping") or {}).get("questions", []), "relationship_proposal": document.get("relationship_proposal")},
             "review_queue": {"structural_blockers": blockers, "analysis_errors": errors,
                              "field_groups": [] if blockers else [groups[key] for key in sorted(groups)],
                              "technical_coverage": technical,
@@ -497,6 +497,13 @@ def render_outputs(outputs):
     if dotnet.get("projects") or dotnet.get("technologies") or dotnet.get("relationships"):
         data_map.extend(["## .NET discovery and modeled relationships", "",
                          "Dependencies and source signals are evidence for investigation. Modeled references do not establish physical database identity or deployed storage.", ""])
+        diagnostic_counts = dotnet.get("diagnostic_summary", {})
+        if diagnostic_counts:
+            data_map.append(f"Extraction diagnostics: {diagnostic_counts.get('diagnostics', 0)} grouped items from {diagnostic_counts.get('occurrences', 0)} source occurrences. These are separate from field-classification and approval work.")
+            for category, count in diagnostic_counts.get("by_category", {}).items():
+                data_map.append(f"- {category}: {count}")
+        for diagnostic in dotnet.get("gaps", []):
+            data_map.append(f"- {diagnostic.get('diagnostic_id', diagnostic['ref'])} [{diagnostic.get('category', 'unsupported_semantics')}]: {diagnostic['reason']} Resolution: {diagnostic.get('resolution_requirement', 'Investigate the cited source.')} Evidence: {', '.join(o['ref'] for o in diagnostic.get('occurrences', [diagnostic]))}")
         for item in dotnet.get("technologies", []):
             data_map.append(f"- {item['technology']} ({item['evidence_kind']}): {item['ref']}")
         for edge in dotnet.get("relationships", []):
