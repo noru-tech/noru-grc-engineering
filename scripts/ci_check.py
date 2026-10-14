@@ -562,7 +562,55 @@ def step_scan(report, piece_dir, decl, repo, manifest_path, on_missing_prereq):
     return "tooling"
 
 
-def step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path):
+def renewal_base(repo, artifact, base_ref):
+    """The commit an agent's renewal is judged against, or None when it cannot be read.
+
+    With --base-ref, the merge base, as the policy step uses. Without it, the commit the manifest
+    was changed against: HEAD when the working tree changes it, otherwise HEAD's first parent, which
+    on a push to a protected branch is the branch before the merge.
+    """
+    if git_read(repo, "rev-parse", "--git-dir") is None:
+        return None
+    if base_ref:
+        if git_read(repo, "rev-parse", "--verify", "--quiet", f"{base_ref}^{{commit}}") is None:
+            return None
+        merge_base = git_read(repo, "merge-base", "HEAD", base_ref)
+        return merge_base.strip() if merge_base else None
+    if git_read(repo, "diff", "--quiet", "HEAD", "--", artifact) is None:
+        head = git_read(repo, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+        return head.strip() if head else None
+    parent = git_read(repo, "rev-parse", "--verify", "--quiet", "HEAD^1^{commit}")
+    return parent.strip() if parent else None
+
+
+def renewal_args(piece_dir, decl, repo, base_ref):
+    """--base and --interpretation-policy, both as they stood at the base revision.
+
+    Only for a piece that lets an agent own a claim. Reading the policy from the base means a pull
+    request that widens it is judged by the policy it would replace. A file absent there is passed
+    as an empty one; a base that cannot be read at all is passed as an empty flag, and the
+    validator then refuses every agent-owned claim rather than taking it on trust.
+    """
+    owners = decl.get("interpretation", {}).get("agent_owners")
+    if not owners:
+        return [], None
+    commit = renewal_base(repo, decl["artifact"], base_ref)
+    if commit is None:
+        return ["--base=", "--interpretation-policy="], "unavailable"
+    cache = repo / ".noru" / ".cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    args = []
+    for flag, rel, suffix in (
+        ("--base", decl["artifact"], "base-manifest.yml"),
+        ("--interpretation-policy", owners["policy"], "base-interpretation-policy.yml"),
+    ):
+        target = cache / f"{piece_dir.name}.{suffix}"
+        target.write_text(git_read(repo, "show", f"{commit}:{rel}") or "", encoding="utf-8")
+        args.append(f"{flag}={target}")
+    return args, commit[:12]
+
+
+def step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path, base_ref=None):
     entry = piece_dir / decl["validator"]["entrypoint"]
     if not entry.is_file():
         report.step("validate", "error", detail=f"validator entrypoint {entry} does not exist")
@@ -570,6 +618,8 @@ def step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path):
     if not manifest_path.is_file():
         report.step("validate", "blocked", detail=f"no manifest at {manifest_path}")
         return "blocked"
+    renewal, base = renewal_args(piece_dir, decl, repo, base_ref)
+    judged = {"renewal_base": base} if base else {}
 
     parsed_path.parent.mkdir(parents=True, exist_ok=True)
     # No --as-of is passed, even to a validator that accepts one. Time is checked once, in the
@@ -583,6 +633,7 @@ def step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path):
             f"--emit-parsed={parsed_path}",
             "--output=json",
             "--quiet",
+            *renewal,
         ]
     )
     if failure:
@@ -591,11 +642,11 @@ def step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path):
 
     result = parse_child_json(completed)
     if completed.returncode == 0:
-        report.step("validate", "pass", counts=(result or {}).get("counts"))
+        report.step("validate", "pass", counts=(result or {}).get("counts"), **judged)
         return "ok"
     if completed.returncode == 1 and result is not None:
         errors = result.get("errors") or []
-        report.step("validate", "fail", errors=len(errors))
+        report.step("validate", "fail", errors=len(errors), **judged)
         for error in errors[:MAX_EXPLAINED_ITEMS]:
             report.find(
                 "invalid",
@@ -1252,7 +1303,9 @@ def main(argv):
                 report, piece_dir, decl, repo, manifest_path, opts["on_missing_prerequisite"]
             )
         elif step == "validate":
-            outcome = step_validate(report, piece_dir, decl, repo, manifest_path, parsed_path)
+            outcome = step_validate(
+                report, piece_dir, decl, repo, manifest_path, parsed_path, opts["base_ref"]
+            )
         elif step == "expiry":
             outcome = step_expiry(report, repo, parsed_path, expiry_policy)
         elif step == "policy":

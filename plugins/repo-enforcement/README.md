@@ -24,7 +24,8 @@ session and never requests a pasted token. Noru writes remain separate.
 - `.noru/enforcement.yml` — desired policy.
 - `.noru/enforcement-baseline.json` — exact, expiring legacy-debt acceptances in ratchet mode.
 - `.github/workflows/noru-grc.yml` — always-running, credential-free validation.
-- `.github/CODEOWNERS` — merged managed block protecting GRC policy and workflow paths.
+- `.github/CODEOWNERS` — merged managed block protecting GRC policy and workflow paths, including
+  everything under `.noru/` such as the interpretation policy that grants agent renewals.
 
 Cache-only candidates and plans live under `.noru/.cache/`.
 

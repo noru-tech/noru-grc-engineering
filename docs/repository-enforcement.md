@@ -17,8 +17,10 @@ piece collectors -> committed .noru manifests -> offline aggregate check
 Run `/repo-enforcement:setup` to inspect first and create an exact local-file plan. Setup needs the
 real review teams, strict or ratchet cutover, exception lifetime, break-glass team, rollout scope,
 and the full commit SHA of the released action. It preserves unrelated CODEOWNERS entries and
-protects the policy, workflow, action, and CODEOWNERS paths. Applying that file plan needs a separate
-confirmation and does not administer GitHub.
+protects the policy, workflow, action, and CODEOWNERS paths. Everything under `.noru/` is behind the
+GRC reviewers, including `.noru/interpretation-policy.yml`, the file that says which agents may
+renew which claims. Applying that file plan needs a separate confirmation and does not administer
+GitHub.
 
 Strict mode accepts no existing failure. Ratchet mode matches only a complete normalized violation
 fingerprint under the current policy digest. A candidate baseline is not an approval: every accepted

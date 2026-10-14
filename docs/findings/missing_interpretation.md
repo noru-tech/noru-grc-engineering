@@ -59,6 +59,11 @@ interpretation:
 Add the block. `owner` names a person, not a team alias; `expires_at` says when it must be looked at
 again.
 
+In `privacy-datamap`, a collection a person signed may instead be renewed by an agent whose
+`operator` is a named person, under a grant in `.noru/interpretation-policy.yml`, as long as the
+collection has not changed since. A missing block on a new or changed collection is still a
+person's to fill in. See [requirement 8](../../contract/README.md#on-requirement-8-and-why-it-is-worth-the-friction).
+
 ## Recording a disposition
 
 As for [`needs_review`](./needs_review.md#recording-a-disposition): an exact violation can be

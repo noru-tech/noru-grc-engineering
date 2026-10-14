@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/interpretation-policy.schema.json",
+  "title": "Interpretation policy (.noru/interpretation-policy.yml)",
+  "description": "Which agents may own which claims, who answers for them, and for how long. Committed, protected by CODEOWNERS through repo-enforcement, and read from the base revision in CI, so a pull request that widens it is judged by the policy it would replace. The policy can only narrow what a piece's validator allows: an agent may only renew a claim anchored to a structure a person signed, and no grant can give it anything else.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "grants"
+  ],
+  "properties": {
+    "kind": {
+      "const": "interpretation-policy"
+    },
+    "version": {
+      "const": 1
+    },
+    "grants": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/grant"
+      }
+    }
+  },
+  "$defs": {
+    "grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "piece",
+        "claims",
+        "agents",
+        "operators",
+        "max_days"
+      ],
+      "properties": {
+        "id": {
+          "description": "What an agent-owned claim names in interpretation.policy_ref.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "piece": {
+          "description": "A piece that declares interpretation.agent_owners. change-control, audit-pack and review-signoff never accept an agent owner.",
+          "type": "string",
+          "not": {
+            "enum": [
+              "change-control",
+              "audit-pack",
+              "review-signoff"
+            ]
+          }
+        },
+        "claims": {
+          "description": "Renewals only. New claims, changed claims and drift acknowledgements are a person's.",
+          "const": [
+            "renewal"
+          ]
+        },
+        "agents": {
+          "description": "The identities an agent writes as interpretation.owner.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "operators": {
+          "description": "The named people who may answer for these agents. Never a team alias.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "max_days": {
+          "description": "How long an agent's renewal may stand, from its decided_at. At most the piece's own agent ceiling.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

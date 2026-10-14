@@ -71,6 +71,26 @@ Read the path and message: each one names the field and what it needs. Fix the m
 python3 plugins/<piece>/scripts/validate_manifest.py .noru/<piece>.yml
 ```
 
+An agent's renewal in `privacy-datamap` is invalid in the same way when it breaks a rule of
+[requirement 8](../../contract/README.md#on-requirement-8-and-why-it-is-worth-the-friction): no
+`operator`, an operator that is a team alias, an agent or operator outside the grant it names, an
+expiry past the agent ceiling, or a collection that is new or has changed since a person signed it.
+The message names which:
+
+```text
+  FAIL [invalid] dataset[0].collections[0].interpretation.operator: missing required `operator` — an agent owner needs a named person who can be asked what it was thinking
+```
+
+The fix for a changed or new collection is a person's signature, not a corrected renewal. To check
+a renewal locally the way CI does, pass the base revision's manifest and policy:
+
+```bash
+git show origin/main:.noru/privacy-datamap.yml > /tmp/base.yml
+git show origin/main:.noru/interpretation-policy.yml > /tmp/policy.yml
+python3 plugins/privacy-datamap/scripts/validate_manifest.py .noru/privacy-datamap.yml \
+  --base=/tmp/base.yml --interpretation-policy=/tmp/policy.yml
+```
+
 ## Recording a disposition
 
 None. `invalid` gates in gate mode, and `--mode=warn` or `--fail-on` without `invalid` only make it

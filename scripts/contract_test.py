@@ -356,7 +356,7 @@ def check_item_3(piece, decl, fail):
         if not path.is_file():
             fail.add(piece.name, 3, f"invalid fixture {entry['path']} does not exist")
             continue
-        result = run(["python3", str(validator), str(path)])
+        result = run(["python3", str(validator), str(path), *entry.get("args", [])], cwd=piece)
         if result.returncode != 1:
             fail.add(
                 piece.name, 3,
@@ -612,7 +612,7 @@ def check_item_8(piece, decl, fail):
         path = piece / entry["path"]
         if not path.is_file():
             continue
-        result = run(["python3", str(validator), str(path)])
+        result = run(["python3", str(validator), str(path), *entry.get("args", [])], cwd=piece)
         if result.returncode != 1:
             fail.add(
                 piece.name, 8,
@@ -636,6 +636,60 @@ def check_item_8(piece, decl, fail):
                 fail.add(piece.name, 8, f"{schema_rel} $defs.interpretation does not require {field}")
         if "expires_at" not in set(block.get("properties", {})):
             fail.add(piece.name, 8, f"{schema_rel} $defs.interpretation has no expires_at")
+
+    check_agent_owners(piece, decl, fail)
+
+
+# What a piece that lets an agent own a claim must prove it refuses, one invalid fixture each.
+AGENT_CASES = (
+    "no_operator", "team_alias_operator", "outside_policy", "above_agent_ceiling",
+    "structure_changed", "new_claim",
+)
+# Their owners hold a duty that exists to be held apart from someone else's. Never an agent.
+NEVER_AGENT = ("change-control", "audit-pack", "review-signoff")
+
+
+def check_agent_owners(piece, decl, fail):
+    """Requirement 8 for agents: an operator who is a person, inside a policy, renewals only."""
+    admits = "agent_owners" in decl["interpretation"]
+    validator = piece / decl["validator"]["entrypoint"]
+    if piece.name in NEVER_AGENT:
+        if admits:
+            fail.add(piece.name, 8, "declares agent_owners, and this piece never accepts an agent owner")
+        # Executed, not read: take the piece's own valid fixture and make its first owner an agent.
+        valid = piece / decl["validator"]["fixtures"]["valid"][0]
+        text = valid.read_text(encoding="utf-8")
+        match = re.search(r"^( +)owner: .+$", text, re.MULTILINE)
+        if not match:
+            fail.add(piece.name, 8, f"{valid.name} has no `owner:` line to make an agent's")
+            return
+        indent = match.group(1)
+        agent = (
+            f"{match.group(0)}\n{indent}owner_kind: agent\n{indent}operator: Dana Okafor\n"
+            f"{indent}policy_ref: renewals"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = pathlib.Path(tmp) / valid.name
+            probe.write_text(text.replace(match.group(0), agent, 1), encoding="utf-8")
+            result = run(["python3", str(validator), str(probe)])
+        if result.returncode != 1 or "owner_kind" not in result.stdout:
+            fail.add(
+                piece.name, 8,
+                f"did not refuse an agent owner by name (exit {result.returncode}); this piece "
+                "must reject owner_kind",
+            )
+        return
+    if not admits:
+        return
+
+    entries = decl["validator"]["fixtures"].get("invalid", [])
+    covered = {e.get("agent_case") for e in entries}
+    for case in AGENT_CASES:
+        if case not in covered:
+            fail.add(
+                piece.name, 8,
+                f"declares agent_owners but ships no invalid fixture for agent_case {case}",
+            )
 
 
 def check_item_9(piece, decl, fail):

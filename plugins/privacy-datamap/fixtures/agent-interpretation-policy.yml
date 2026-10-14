@@ -1,0 +1,14 @@
+# The interpretation policy the agent fixtures are judged by: one grant, renewals only, a named
+# operator, and a ceiling shorter than the piece's own agent ceiling.
+kind: interpretation-policy
+version: 1
+grants:
+  - id: datamap-renewals
+    piece: privacy-datamap
+    claims:
+      - renewal
+    agents:
+      - datamap-renewal-agent
+    operators:
+      - Dana Okafor
+    max_days: 60
