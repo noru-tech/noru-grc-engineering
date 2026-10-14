@@ -6,6 +6,9 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Recover source-defined inherited fields with origin evidence and Identity custom user fields;
+  leave unavailable framework definitions and ambiguous inheritance as explicit gaps.
+
 - Trace literal PostgreSQL registrations across project references and straight-line Aspire
   PostgreSQL database wiring, keeping ambiguous or dynamic connections unresolved.
 

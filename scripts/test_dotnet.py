@@ -177,6 +177,32 @@ throw new Exception("target must not run");
         self.put('host/App.cs', 'var server = builder.AddPostgres("server"); var db = server.AddDatabase("main"); db = Other(); var app = builder.AddDotnetProject("app", "../src").WithReference(db);')
         self.assertFalse(any('host/App.cs:1' in r['refs'] for r in self.scan()['relationships']))
 
+    def test_inherited_fields_keep_origin_and_missing_framework_stays_gap(self):
+        self.fixture()
+        self.put('src/Base.cs', 'namespace Example; public abstract class Base { int _id; public virtual int Key { get { return _id; } protected set { _id = value; } } public string Shared { get; set; } }')
+        self.put('src/Entities.cs', self.files['src/Entities.cs'].replace('class Item {', 'class Item : Base {'))
+        report = self.scan()
+        fields = {f['name']: f for f in report['tables'][0]['fields']}
+        self.assertIn('Key', fields)
+        self.assertEqual(fields['Shared']['evidence'][0]['path'], 'src/Base.cs')
+        self.put('src/Base.cs', 'namespace Example; public abstract class Base : MissingBase { public string Shared { get; set; } }')
+        self.assertTrue(any('not synthesized' in g['reason'] for g in self.scan()['gaps']))
+        self.put('src/Base.cs', 'namespace Example; public class Base : Item { public string Shared { get; set; } }')
+        self.assertTrue(any('Cyclic' in g['reason'] for g in self.scan()['gaps']))
+
+    def test_identity_extracts_only_source_declared_custom_fields(self):
+        self.put('App.csproj', '<Project />')
+        self.put('Data.cs', 'using Microsoft.EntityFrameworkCore; using Microsoft.AspNetCore.Identity.EntityFrameworkCore; class Customer : IdentityUser { public string Street { get; set; } } class Store : IdentityDbContext<Customer> {}')
+        self.put('Program.cs', 'builder.AddNpgsqlDbContext<Store>("customers");')
+        report = self.scan()
+        self.assertEqual([f['name'] for f in report['tables'][0]['fields']], ['Street'])
+        self.assertEqual(report['relationships'][0]['kind'], 'identity_user_model')
+        self.assertTrue(any('framework table names' in g['reason'] for g in report['gaps']))
+        self.assertNotIn('AspNetUsers', json.dumps(report))
+        self.assertNotIn('PasswordHash', json.dumps(report))
+        self.put('More.cs', 'class Customer { public string Other { get; set; } }')
+        self.assertEqual(self.scan()['relationships'], [])
+
     def test_mongo_nested_members_and_receiver_scopes(self):
         self.put('App.csproj','<Project />')
         self.put('Models.cs','''using MongoDB.Driver;

@@ -347,7 +347,9 @@ class Reader:
             words=[t for t in head if t.value not in modifiers]
             if 'public' in [t.value for t in head] and 'static' not in [t.value for t in head] and len(words)>=2 and not any(t.value in {'(', '=', 'class', 'record', 'struct', 'event'} for t in words):
                 access=values(body[i+1:end]) if body[i].value=='{' else ''
-                if IDENT.fullmatch(words[-1].value) and re.fullmatch(r'get ; (?:(?:private|protected|internal) )?(?:set|init) ;',access):
+                backing = re.fullmatch(r'get \{ return (\w+) ; \} (?:(?:private|protected|internal) )?set \{ (\w+) = value ; \}', access)
+                backed = backing and backing[1] == backing[2] and re.search(r'\b'+re.escape(' '.join(t.value for t in words[:-1]))+r' '+re.escape(backing[1])+r' ;', values(body))
+                if IDENT.fullmatch(words[-1].value) and (re.fullmatch(r'get ; (?:(?:private|protected|internal) )?(?:set|init) ;',access) or backed):
                     props.append({'name':words[-1].value,'type':''.join(t.value for t in words[:-1]),'line':words[-1].line,'attributes':attributes})
                 else: self.gap(model['path'],head[0].line,'Public member is not a supported auto-property; investigate persisted fields, computed accessors or read-only mapping')
             i=end+1
@@ -359,13 +361,38 @@ class Reader:
                 i+=1
         return props
 
+    def inherited_properties(self, model, seen=()):
+        identity = (model['project'], model['qualified'])
+        if identity in seen or len(seen) >= 16:
+            self.gap(model['path'], model['line'], 'Cyclic or deep inheritance requires investigation'); return []
+        props = [dict(p, owner=model) for p in self.properties(model)]
+        header = model['header']
+        colon = next((i for i,t in enumerate(header) if t.value == ':'), None)
+        if colon is None: return props
+        for part in split(header[colon+1:]):
+            name = ''.join(t.value for t in part)
+            if name in {'object','System.Object'}: continue
+            if '<' in name:
+                self.gap(model['path'],model['line'],'Generic inherited model requires type substitution; base members remain unresolved'); continue
+            base = self.resolve(name, model)
+            if base is None:
+                self.gap(model['path'],model['line'],'External or unresolved inherited model: base fields and framework storage definitions are not synthesized'); continue
+            if base['kind'] == 'interface': continue
+            for prop in self.inherited_properties(base, (*seen,identity)):
+                existing = next((p for p in props if p['name'] == prop['name']), None)
+                if existing:
+                    self.gap(model['path'],model['line'],'Hidden or overridden inherited member requires mapping investigation')
+                else: props.append(prop)
+        return props
+
     def fields(self, model, dialect, seen=()):
         if model['qualified'] in seen or len(seen)>=8:
             self.gap(model['path'],model['line'],'Recursive or deep nested model requires shape investigation'); return []
-        if 'partial' in model['modifiers'] or any(t.value in {':','<'} for t in model['header']):
-            self.gap(model['path'],model['line'],'Partial, inherited or generic model requires investigation beyond declared members')
+        if 'partial' in model['modifiers'] or any(t.value == '<' for t in model['header']):
+            self.gap(model['path'],model['line'],'Partial or generic model requires investigation beyond declared members')
         out=[]
-        for prop in self.properties(model):
+        for prop in self.inherited_properties(model):
+            origin = prop['owner']
             attributes=prop['attributes']
             ignored={'sql':'NotMapped','mongo':'BsonIgnore','dynamo':'DynamoDBIgnore','query':'__none__'}[dialect]
             if attr(attributes,ignored) is not None: continue
@@ -394,7 +421,7 @@ class Reader:
                     info={'kind':'unknown_object','name':shape,'open':True}
                     self.gap(model['path'],prop['line'],'Dynamic or dictionary content has unknown additional members; supply a content contract')
                 else:
-                    child=self.resolve(target,model)
+                    child=self.resolve(target,origin)
                     if child and child['kind'] == 'enum':
                         enum_base = values(child['header']).removeprefix(':').strip() or 'int'
                         if enum_base not in {'byte','sbyte','short','ushort','int','uint','long','ulong'}:
@@ -409,7 +436,7 @@ class Reader:
             if item: info={'kind':'array','name':shape,'items':[info], 'open':info.get('open',False)}
             if members: info['members']=[{'name':member['name']} for member in members]
             field={'name':name,'line':prop['line'],'shape':shape,'type':info,'optional':optional,
-                   'evidence':[self.span(model,prop['line'])], 'members':members}
+                   'evidence':[self.span(origin,prop['line'])], 'members':members}
             if any(f['name']==name for f in out): self.gap(model['path'],prop['line'],'Multiple properties map to the same stored name')
             else: out.append(field)
         if not out: self.gap(model['path'],model['line'],'Mapped model has no extracted persisted fields')
@@ -427,7 +454,7 @@ class Reader:
         if fields:
             self.observations.append({'path':model['path'],'boundary':key,'relationship_bound':True,'binding_refs':refs,
                                      'kind':'dotnet','role':'canonical','collections':[{'name':table,'refs':refs,
-                                     'fields':[{'name':f['name'],'shape':f['shape'],'refs':[f"{model['path']}:{f['line']}"]} for f in fields]}]})
+                                     'fields':[{'name':f['name'],'shape':f['shape'],'refs':[f"{e['path']}:{e['start_line']}" for e in f['evidence']]} for f in fields]}]})
             self.tables.append({'name':table,'dataset':key,'schema_path':model['path'],'fields':fields})
 
     def global_ef_imports(self):
@@ -559,10 +586,20 @@ class Reader:
             import_refs = global_imports.get(model['project'], [])
             local_ef = 'EntityFrameworkCore' in code or 'System . Data . Entity' in code
             global_ef = bool(import_refs) and bool(re.search(r'(?<!:):\s*DbContext\b', header))
-            context = bool(re.search(r'\bDbContext\b', header)) and (local_ef or global_ef)
+            identity_context = re.search(r':\s*IdentityDbContext\s*<\s*([\w.]+)\s*>', header)
+            context = (bool(re.search(r'\bDbContext\b', header)) and (local_ef or global_ef)) or bool(identity_context and (local_ef or import_refs))
             if context:
                 scope, store, connection_refs = self.connection_bindings(model)
                 owner = dict(model, binding_scope=scope)
+                if identity_context:
+                    target = self.resolve(identity_context[1], model)
+                    self.gap(model['path'],model['line'],'Identity framework table names and inherited framework fields require source or schema evidence; custom user fields are provisional')
+                    if target:
+                        before = len(self.observations)
+                        self.bind(owner,target,target['name'],store,'sql',model['line'],'identity_user_model')
+                        if len(self.observations) > before:
+                            self.observations[-1]['binding_refs'] += import_refs + connection_refs
+                            self.relationships[-1]['refs'] = sorted(set(self.relationships[-1]['refs'] + import_refs + connection_refs))
                 for prop in self.properties(model):
                     match=re.fullmatch(r'(?:Microsoft\.EntityFrameworkCore\.)?DbSet<(.+)>',prop['type'])
                     if not match: continue

@@ -37,7 +37,10 @@ and unknown additional content remain unresolved. Ordinary DTOs without a suppor
 binding do not become datasets.
 
 Properties with initializers retain their declared types; initializer values are not exported.
-Partial/inherited/generic models, custom accessors, unsupported attributes, converters, aliases,
+Source-defined base members retain their origin evidence. Simple field-backed get/set accessors
+are supported. Identity contexts expose custom user fields provisionally under their model name;
+framework fields and physical table names require source/schema evidence and are not synthesized.
+Partial/generic models, ambiguous or external inheritance, other custom accessors, unsupported attributes, converters, aliases,
 shadowed framework symbols, fluent mappings and custom serialization/convention configuration
 produce gaps. Declared fields can still appear as provisional observations, but a gap is not closed
 by approving those fields. Investigate the source and extend supported extraction where necessary;
