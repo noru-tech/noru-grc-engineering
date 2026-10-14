@@ -93,6 +93,13 @@ VOCAB_SYNC = [
     ("iac-scan", "category", "$defs.finding.properties.category.enum", "set"),
     ("iac-scan", "queue_tools",
      "properties.queue_snapshot.properties.via.items.enum", "set"),
+    ("findings-ingest", "format", "$defs.input.properties.format.enum", "set"),
+    ("findings-ingest", "class", "$defs.input.properties.class.enum", "set"),
+    ("findings-ingest", "severity", "$defs.finding.properties.severity.enum", "set"),
+    ("findings-ingest", "finding_status", "$defs.finding.properties.status.enum", "set"),
+    ("findings-ingest", "category", "$defs.finding.properties.category.enum", "set"),
+    ("findings-ingest", "queue_tools",
+     "properties.queue_snapshot.properties.via.items.enum", "set"),
     ("review-signoff", "review_kind", "$defs.review.properties.kind.enum", "set"),
     ("review-signoff", "cadence", "$defs.review.properties.cadence.enum", "set"),
     ("review-signoff", "disposition", "$defs.exception.properties.disposition.enum", "set"),
@@ -1004,6 +1011,58 @@ def check_workflow_hardening(problems):
                 problems.append(f"{where}:{line}: {ref} is not pinned to a full commit SHA")
 
 
+def check_fixture_manifest_pins(problems):
+    """tests/fixture-repo/store/requirements.txt pins exactly what the committed OSV-Scanner report scanned.
+
+    The report under tests/fixture-repo/.noru/.cache/findings/ names each package at the version it
+    found in that manifest, and the findings-ingest fixtures expect those findings. The pins are old
+    on purpose and nothing installs them. Dependabot reads the file as a real manifest and opens
+    security bumps against it, so .github/dependabot.yml ignores every dependency in that directory;
+    this check catches a bump that lands anyway, and a config edit that drops the ignore.
+    """
+    manifest = ROOT / "tests" / "fixture-repo" / "store" / "requirements.txt"
+    report = ROOT / "tests" / "fixture-repo" / ".noru" / ".cache" / "findings" / "osv-scanner.json"
+    config = ROOT / ".github" / "dependabot.yml"
+    for path in (manifest, report, config):
+        if not path.is_file():
+            problems.append(f"{path.relative_to(ROOT)}: missing; the fixture manifest check needs it")
+            return
+    where = manifest.relative_to(ROOT)
+
+    pinned = {}
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        name, sep, version = line.split("#", 1)[0].strip().partition("==")
+        if sep:
+            pinned[name.lower()] = version
+    scanned = {}
+    for result in json.loads(report.read_text(encoding="utf-8")).get("results", []):
+        if not str(result.get("source", {}).get("path", "")).endswith("/store/requirements.txt"):
+            continue
+        for entry in result.get("packages", []):
+            package = entry.get("package", {})
+            scanned[str(package.get("name", "")).lower()] = str(package.get("version", ""))
+    if not scanned:
+        problems.append(f"{report.relative_to(ROOT)}: no result scanned store/requirements.txt")
+    elif pinned != scanned:
+        problems.append(
+            f"{where} pins {pinned} but {report.relative_to(ROOT)} scanned {scanned}; the fixture "
+            "manifest is what the report describes, not a dependency: revert the bump"
+        )
+
+    text = config.read_text(encoding="utf-8")
+    entry = re.search(
+        r"^  - package-ecosystem: pip\n(?:    .*\n)*?    directory: /tests/fixture-repo/store\n"
+        r"(?:    .*\n)*?    ignore:\n(?:      .*\n)*?      - dependency-name: \"\*\"",
+        text,
+        re.M,
+    )
+    if not entry:
+        problems.append(
+            f"{config.relative_to(ROOT)}: no pip entry for /tests/fixture-repo/store ignoring "
+            'dependency-name "*"; without it Dependabot opens security bumps against the fixture'
+        )
+
+
 def check_secrets(problems):
     for path in sorted(ROOT.rglob("*")):
         if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
@@ -1082,6 +1141,7 @@ def main(argv):
         check_enforcement_registry(problems)
         check_enforcement_action(problems)
         check_workflow_hardening(problems)
+        check_fixture_manifest_pins(problems)
         check_skills(problems, plugin_names)
         check_secrets(problems)
     except Exception as exc:  # noqa: BLE001

@@ -167,7 +167,7 @@ def main(argv):
         results.check(
             "unchanged branch explains every skipped piece",
             payload
-            and len(payload["pieces"]) == 8
+            and len(payload["pieces"]) == 9
             and all(piece["disposition"] == "skipped" and piece["reasons"] for piece in payload["pieces"]),
             payload,
         )

@@ -25,6 +25,8 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
   artifact
 - [`audit-pack.schema.json`](./audit-pack.schema.json) — the `.noru/audit-pack.yml` artifact
 - [`iac-scan.schema.json`](./iac-scan.schema.json) — the `.noru/iac-scan.yml` artifact
+- [`findings-ingest.schema.json`](./findings-ingest.schema.json) — the `.noru/findings-ingest.yml`
+  artifact
 - [`change-control.schema.json`](./change-control.schema.json) — the `.noru/change-control.yml`
   artifact
 - [`privacy-datamap.schema.json`](./privacy-datamap.schema.json) — the accepted
@@ -69,7 +71,8 @@ The contract says *one* idempotent call. Today only one piece can keep that lite
   findings are keyed on `(source, externalId)` server-side, so it embeds no marker, probes nothing,
   and closes a finding with the same call that files one. It is still `keyed_upsert` — a repository
   with fifty findings is fifty calls — but the debt is throughput, not correctness, and that is a
-  materially better place to be than the pieces above it.
+  materially better place to be than the pieces above it. `findings-ingest` lands through the same
+  upsert and inherits the same property.
 
 ### What `:push` means for a piece that assembles
 

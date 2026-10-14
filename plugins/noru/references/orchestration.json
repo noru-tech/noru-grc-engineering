@@ -49,6 +49,13 @@
       "scan_read_tools": ["getOrganizationControls", "getControlContext", "getEvidenceItems"],
       "diff_read_tools": ["findOrganization", "getOrganizationEvidence"]
     },
+    "findings-ingest": {
+      "manifest": ".noru/findings-ingest.yml",
+      "scan_command": "/findings-ingest:scan",
+      "diff_command": "/findings-ingest:diff",
+      "scan_read_tools": ["getSecurityFindings", "getOrganizationAssets", "getOrganizationRisks", "getRiskTreatments"],
+      "diff_read_tools": ["findOrganization", "getSecurityFindings"]
+    },
     "governance-records": {
       "manifest": ".noru/governance-records.yml",
       "scan_command": "/governance-records:scan",

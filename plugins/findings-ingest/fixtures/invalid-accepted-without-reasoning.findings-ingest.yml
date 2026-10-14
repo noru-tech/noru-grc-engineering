@@ -1,0 +1,157 @@
+# Invalid fixture for the findings-ingest validator: An accepted finding whose reasoning is a shrug.
+# Otherwise identical to valid.findings-ingest.yml. Synthetic throughout.
+version: 0.12.2
+piece: findings-ingest
+source:
+  slug: example-org/example-app
+  commit_sha: 0f3c9a1e7b2d4c6e8a0b1c2d3e4f5a6b7c8d9e0f
+  branch: main
+  generated_by: findings-ingest@0.12.2
+  derived_digest: df99ce71c2f0acddc4cf8b56c215a7053828f34bf244e941313376b74f41f739
+inputs:
+  - id: example-sast
+    path: ".noru/.cache/findings/example-sast.sarif"
+    format: sarif
+    class: code
+    reaches_forge_alert_store: false
+  - id: osv
+    path: ".noru/.cache/findings/osv-scanner.json"
+    format: osv
+    class: dependency
+    reaches_forge_alert_store: false
+links:
+  asset_external_id: example-org/example-app
+  risk_by_class:
+    code: EXAMPLE-RISK-ID
+queue_snapshot:
+  fetched_at: "2026-08-27T09:14:00Z"
+  via:
+    - getSecurityFindings
+    - getOrganizationAssets
+    - getOrganizationRisks
+    - getRiskTreatments
+  source: findings-ingest
+  open_findings:
+    - external_id: "example-org/example-app:example-sast.example.weak-hash.0123456789ab"
+      check_name: example.weak-hash
+      title: Weak hash function used for a security purpose
+      severity: medium
+      status: open
+      category: vulnerability
+  assets:
+    - id: EXAMPLE-ASSET-ID
+      external_id: example-org/example-app
+      name: Example application repository
+  risks:
+    - id: EXAMPLE-RISK-ID
+      title: "Example risk: exploitable flaws in shipped code"
+      due_on: 2026-12-31
+findings:
+  - key: example-sast.example.credential-in-source.5befcc02344c
+    input: example-sast
+    tool: example-sast
+    rule: example.credential-in-source
+    class: code
+    severity: high
+    category: vulnerability
+    status: open
+    title: Credential written into source code
+    file: src/agent.py
+    location: null
+    observed_on: 2026-08-27
+    refs:
+      - "src/agent.py:3"
+    interpretation:
+      owner: dana.okafor@example.com
+      decided_at: 2026-08-28
+      expires_at: 2026-10-26
+      rationale: "The token in src/agent.py:3 is a real service credential. It is being rotated today and the file moved to the secret store; moving it alone would not be enough."
+  - key: example-sast.example.sql-built-from-input.8b0fb0b8ca10
+    input: example-sast
+    tool: example-sast
+    rule: example.sql-built-from-input
+    class: code
+    severity: high
+    category: vulnerability
+    status: open
+    title: SQL statement built from request input
+    file: store/models.py
+    location: store.models.find_accounts
+    observed_on: 2026-08-27
+    refs:
+      - "store/models.py:10"
+      - "store/models.py:12"
+    interpretation:
+      owner: dana.okafor@example.com
+      decided_at: 2026-08-28
+      expires_at: 2026-10-26
+      rationale: "Both cited queries in find_accounts concatenate request parameters into SQL. Reachable from the public API; fix is parameterised queries this sprint."
+  - key: osv.ghsa-0000-example-0001.08a2783a5967
+    input: osv
+    tool: osv-scanner
+    rule: GHSA-0000-example-0001
+    class: dependency
+    severity: high
+    category: vulnerability
+    status: open
+    title: "jinja2: Example sandbox escape in template rendering"
+    file: store/requirements.txt
+    location: null
+    package:
+      ecosystem: PyPI
+      name: jinja2
+      version: 2.10.1
+    aliases:
+      - CVE-0000-00001
+      - PYSEC-0000-example-2
+    observed_on: 2026-08-27
+    refs:
+      - store/requirements.txt
+    interpretation:
+      owner: dana.okafor@example.com
+      decided_at: 2026-08-28
+      expires_at: 2026-10-26
+      rationale: "jinja2 2.10.1 renders operator-supplied templates in the admin export job. The sandbox escape applies; upgrade is scheduled with the next dependency batch."
+  - key: example-sast.example.debug-endpoint.417779470a50
+    input: example-sast
+    tool: example-sast
+    rule: example.debug-endpoint
+    class: code
+    severity: medium
+    category: vulnerability
+    status: accepted
+    title: Debug endpoint reachable in production builds
+    file: src/chat-route.ts
+    location: null
+    observed_on: 2026-08-27
+    refs:
+      - "src/chat-route.ts:7"
+    suppressed_in_source: true
+    interpretation:
+      owner: dana.okafor@example.com
+      decided_at: 2026-08-28
+      expires_at: 2027-03-15
+      rationale: "Internal only, fine."
+  - key: osv.ghsa-0000-example-0003.e303d06d8072
+    input: osv
+    tool: osv-scanner
+    rule: GHSA-0000-example-0003
+    class: dependency
+    severity: medium
+    category: vulnerability
+    status: false_positive
+    title: "requests: Example credential leak on redirect"
+    file: store/requirements.txt
+    location: null
+    package:
+      ecosystem: PyPI
+      name: requests
+      version: 2.19.0
+    observed_on: 2026-08-27
+    refs:
+      - store/requirements.txt
+    interpretation:
+      owner: dana.okafor@example.com
+      decided_at: 2026-08-28
+      expires_at: 2027-03-15
+      rationale: "requests follows redirects on the outbound webhook client, but no credentials are attached to those calls, so the leak has nothing to leak here."

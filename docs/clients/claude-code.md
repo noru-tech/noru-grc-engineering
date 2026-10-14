@@ -11,6 +11,7 @@
 /plugin install review-signoff@noru-grc-engineering
 /plugin install audit-pack@noru-grc-engineering
 /plugin install iac-scan@noru-grc-engineering
+/plugin install findings-ingest@noru-grc-engineering
 /plugin install privacy-datamap@noru-grc-engineering
 /plugin install change-control@noru-grc-engineering
 /plugin install compliance-assistant@noru-grc-engineering
@@ -77,6 +78,9 @@ Claude Code, or Codex, or Cursor.
 | `iac-scan:scan` | `read:risks`, `read:assets` |
 | `iac-scan:diff` | adds `read:organization` to bind the plan |
 | `iac-scan:push` | adds `write:risks` |
+| `findings-ingest:scan` | `read:risks`, `read:assets` |
+| `findings-ingest:diff` | adds `read:organization` to bind the plan |
+| `findings-ingest:push` | adds `write:risks` |
 | `privacy-datamap:scan` | `read:datamaps` |
 | `privacy-datamap:diff` | adds `read:organization` to bind the plan |
 | `privacy-datamap:push` | adds `write:datamaps` |

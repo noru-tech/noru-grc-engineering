@@ -68,6 +68,18 @@
       "category": "Productivity"
     },
     {
+      "name": "findings-ingest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/findings-ingest"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
       "name": "governance-records",
       "source": {
         "source": "local",

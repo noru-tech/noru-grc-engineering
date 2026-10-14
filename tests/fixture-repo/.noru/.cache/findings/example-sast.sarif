@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "example-sast",
+          "version": "1.4.0",
+          "rules": [
+            {
+              "id": "example.sql-built-from-input",
+              "shortDescription": { "text": "SQL statement built from request input" },
+              "helpUri": "https://example.com/rules/sql-built-from-input",
+              "defaultConfiguration": { "level": "error" },
+              "properties": { "security-severity": "8.1" }
+            },
+            {
+              "id": "example.credential-in-source",
+              "shortDescription": { "text": "Credential written into source code" },
+              "defaultConfiguration": { "level": "error" }
+            },
+            {
+              "id": "example.debug-endpoint",
+              "shortDescription": { "text": "Debug endpoint reachable in production builds" },
+              "defaultConfiguration": { "level": "warning" }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "example.sql-built-from-input",
+          "ruleIndex": 0,
+          "message": { "text": "Query concatenates request.args['q']" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "store/models.py", "uriBaseId": "%SRCROOT%" },
+                "region": { "startLine": 12 }
+              },
+              "logicalLocations": [{ "fullyQualifiedName": "store.models.find_accounts" }]
+            }
+          ],
+          "partialFingerprints": { "primaryLocationLineHash": "4b1e0f2d9c8a7b6e:1" }
+        },
+        {
+          "ruleId": "example.sql-built-from-input",
+          "ruleIndex": 0,
+          "message": { "text": "Query concatenates request.args['sort']" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "/home/runner/work/example-app/example-app/store/models.py" },
+                "region": { "startLine": 10 }
+              },
+              "logicalLocations": [{ "fullyQualifiedName": "store.models.find_accounts" }]
+            }
+          ]
+        },
+        {
+          "ruleId": "example.credential-in-source",
+          "ruleIndex": 1,
+          "message": { "text": "Found credential 'example-placeholder-not-a-credential' assigned to API_TOKEN" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/agent.py" },
+                "region": { "startLine": 3, "snippet": { "text": "API_TOKEN = \"example-placeholder-not-a-credential\"" } }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "example.debug-endpoint",
+          "ruleIndex": 2,
+          "message": { "text": "Debug route registered" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/chat-route.ts" },
+                "region": { "startLine": 7 }
+              }
+            }
+          ],
+          "suppressions": [{ "kind": "inSource", "justification": "internal network only" }]
+        },
+        {
+          "ruleId": "example.debug-endpoint",
+          "ruleIndex": 2,
+          "kind": "pass",
+          "message": { "text": "No debug route" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/inference.ts" },
+                "region": { "startLine": 1 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "example.debug-endpoint",
+          "ruleIndex": 2,
+          "message": { "text": "Debug route registered" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "/somewhere/else/entirely/not-in-this-repo.ts" },
+                "region": { "startLine": 4 }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

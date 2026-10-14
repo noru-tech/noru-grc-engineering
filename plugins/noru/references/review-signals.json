@@ -32,6 +32,15 @@
       ],
       "content": []
     },
+    "findings-ingest": {
+      "paths": [
+        { "pattern": "(^|/)\\.noru/findings-ingest\\.inputs\\.json$", "reason": "the declared scanner reports changed" },
+        { "pattern": "(\\.sarif|osv-scanner\\.toml)$", "reason": "a SARIF report or scanner configuration changed" }
+      ],
+      "content": [
+        { "pattern": "(\"\\$schema\"\\s*:\\s*\"[^\"]*sarif|\"reaches_forge_alert_store\")", "reason": "a scanner report or ingest input definition changed" }
+      ]
+    },
     "governance-records": {
       "paths": [
         { "pattern": "(^|/)(governance|minutes|board|committee|management-review|statement-of-applicability|corrective-actions?)(/|\\.)", "reason": "a governance decision or meeting record changed" }

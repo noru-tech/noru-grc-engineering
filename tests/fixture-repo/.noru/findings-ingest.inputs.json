@@ -1,0 +1,19 @@
+{
+  "_comment": "Fixture inputs for the findings-ingest collector. Both reports are written by CI into .noru/.cache/findings/ and neither is uploaded to a forge alert store. Everything they contain is synthetic.",
+  "inputs": [
+    {
+      "id": "example-sast",
+      "path": ".noru/.cache/findings/example-sast.sarif",
+      "format": "sarif",
+      "class": "code",
+      "reaches_forge_alert_store": false
+    },
+    {
+      "id": "osv",
+      "path": ".noru/.cache/findings/osv-scanner.json",
+      "format": "osv",
+      "class": "dependency",
+      "reaches_forge_alert_store": false
+    }
+  ]
+}

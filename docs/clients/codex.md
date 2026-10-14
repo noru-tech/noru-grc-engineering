@@ -11,6 +11,7 @@ codex plugin add governance-records@noru-grc-engineering
 codex plugin add review-signoff@noru-grc-engineering
 codex plugin add audit-pack@noru-grc-engineering
 codex plugin add iac-scan@noru-grc-engineering
+codex plugin add findings-ingest@noru-grc-engineering
 codex plugin add privacy-datamap@noru-grc-engineering
 codex plugin add change-control@noru-grc-engineering
 codex plugin add compliance-assistant@noru-grc-engineering
@@ -57,6 +58,9 @@ inlines the value, and do not paste the key into a chat.
 | `iac-scan:scan` | `read:risks`, `read:assets` |
 | `iac-scan:diff` | adds `read:organization` to bind the plan |
 | `iac-scan:push` | adds `write:risks` |
+| `findings-ingest:scan` | `read:risks`, `read:assets` |
+| `findings-ingest:diff` | adds `read:organization` to bind the plan |
+| `findings-ingest:push` | adds `write:risks` |
 | `privacy-datamap:scan` | `read:datamaps` |
 | `privacy-datamap:diff` | adds `read:organization` to bind the plan |
 | `privacy-datamap:push` | adds `write:datamaps` |

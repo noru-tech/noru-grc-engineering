@@ -36,6 +36,9 @@ intend to push. Two pieces sit outside that set entirely:
 | `iac-scan:scan` | `read:risks`, `read:assets` |
 | `iac-scan:diff` | adds `read:organization` to bind the plan |
 | `iac-scan:push` | adds `write:risks` |
+| `findings-ingest:scan` | `read:risks`, `read:assets` |
+| `findings-ingest:diff` | adds `read:organization` to bind the plan |
+| `findings-ingest:push` | adds `write:risks` |
 | `privacy-datamap:scan` | `read:datamaps` |
 | `privacy-datamap:diff` | adds `read:organization` to bind the plan |
 | `privacy-datamap:push` | adds `write:datamaps` |
@@ -44,8 +47,8 @@ intend to push. Two pieces sit outside that set entirely:
 
 Clone this repository somewhere, then drive the scripts from the repository you want to scan.
 `ai-inventory` below is only the example — every piece ships the same three scripts, so substitute
-`evidence-push`, `governance-records`, `review-signoff`, `audit-pack`, `iac-scan` or
-`privacy-datamap` and the sequence is identical:
+`evidence-push`, `governance-records`, `review-signoff`, `audit-pack`, `iac-scan`,
+`findings-ingest` or `privacy-datamap` and the sequence is identical:
 
 ```bash
 GRC=/path/to/noru-grc-engineering
@@ -78,7 +81,7 @@ Three pieces depart from that shape, and it is worth knowing which before you dr
   surface — tool arguments are JSON and cannot carry a multipart body.
 - **`iac-scan:push`** emits `createSecurityFinding` calls, which are documented server-side upserts
   on `source + externalId`. Filing a finding and closing one are the same call, and a repeat lands
-  the same record.
+  the same record. **`findings-ingest:push`** emits the same calls, and never a due date.
 - **`privacy-datamap:push`** emits a single `ingestDatamap` call carrying the whole map for a
   source, however many fields the repository has.
 

@@ -121,6 +121,34 @@
       ]
     },
     {
+      "artifact": ".noru/findings-ingest.yml",
+      "drift_check": {
+        "arguments": [
+          "--repo={repo}",
+          "--check",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/collect.mjs",
+        "runtime": "node"
+      },
+      "generated_outputs": [],
+      "name": "findings-ingest",
+      "validate": {
+        "arguments": [
+          "{manifest}",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/validate_manifest.py",
+        "runtime": "python3"
+      },
+      "watch_paths": [
+        ".noru/findings-ingest.inputs.json",
+        ".noru/findings-ingest.yml"
+      ]
+    },
+    {
       "artifact": ".noru/governance-records.yml",
       "drift_check": {
         "arguments": [
