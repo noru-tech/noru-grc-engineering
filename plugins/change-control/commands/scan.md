@@ -39,6 +39,18 @@ Both write `.noru/.cache/change-events.json`. Read the exporter's output: if it 
 `window.complete` is false the listing was truncated, and absence of a change is not evidence it did
 not happen. Say so in the rationale rather than letting a round number imply completeness.
 
+If the repository already runs agent-change-control, use its manifest instead (written with
+`--format json`); acc then decides the separations it assesses. Keep the forge export alongside it for
+deployments and branch settings when you have one:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/export/acc.mjs" --manifest=<acc-manifest.json> \
+  [--forge-export=.noru/.cache/change-events.json]
+```
+
+An acc verdict of `unknown` becomes a violation like a `fail`: acc could not establish that the
+separation held, and the person dispositioning it has to say whether it did.
+
 ## 3. Collect
 
 ```bash

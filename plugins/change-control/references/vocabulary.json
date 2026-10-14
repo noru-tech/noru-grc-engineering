@@ -25,7 +25,8 @@
     "force_push",
     "branch_protection_disabled",
     "required_checks_skipped",
-    "environment_approval_skipped"
+    "environment_approval_skipped",
+    "ruleset_bypass"
   ],
   "sod_rule": [
     "approver_is_author",

@@ -596,7 +596,10 @@ Four things in it are worth copying deliberately rather than by accident:
   finding gates instead of only the new ones.
 - **The forge token is not the Noru token.** The exporter reads `GITHUB_TOKEN` or `GITLAB_TOKEN` at
   the point of use; the collector that consumes its output takes no credential at all, which is what
-  keeps the offline half offline.
+  keeps the offline half offline. Where agent-change-control already runs, its manifest
+  can replace the export: `acc scan --format json`, then `export/acc.mjs` turns it into the same
+  input, and acc's verdicts decide the separations it assesses
+  ([change-control](../plugins/change-control/README.md#from-an-agent-change-control-manifest)).
 - **The export is deleted at the end of the job.** It is a list of who reviewed what and when —
   personal data about colleagues — and an artifact store keeps things for ninety days.
 - **The write job is separate, on `main`, behind an environment.** Never on `pull_request_target`.

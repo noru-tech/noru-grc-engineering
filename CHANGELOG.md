@@ -6,6 +6,20 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- `change-control` can take its change history from an agent-change-control manifest instead of its
+  own exporter: `scripts/export/acc.mjs --manifest=acc-manifest.json [--forge-export=…]` writes the
+  same `.noru/.cache/change-events.json`, offline, with acc's verdict on each change. ACC002, ACC003
+  and ACC001 then decide `approver_is_author`, `merged_without_independent_approval` and
+  `agent_change_without_independent_human`, and ACC005, when acc assessed it, decides `bypass_used`
+  (new bypass kind `ruleset_bypass`). An acc `unknown` is a violation a person must disposition.
+  `deployer_is_author` stays computed here. The manifest records `source.input` and
+  `source.acc_manifest_sha256`, and each change's verdicts under `acc`.
+
+  **Migrating:** nothing changes for a manifest built from the forge exporter; its derived digest
+  is the same. A manifest rebuilt from acc can show more violations than before in one case: an
+  agent's change approved only by the person who ran the agent is, to acc, also a self-approval
+  without independent approval. Disposition the new exceptions, or keep the forge exporter. Keep
+  the exporters for laptop use, and pass `--forge-export` for deployments and branch settings.
 - Confirmation by a reviewed plan. On a pull request, `write-reviewed-plan` stores the plan the
   diff step built, with a digest of what it does and a summary for reviewers, for the workflow to
   upload. After the merge, `fetch-reviewed-plan` (or `reviewed-plan`), `acc-manifest` and

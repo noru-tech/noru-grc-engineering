@@ -94,11 +94,58 @@ never writes, logs or echoes it, the same arrangement `evidence-push` uses for `
 so CI mode reports this piece as `skipped` rather than `pass`. That is the honest ceiling of a check
 whose input is an API.
 
+## From an agent-change-control manifest
+
+[agent-change-control](https://github.com/noru-tech/agent-change-control) (`acc`) decides most of
+these separations already, from a richer record: who directed an agent, review withdrawals, signed
+evidence, ruleset bypasses. When `acc` runs in your CI, this piece takes its answers instead of
+working them out a second time:
+
+```bash
+acc scan github example-org/example-app --since 2026-07-01 --until 2026-09-30 \
+  --format json -o acc-manifest.json
+node plugins/change-control/scripts/export/acc.mjs --manifest=acc-manifest.json \
+  [--forge-export=.noru/.cache/change-events.json]
+```
+
+`export/acc.mjs` reads files only: no network, no credential. It writes the same
+`.noru/.cache/change-events.json` the collector reads, with acc's verdict on each change:
+
+| rule here | decided by |
+|---|---|
+| `approver_is_author` | acc `ACC002` |
+| `merged_without_independent_approval` | acc `ACC003` |
+| `agent_change_without_independent_human` | acc `ACC001` |
+| `bypass_used` | acc `ACC005`, when the acc policy enables it; otherwise the recorded bypass |
+| `deployer_is_author` | this piece, always: acc records no deployments |
+
+A `fail` is a violation and so is an `unknown`: acc could not establish that the separation held,
+and a person has to say whether it did. A rule acc did not assess is decided here, as before.
+
+acc records nothing about deployments or branch protection. Pass the forge export too
+(`--forge-export`) and its change records, deployments and settings are kept, with acc's verdicts
+added; without it, `deployer_is_author` has nothing to compare and the `controls` block is absent.
+
+The manifest says which input it came from (`source.input: agent-change-control`) and records the
+acc manifest's SHA-256 (`source.acc_manifest_sha256`), so drift detection covers the evidence
+underneath. A manifest from the forge exporter is unchanged and keeps the digest it was signed
+against.
+
+**Where the two disagree.** acc treats the person who ran an agent as the change's author. An agent's
+change approved only by that person is therefore, to acc, a self-approval with no independent
+approval as well as an agent change without an independent human; this piece's own arithmetic finds
+only the last. On the fixture repository that is the one difference (`pr-1044`), and
+`scripts/test_collectors.py` pins it.
+
+To keep acc's signed verdict with the record, attach the acc in-toto Statement as file evidence
+through [`evidence-push`](../evidence-push/): list it under `uploads` in `.noru/evidence-push.yml`
+with its `sha256`, mapped to the same change-management control.
+
 ## Commands
 
 | Command | Writes to Noru? | What it does |
 |---|---|---|
-| `/change-control:scan` | no | Reads the export, computes the separations that did not hold → `.noru/change-control.yml`, every violation flagged `needs_review: true` |
+| `/change-control:scan` | no | Reads the export (from the forge exporter or `export/acc.mjs`), computes the separations that did not hold → `.noru/change-control.yml`, every violation flagged `needs_review: true` |
 | `/change-control:diff` | no | Probes existing findings and evidence, prints the exact plan |
 | `/change-control:push` | **yes** | Files each owned exception as a security finding and the window as evidence |
 
