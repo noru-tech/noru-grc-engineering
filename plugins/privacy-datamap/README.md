@@ -25,6 +25,7 @@ for business context or accountable acceptance.
 | SQL DDL | current `*.sql` schemas | declarative `CREATE TABLE`; recognized migrations are excluded |
 | Drizzle | `*.ts`, `*.tsx`, `*.js`, `*.jsx` | common multiline `pgTable`, `mysqlTable` and `sqliteTable` declarations, including nested builder calls |
 | Prisma | `*.prisma` | `model` → collection, each field |
+| C#/.NET | `*.cs` and project metadata | bounded persisted model/property extraction and modeled EF, MongoDB, DynamoDB and literal typed SQL bindings; [support and limits](references/dotnet-support.md) |
 | Python ORM | `*.py` | Django `models.Model` and SQLAlchemy declarative classes; an attribute assigned from `Column(...)`, `mapped_column(...)` or a `*Field(...)` call |
 | Protobuf | `*.proto` | `message` → collection, each numbered field |
 | GraphQL SDL | `*.graphql`, `*.gql`, `*.graphqls` | `type` and `input` → collection, each field |

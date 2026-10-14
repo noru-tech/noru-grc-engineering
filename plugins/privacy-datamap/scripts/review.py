@@ -438,7 +438,7 @@ def build_outputs(document, result, derived, candidate, errors):
             "progress": scan_progress(document, result, derived, errors, blockers),
             "observation_digest": result["observation_digest"],
             "collection_mode": "candidate" if result.get("candidate_context") else "manifest",
-            "data_map": {"system_flows": [{"system": s["fides_key"], "direction": k, "resources": s[k]} for s in candidate.get("system", []) for k in ("ingress", "egress") if s.get(k)], "stores": stores, "processing_activities": activities, "monitoring_scope": result.get("monitoring_scope", {}), "connection_questions": (derived.get("relationship_mapping") or {}).get("questions", []), "relationship_proposal": document.get("relationship_proposal")},
+            "data_map": {"dotnet": {key: derived.get("dotnet", {}).get(key, []) for key in ("projects", "solutions", "technologies", "relationships")}, "system_flows": [{"system": s["fides_key"], "direction": k, "resources": s[k]} for s in candidate.get("system", []) for k in ("ingress", "egress") if s.get(k)], "stores": stores, "processing_activities": activities, "monitoring_scope": result.get("monitoring_scope", {}), "connection_questions": (derived.get("relationship_mapping") or {}).get("questions", []), "relationship_proposal": document.get("relationship_proposal")},
             "review_queue": {"structural_blockers": blockers, "analysis_errors": errors,
                              "field_groups": [] if blockers else [groups[key] for key in sorted(groups)],
                              "technical_coverage": technical,
@@ -493,6 +493,15 @@ def render_outputs(outputs):
     for store in outputs["data_map"]["stores"]:
         data_map.extend([f"## {store['name']}", "", f"Scope: {len(store['collections'])} collections",
                          f"Categories: {', '.join(store['data_categories']) or 'None established'}", ""])
+    dotnet = outputs["data_map"].get("dotnet", {})
+    if dotnet.get("projects") or dotnet.get("technologies") or dotnet.get("relationships"):
+        data_map.extend(["## .NET discovery and modeled relationships", "",
+                         "Dependencies and source signals are evidence for investigation. Modeled references do not establish physical database identity or deployed storage.", ""])
+        for item in dotnet.get("technologies", []):
+            data_map.append(f"- {item['technology']} ({item['evidence_kind']}): {item['ref']}")
+        for edge in dotnet.get("relationships", []):
+            data_map.append(f"- {edge['model']} → {edge['dataset']}/{edge['collection']} ({edge['kind']}; physical identity unverified). Evidence: {', '.join(edge['refs'])}")
+        data_map.append("")
     containers = [row for row in outputs["evidence_record"]["fields"] if row.get("member_coverage")]
     if containers:
         data_map.extend(["## Nested field coverage", "",

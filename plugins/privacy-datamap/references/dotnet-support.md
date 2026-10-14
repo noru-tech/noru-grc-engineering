@@ -1,0 +1,62 @@
+# .NET source support
+
+The collector reads declarations and modeled references offline. It does not build a solution,
+restore packages, evaluate MSBuild, run source generators, load assemblies, contact databases or
+infer privacy categories from C# property names. This is a bounded structural reader, not Roslyn
+or a general C# semantic analyzer. `scripts/test_dotnet.py` exercises its supported cases and gaps.
+
+## Discovery
+
+`.csproj`, `.sln` and `.slnx` identify project boundaries and references. `Directory.Packages.props`
+and other `.props`/`.targets` XML supply declared dependency signals. Source signals are labeled
+separately from dependency declarations. Neither alone proves runtime use. Missing project
+references, shared source directories with multiple projects, conditional/imported MSBuild settings
+and explicit Compile configuration require investigation. Project references allow resolution of
+models in an explicitly referenced in-repository project; ambiguous model names are not selected.
+
+The normal tracked-file, test-fixture and migration filters apply. `bin` and `obj` are excluded.
+Comments and literal strings are not model declarations. Unsupported preprocessor source,
+interpolated/raw strings or malformed declarations produce coverage gaps rather than empty success.
+
+## Fields and relationships
+
+| Source pattern | Extracted structure | Identity and limits |
+|---|---|---|
+| EF `DbContext` with auto-property `DbSet<T>` | Referenced model's public get/set or get/init properties, `Table`/`Column` names, `NotMapped` exclusions | Context-local modeled store; a literal `GetConnectionString` key inside `AddDbContext`/`UseSqlServer` can associate contexts in the same project. Connection values are not emitted. |
+| MongoDB local `db = client.GetDatabase("name")` followed in the same block by `db.GetCollection<T>("name")` | Typed document fields, `BsonElement`, `BsonId`/conventional ID, `BsonIgnore`, supported nested records/classes | Local receiver scope identifies the modeled reference. Reassigned or unresolved database receivers require investigation. |
+| `DynamoDBTable("name")` | Model properties, explicit property/key names and `DynamoDBIgnore` exclusions | Each attributed model retains its own provisional identity; equal table names do not prove a common AWS account, region or client. |
+| Dapper `Query<T>`/`QueryAsync<T>` with a literal simple `SELECT columns FROM table` | Typed result when the named projection matches its properties | Query-local modeled reference. SQL connection identity and completeness of the underlying schema still require investigation. Joins, computed projections, dynamic SQL and other queries are not reconstructed. |
+| Current SQL DDL | Declared columns; bracketed and schema-qualified SQL Server identifiers | Schema qualification is retained, so two schemas' same-named tables remain distinct. Migrations are not a current schema. |
+
+Nullable type annotations are preserved as source facts, not interpreted as proof of database
+constraints. Primitive arrays retain their element type; supported document members enter the
+existing recursive classification review. Dictionaries, dynamic objects, recursive/unresolved types
+and unknown additional content remain unresolved. Ordinary DTOs without a supported persistence
+binding do not become datasets.
+
+Properties with initializers retain their declared types; initializer values are not exported.
+Partial/inherited/generic models, custom accessors, unsupported attributes, converters, aliases,
+shadowed framework symbols, fluent mappings and custom serialization/convention configuration
+produce gaps. Declared fields can still appear as provisional observations, but a gap is not closed
+by approving those fields. Investigate the source and extend supported extraction where necessary;
+do not describe unsupported mappings as complete.
+
+## Review and physical identity
+
+The review shows project/dependency evidence and model-to-collection relationships with citations.
+Every automatically discovered relationship is labeled `modeled_reference`, with physical identity
+`unverified`. Separate logical references may reach one physical store, and one configuration key
+may have different deployment values. Confirm that distinction from evidence before describing a
+production inventory. No endpoint credentials or connection-string values are copied into output.
+
+A single reviewed schema binding in the existing connection graph overrides the discovered dataset
+identity. Multiple reviewed bindings for one C# file require per-relationship investigation. Fields,
+nested members and extraction gaps use the existing classification contract; C# and project files
+participate in source freshness. Acceptance and publication retain the existing gates. Retention
+handling is outside this feature.
+
+## References
+
+- [EF Core entity properties](https://learn.microsoft.com/en-us/ef/core/modeling/entity-properties)
+- [MongoDB POCO mappings](https://www.mongodb.com/docs/drivers/csharp/current/serialization/poco/)
+- [DynamoDB .NET mapping attributes](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DeclarativeTagsList.html)

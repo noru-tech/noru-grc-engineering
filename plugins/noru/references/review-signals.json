@@ -3,10 +3,12 @@
     "ai-inventory": {
       "paths": [
         { "pattern": "(^|/)(agents?|prompts?|evals?|models?|retrieval)(/|\\.)", "reason": "AI agent, prompt, model, retrieval or evaluation path changed" },
-        { "pattern": "(^|/)(package(-lock)?\\.json|pyproject\\.toml|requirements[^/]*\\.txt)$", "reason": "a dependency manifest that may add an AI provider changed" }
+        { "pattern": "(^|/)(package(-lock)?\\.json|pyproject\\.toml|requirements[^/]*\\.txt)$", "reason": "a dependency manifest that may add an AI provider changed" },
+        { "pattern": "(^|/)([^/]+\\.csproj|Directory\\.Packages\\.props|packages\\.config)$", "reason": ".NET dependency declaration changed; inspect AI dependencies" }
       ],
       "content": [
-        { "pattern": "(@ai-sdk/|openai|anthropic|bedrock|vertexai|langchain|llamaindex|generateText|streamText|chat\\.completions)", "reason": "AI provider or model-call code changed" }
+        { "pattern": "(@ai-sdk/|openai|anthropic|bedrock|vertexai|langchain|llamaindex|generateText|streamText|chat\\.completions)", "reason": "AI provider or model-call code changed" },
+        { "pattern": "(Microsoft\\.SemanticKernel|Azure\\.AI\\.OpenAI)", "reason": ".NET AI SDK reference changed" }
       ]
     },
     "audit-pack": {
@@ -50,7 +52,8 @@
     "privacy-datamap": {
       "paths": [
         { "pattern": "(^|/)(migrations?|schema|schemas|models?|db|database)(/|\\.)", "reason": "a schema, model, migration or database path changed" },
-        { "pattern": "(schema\\.prisma|\\.(sql|proto|graphql|gql))$", "reason": "a supported data-contract file changed" }
+        { "pattern": "(schema\\.prisma|\\.(sql|proto|graphql|gql))$", "reason": "a supported data-contract file changed" },
+        { "pattern": "\\.(cs|csproj|sln|slnx|props|targets)$", "reason": ".NET source or project configuration changed; inspect persistence and data contracts" }
       ],
       "content": [
         { "pattern": "(CREATE\\s+TABLE|model\\s+\\w+\\s*\\{|message\\s+\\w+\\s*\\{|type\\s+\\w+\\s*\\{|class\\s+\\w+.*(Model|Base))", "reason": "a stored-record or API schema definition changed" }

@@ -4884,7 +4884,7 @@ def main(argv):
         return 2
 
     results = Results()
-    for suite in ("test_field_review.py", "test_typescript_evidence.py", "test_classification_evaluation.py", "test_privacy_investigation.py", "test_privacy_delivery_gate.py", "test_static_bindings.py"):
+    for suite in ("test_field_review.py", "test_typescript_evidence.py", "test_classification_evaluation.py", "test_privacy_investigation.py", "test_privacy_delivery_gate.py", "test_static_bindings.py", "test_dotnet.py"):
         checks = run([sys.executable, str(ROOT / "scripts" / suite)])
         results.check("[privacy-datamap] " + suite, checks.returncode == 0, checks.stderr)
 

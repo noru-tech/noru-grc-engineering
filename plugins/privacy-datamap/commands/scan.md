@@ -14,10 +14,17 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --output=json
 finish structure collection only. Continue the analysis below before reporting scan completion.
 
 The collector parses SQL DDL, Drizzle TypeScript, Prisma, Django/SQLAlchemy models, protobuf and
-GraphQL SDL into file-shaped observations, then normalizes them into logical datastores and runtime
+GraphQL SDL plus bounded C# persisted models into file-shaped observations, then normalizes them into logical datastores and runtime
 systems. A source file is evidence for a dataset, not automatically a dataset. Every current field
 retains all contributing `file:line` references. Names are candidate hints only; every new field remains `needs_review: true` until
 evidence-backed investigation and accountable acceptance.
+
+For .NET repositories, read `references/dotnet-support.md`. Inspect `dotnet.projects`,
+`dotnet.technologies`, `dotnet.relationships` and the `dotnet` coverage gaps. These are modeled
+source relationships, not proof of deployed physical databases. Resolve aliases, serializer
+configuration, connection identity and unparsed source before claiming complete coverage. Do not
+run `dotnet`, MSBuild, NuGet restore, target assemblies or source generators. A C# class is not a
+store unless a supported persistence binding connects it. Keep any unknown members explicit.
 
 Schema declarations in `.test.*` and `.spec.*` files are excluded as fixtures unless explicitly
 bound by a connection relationship or a Drizzle configuration. Test files remain in the repository

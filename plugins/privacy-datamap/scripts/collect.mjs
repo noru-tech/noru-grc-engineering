@@ -38,7 +38,7 @@ const MANIFEST_INPUT_PATH = ".noru/privacy-datamap.yml";
 // ever name the directories its author has already seen.
 const SKIP_DIRS = new Set([
   ".git", "node_modules", "dist", "build", "out", ".next", ".turbo", "coverage",
-  "vendor", "target", ".venv", "venv", "__pycache__", ".noru",
+  "vendor", "target", ".venv", "venv", "__pycache__", ".noru", "bin", "obj",
 ]);
 const USAGE =
   "usage: collect.mjs [--repo=<path>] [--check | --candidate | --export] [--output=json|text] [--quiet]\n";
@@ -227,7 +227,7 @@ export function normalizeSqlShape(value) {
 }
 
 const SQL_SKIP = /^(primary|foreign|unique|constraint|key|index|check|partition|using|with|like|exclude)\b/i;
-const SQL_CREATE = /create\s+table\s+(?:if\s+not\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s*\(/i;
+const SQL_CREATE = /create\s+table\s+(?:if\s+not\s+exists\s+)?((?:\[[A-Za-z_][A-Za-z0-9_]*\]|"[A-Za-z_][A-Za-z0-9_]*"|`[A-Za-z_][A-Za-z0-9_]*`|[A-Za-z_][A-Za-z0-9_]*)(?:\s*\.\s*(?:\[[A-Za-z_][A-Za-z0-9_]*\]|"[A-Za-z_][A-Za-z0-9_]*"|`[A-Za-z_][A-Za-z0-9_]*`|[A-Za-z_][A-Za-z0-9_]*))*)\s*\(/i;
 
 export function parseSqlDdl(text) {
   const lines = text.split("\n");
@@ -235,7 +235,7 @@ export function parseSqlDdl(text) {
   for (let i = 0; i < lines.length; i += 1) {
     const match = lines[i].match(SQL_CREATE);
     if (!match) continue;
-    const name = match[1].split(".").pop();
+    const name = match[1].replace(/[[\]"`\s]/g, "");
     const startLine = i + 1;
     const fields = [];
     let depth = 0;
@@ -251,11 +251,11 @@ export function parseSqlDdl(text) {
       // CHECK expressions are constraint bodies, not columns; accepting every depth used to turn
       // multiline boolean expressions into fields named `OR` and referenced column names.
       if (j > i && depthBefore === 1) {
-        const body = line.trim().replace(/^[`"[]/, "");
-        const first = body.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+        const body = line.trim();
+        const first = body.match(/^(?:\[([A-Za-z_][A-Za-z0-9_]*)\]|"([A-Za-z_][A-Za-z0-9_]*)"|`([A-Za-z_][A-Za-z0-9_]*)`|([A-Za-z_][A-Za-z0-9_]*))/);
         if (first && !SQL_SKIP.test(body)) {
           fields.push({
-            name: first[1],
+            name: first.slice(1).find(Boolean),
             line: j + 1,
             // SQL type and constraint keywords are case-insensitive. Formatting them differently
             // must not turn an unchanged column into a material privacy delta.
@@ -1272,10 +1272,31 @@ export function collectFacts(repo, { candidate = false } = {}) {
   const compilerGaps = compilerReport.gaps.filter((gap) => compilerStructuralKinds.has(gap.kind)).map((gap) => ({
     format: "drizzle", ref: `${gap.evidence[0]?.path ?? "."}:${gap.evidence[0]?.start_line ?? 1}`, reason: gap.message,
   }));
-  const observations = [];
+  const dotnet = files.some((path) => /\.(?:cs|csproj|slnx?|props|targets)$/.test(path))
+    ? JSON.parse(execFileSync("python3", [join(HERE, "dotnet.py"), repo],
+      { input: JSON.stringify({ files, excluded: excludedNonRuntime }), encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }))
+    : { projects: [], technologies: [], relationships: [], observations: [], tables: [], gaps: [] };
+  const observations = dotnet.observations.map((observation) => {
+    const bindings = relationships.bindings[observation.path];
+    if (bindings?.length === 1) {
+      for (const table of dotnet.tables) {
+        if (table.dataset === observation.boundary && table.schema_path === observation.path) table.dataset = bindings[0];
+      }
+      for (const edge of dotnet.relationships) {
+        if (edge.dataset === observation.boundary && edge.schema_path === observation.path) edge.dataset = bindings[0];
+      }
+      return { ...observation, boundary: bindings[0] };
+    }
+    if (bindings?.length > 1) dotnet.gaps.push({ format: "dotnet", ref: `${observation.path}:1`,
+      reason: "Multiple reviewed bindings for one C# model need per-relationship investigation." });
+    return observation;
+  });
+  dotnet.tables = [...new Map(dotnet.tables.map((table) => [JSON.stringify(table), table])).values()];
   const parsedFiles = new Set();
   const parsedByKind = {};
   const sourceReadGaps = [];
+  for (const observation of observations) parsedFiles.add(observation.path);
+  if (parsedFiles.size) parsedByKind.dotnet = parsedFiles.size;
   for (const configPath of drizzleTopology.parsedConfigs) parsedFiles.add(configPath);
   if (drizzleTopology.parsedConfigs.length > 0) {
     parsedByKind.drizzle_config = drizzleTopology.parsedConfigs.length;
@@ -1447,6 +1468,8 @@ export function collectFacts(repo, { candidate = false } = {}) {
     input_dependencies: inputs.evidence_dependencies,
     observations,
     datastore_links: drizzleTopology.links,
+    ...(dotnet.projects.length || dotnet.technologies.length || dotnet.gaps.length || dotnet.observations.length
+      ? { dotnet: { ...dotnet, observations: undefined } } : {}),
     relationship_mapping: relationships,
     discovery,
     migration_operations: migrationOperations,
@@ -1479,6 +1502,7 @@ export function collectFacts(repo, { candidate = false } = {}) {
       unparsed_candidates: [...new Map([
         ...findUnparsedCandidates(repo, files, parsedFiles, new Set((compilerReport.sources ?? []).map((source) => source.path).filter((path) => !compilerUnboundFiles.has(path)))),
         ...compilerGaps,
+        ...dotnet.gaps,
         ...drizzleTopology.gaps,
         ...sourceReadGaps,
         ...relationships.errors.map((reason) => ({ format: "relationship_graph", ref: ".noru/privacy-datamap.yml:1", reason })),

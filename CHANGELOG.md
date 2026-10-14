@@ -6,6 +6,12 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Discover .NET projects and relevant dependencies, extract bounded C# persisted model fields,
+  and trace modeled Entity Framework, MongoDB, DynamoDB and literal typed SQL relationships.
+  Report unresolved configuration and extraction gaps with source evidence; preserve nested
+  member review and C# source freshness. Support SQL schema-qualified names, .NET review routing
+  and .NET AI dependency signatures without running target code.
+
 ## 0.12.2 — 2026-10-14
 
 - Explain recursive member coverage in privacy reviews without assigning child categories to

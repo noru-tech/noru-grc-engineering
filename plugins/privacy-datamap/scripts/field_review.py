@@ -23,8 +23,8 @@ ROOT = HERE.parent
 VERSION = 2
 POLICY = "evidence-classification-v3"
 TAXONOMY = {r["fides_key"]: r["description"] for r in json.loads((ROOT / "references/taxonomy/data_categories.json").read_text())}
-SOURCE_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".py", ".sql", ".prisma", ".go", ".rs", ".java", ".rb", ".php", ".json", ".yaml", ".yml", ".toml", ".tf"}
-EXCLUDED = {".git", ".noru", ".fides", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build", "coverage"}
+SOURCE_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".py", ".sql", ".prisma", ".go", ".rs", ".java", ".rb", ".php", ".json", ".yaml", ".yml", ".toml", ".tf", ".cs", ".csproj", ".props", ".targets", ".sln", ".slnx"}
+EXCLUDED = {".git", ".noru", ".fides", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build", "coverage", "bin", "obj"}
 PERSONAL = {"yes", "no", "mixed", "unknown"}
 ASSOCIATIONS = {"natural_person", "organization", "service", "mixed", "unknown", "none"}
 
@@ -103,7 +103,7 @@ def structure_digest(derived):
 
 
 def taxonomy_digest():
-    paths = [path for path in (HERE / "field_review.py", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
+    paths = [path for path in (HERE / "field_review.py", HERE / "dotnet.py", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
     return digest({"policy": POLICY, "categories": TAXONOMY, "implementation": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}})
 
 
@@ -323,7 +323,7 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
                 pass
     contract["shape_observations"] = shape_investigation.current(shapes, contract["binding"])
     table_fields = []
-    for table in report.get("tables", []):
+    for table in report.get("tables", []) + derived.get("dotnet", {}).get("tables", []):
         for field in table.get("fields", []):
             table_fields.append((table, field))
     old_rows = {r["entity_id"]: r for r in all_rows(prior.get("fields", []))}
@@ -415,13 +415,17 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
             continue
         paths = {ref.rsplit(":", 1)[0] for ref in observed.get("refs", [])}
         matches = [field for table, field in table_fields if table.get("name") == observed["collection"] and field.get("name") == observed["name"]
+                   and (not table.get("dataset") or table["dataset"] == observed["entity_id"].split("/")[0])
                    and any(span.get("path") in paths for span in field.get("evidence", []))]
         contract["fields"].append(make_row(observed, matches[0] if len(matches) == 1 else structural_members(observed)))
         if len(matches) > 1:
             contract["gaps"].append({"kind": "identity_ambiguity", "subject": observed["entity_id"], "message": "More than one source field matches this observation.", "status": "unresolved", "gap_id": "gap:" + digest(observed["entity_id"])})
     # Adapter gaps stay explicit; resolving the associated field must account for them.
     prior_gaps = {gap.get("gap_id"): gap for gap in prior.get("gaps", [])}
-    for gap in report.get("gaps", []):
+    dotnet_gaps = [{"kind": "dotnet_extraction", "subject": gap["ref"], "message": gap["reason"],
+                    "evidence": [span] if (span := span_from_ref(repo, gap["ref"], exclusions)) else []}
+                   for gap in derived.get("dotnet", {}).get("gaps", [])]
+    for gap in report.get("gaps", []) + dotnet_gaps:
         spans = [span for span in gap.get("evidence", []) if not migration(span.get("path", ""))]
         contract["gaps"].append({**gap, "evidence_ids": register_evidence(contract, spans, repo), "status": "unresolved", "gap_id": "gap:" + digest(gap)})
     if prior.get("binding") == contract["binding"]:
