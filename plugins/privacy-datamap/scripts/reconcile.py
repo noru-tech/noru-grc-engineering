@@ -19,9 +19,9 @@ import pathlib
 import re
 import sys
 import subprocess
-from runtime_context import NODE
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from runtime_context import NODE
 import dependencies
 import relationships
 import analysis_cache
