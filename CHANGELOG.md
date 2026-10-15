@@ -6,6 +6,18 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- CI without a stored key. With `trust-id` (the `noru-ci` action and the GitLab `noru-ci.yml`
+  component) or `NORU_TRUST_ID`, `scripts/ci_check.py` requests the job's OIDC ID token (GitHub
+  Actions' runner endpoint, or GitLab's `NORU_ID_TOKEN` from `id_tokens`) and exchanges it once, at
+  Noru's CI token exchange, for a 15-minute token carrying only the piece's read scopes, plus its
+  write scopes when the run includes `push`. The token reaches exactly the steps `NORU_API_KEY`
+  reaches. A trust record wins over a key that is also present, and the report's `credential` says
+  the key went unused; a job with no ID token skips `state`, `diff` and `push` as one without a key
+  does; a refused exchange is a tooling error that names Noru's reason. New: `scripts/ci_credential.py`;
+  the GitLab component gains `trust-id` and `api-origin` and an `id_tokens` entry.
+- `ci_check.py`'s redaction now also covers Noru tokens whose random part contains `_` or `-`, and
+  any JWT, and every child process loses the variables that would let it request an ID token.
+
 ## 0.14.0 — 2026-10-15
 
 - Fix: `privacy-datamap` reconcile no longer stops with "evidence path must identify current
