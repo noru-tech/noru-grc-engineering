@@ -163,6 +163,14 @@ throw new Exception("target must not run");
         self.assertEqual(len({r['dataset'] for r in hosted['relationships']}), 1)
         self.assertNotEqual(hosted['relationships'][0]['dataset'], report['relationships'][0]['dataset'])
         self.assertTrue(all('host/App.cs:1' in r['refs'] for r in hosted['relationships']))
+        self.put('api/Program.cs', 'var builder = WebApplication.CreateBuilder(args); builder.Build().Run();')
+        script = "import {collectFacts} from './plugins/privacy-datamap/scripts/collect.mjs'; console.log(JSON.stringify(collectFacts(process.argv[1])));"
+        collected = subprocess.run(['node', '--input-type=module', '-e', script, str(self.repo)], cwd=SCRIPTS.parents[2], capture_output=True, text=True)
+        self.assertEqual(collected.returncode, 0, collected.stderr)
+        facts = json.loads(collected.stdout)
+        runtime = next(s for s in facts['systems'] if s['name'] == 'api')
+        self.assertTrue(runtime['dataset_references'])
+        self.assertTrue(set(runtime['dataset_references']) <= {d['fides_key'] for d in facts['datasets']})
         self.put('api/Startup.cs', self.files['api/Startup.cs'].replace('GetConnectionString("main")', 'GetConnectionString("other")'))
         self.assertEqual(len({r['dataset'] for r in self.scan()['relationships']}), 2)
 

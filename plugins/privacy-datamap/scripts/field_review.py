@@ -111,7 +111,7 @@ def structure_digest(derived):
 
 
 def taxonomy_digest():
-    paths = [path for path in (HERE / "field_review.py", HERE / "dotnet.py", HERE / "dotnet_syntax.py", HERE / "dotnet_model.py", HERE / "dotnet_diagnostics.py", HERE / "gap_resolution.py", HERE / "uncertainty.py", HERE / "migration_coverage.py", HERE / "dotnet_adapters.py", HERE / "dotnet_boundaries.py", ROOT / "references/dotnet-boundary-contracts.json", ROOT / "references/dotnet-framework-contracts.json", ROOT / "references/dotnet-diagnostics.json", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
+    paths = [path for path in (HERE / "field_review.py", HERE / "dotnet.py", HERE / "dotnet_syntax.py", HERE / "dotnet_model.py", HERE / "dotnet_diagnostics.py", HERE / "gap_resolution.py", HERE / "uncertainty.py", HERE / "migration_coverage.py", HERE / "dotnet_adapters.py", HERE / "dotnet_boundaries.py", HERE / "dotnet_contract_candidates.py", HERE / "system_review.py", ROOT / "references/dotnet-boundary-contracts.json", ROOT / "references/dotnet-framework-contracts.json", ROOT / "references/dotnet-diagnostics.json", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
     return digest({"policy": POLICY, "categories": TAXONOMY, "implementation": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}})
 
 
@@ -409,6 +409,24 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
         prior_row = old_rows.get(identity)
         if prior_row and prior_row.get("user_feedback"):
             row["user_feedback"] = copy.deepcopy(prior_row["user_feedback"])
+        content = (prior_row or {}).get('open_content_resolution') or {}
+        if (prior.get('version') == VERSION and prior_row and row.get('open_content')
+                and prior.get('binding', {}).get('source_inventory') == contract['binding']['source_inventory']
+                and prior_row.get('observation_digest') == row['observation_digest']
+                and prior_row.get('decision_binding') == decision_binding(prior_row, prior)
+                and content.get('outcome') in CONTENT_OUTCOMES - {'accepted_certificate'}
+                and content.get('rationale') and content.get('evidence_ids')
+                and (content.get('outcome') != 'reviewed_open_content' or isinstance(content.get('residual_uncertainty'), str) and content['residual_uncertainty'].strip())
+                and set(content['evidence_ids']) <= set(prior_row.get('evidence_ids', []))
+                and all(key in prior.get('evidence', {}) and not evidence_errors(prior['evidence'][key], repo, exclusions)
+                        for key in prior_row.get('evidence_ids', []))):
+            # Structure and its evidenced openness do not become unknown when taxonomy policy changes.
+            # This carries no categories, personal association, acceptance or proposed status.
+            row['open_content_resolution'] = copy.deepcopy(content)
+            row['evidence_ids'] = sorted(set(row['evidence_ids']) | set(content['evidence_ids']))
+            for key in content['evidence_ids']:
+                contract['evidence'][key] = copy.deepcopy(prior['evidence'][key])
+            row['evidence'] = sorted({contract['evidence'][key]['path'] + ':' + str(contract['evidence'][key]['start_line']) for key in row['evidence_ids']})
         if prior.get("version") == VERSION and prior.get("binding", {}).get("taxonomy_digest") == taxonomy_digest() and prior.get("binding", {}).get("source_inventory") == contract["binding"]["source_inventory"] and prior_row and prior_row.get("observation_digest") == row["observation_digest"]:
             used = prior_row.get("evidence_ids", [])
             if all(key in prior.get("evidence", {}) and not evidence_errors(prior["evidence"][key], repo) for key in used):
@@ -485,6 +503,11 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
             for key in gap.get("resolution", {}).get("evidence_ids", []):
                 if key in prior.get("evidence", {}) and not evidence_errors(prior["evidence"][key], repo, exclusions):
                     contract["evidence"][key] = copy.deepcopy(prior["evidence"][key])
+            # Upgrade old global bindings only when both the old signature and affected scope
+            # are unchanged. Normal resolution validation still checks all cited evidence.
+            if (previous.get("resolution_binding") == gap_resolution.binding(previous, prior, legacy=True)
+                    and gap_resolution.binding(previous, prior) == gap_resolution.binding(gap, contract)):
+                gap["resolution_binding"] = gap_resolution.binding(gap, contract)
             if gap.get("status") == "resolved" and gap_resolution.resolution_errors(gap, contract, repo):
                 gap.setdefault("resolution_history", []).append(copy.deepcopy(previous["resolution"]))
                 gap["status"] = "unresolved"
@@ -655,7 +678,7 @@ def row_errors(row, contract, structural_only=False):
             errors.append("classification decision is unbound or modified; submit it through plugin investigation")
         content = row.get("open_content_resolution")
         if row.get("open_content") and not accepted and (not isinstance(content, dict) or not content.get("rationale") or not content.get("evidence_ids") or not set(content["evidence_ids"]) <= set(row.get("evidence_ids", [])) or content.get("outcome") not in CONTENT_OUTCOMES):
-            errors.append("open or unmodeled content requires an evidenced content assessment")
+            errors.append("open or unmodeled content requires an evidenced content assessment: submit open_content_resolution on this parent; resolving known members does not account for additional open content")
         if content and content.get("outcome") == "reviewed_open_content" and (not isinstance(content.get("residual_uncertainty"), str) or not content["residual_uncertainty"].strip()):
             errors.append("reviewed open content must describe its residual uncertainty")
         if content and content.get("outcome") == "accepted_certificate" and (row.get("decision_origin") != "accepted-certificate" or content.get("certificate_digest") != contract.get("accepted_certificate") or not contract.get("accepted_certificate")):
@@ -958,7 +981,7 @@ def pending_requests(contract):
     return sorted(requests, key=lambda row: (row["priority"], row["entity_id"]))
 
 
-def projected_fields(rows, existing=None):
+def projected_fields(rows, existing=None, supplemental=False):
     result = []
     old = {field["name"]: field for field in existing or []}
     for row in rows:
@@ -969,6 +992,10 @@ def projected_fields(rows, existing=None):
             field["description"] += " Open content: " + content["residual_uncertainty"]
         entry = uncertainty.field_entry(row)
         meta = field.setdefault("meta", {})
+        if supplemental and not meta.get('noru'):
+            # Newly investigated members have no prior manifest node to copy provenance from.
+            shape = row.get('shape') or row.get('type', {}).get('name') or row.get('type', {}).get('kind')
+            meta['noru'] = {'shape': shape, 'evidence_kind': 'typed_contract'}
         meta.pop("accepted_uncertainties", None)
         if entry:
             meta["accepted_uncertainties"] = [entry]
@@ -979,7 +1006,7 @@ def projected_fields(rows, existing=None):
         if row["status"] != "proposed":
             field["needs_review"] = True
         if row.get("nested_members"):
-            field["fields"] = projected_fields(row["nested_members"], field.get("fields", []))
+            field["fields"] = projected_fields(row["nested_members"], field.get("fields", []), supplemental)
         result.append(field)
     return result
 
@@ -1026,6 +1053,35 @@ def project_candidate(document, candidate, derived=None, repo=None):
     if contract.get("version") != VERSION or contract.get("binding", {}).get("observation_digest") != document.get("observation_digest") or (derived is not None and contract.get("binding", {}).get("structural_digest") != structure_digest(derived)):
         return candidate
     index = {row["entity_id"]: row for row in contract["fields"]}
+    system_proposals = {row['entity_id']: row for row in document.get('system_proposals', [])}
+    for system in candidate.get('system', []):
+        proposal = system_proposals.get(system['fides_key'])
+        if not proposal:
+            continue
+        if proposal.get('system_type'):
+            system['system_type'] = proposal['system_type']
+        if proposal.get('personal_data') == 'no':
+            system['privacy_declarations'] = []
+            record = {'rationale': proposal.get('non_personal_rationale', ''), 'refs': proposal.get('refs', []),
+                      'investigation': copy.deepcopy(proposal.get('investigation', {})),
+                      'needs_review': not bool(proposal.get('interpretation'))}
+            if proposal.get('interpretation'): record['interpretation'] = copy.deepcopy(proposal['interpretation'])
+            if repo is not None:
+                import system_review
+                record['evidence_binding'] = system_review.binding(system, record['refs'], repo)
+            system.setdefault('meta', {})['non_personal_processing'] = record
+        elif proposal.get('processing_activities'):
+            declarations = []
+            for activity in proposal['processing_activities']:
+                from processing_declarations import expanded_names
+                for name, use in expanded_names(activity):
+                    declaration = {'name': name, 'data_use': use,
+                        'data_subjects': activity.get('proposed_data_subjects', []),
+                        'data_categories': activity.get('proposed_categories', []), 'refs': activity.get('refs', []),
+                        'needs_review': not bool(activity.get('interpretation'))}
+                    if activity.get('interpretation'): declaration['interpretation'] = copy.deepcopy(activity['interpretation'])
+                    declarations.append(declaration)
+            system['privacy_declarations'] = declarations
     dependency_rows = []
     for dataset in candidate.get("dataset", []):
         for collection in dataset.get("collections", []):
@@ -1035,13 +1091,22 @@ def project_candidate(document, candidate, derived=None, repo=None):
                 prior_compact = set(collection.get("non_personal_fields", []))
                 compact = {row["name"] for row in rows if row["name"] in prior_compact and row["personal_data"] == "no" and row["status"] == "proposed" and not row.get("nested_members") and not row.get("open_content") and not row.get("accepted_uncertainty")}
                 represented = [row for row in rows if row["name"] not in compact]
-                collection["fields"] = projected_fields(represented, collection.get("fields", []))
+                collection["fields"] = projected_fields(represented, collection.get("fields", []),
+                    supplemental=(dataset.get('meta') or {}).get('noru', {}).get('origin') == 'supplemental')
                 if (dataset.get("meta") or {}).get("noru", {}).get("origin") == "supplemental":
                     dependency_rows.extend((row, prefix[:-1]) for row in all_rows(represented))
                 if compact:
                     collection["non_personal_fields"] = sorted(compact)
                 else:
                     collection.pop("non_personal_fields", None)
+                # Projection can introduce nested members after the initial candidate was built.
+                def names(fields, prefix=''):
+                    for field in fields:
+                        name = prefix + field['name']
+                        yield name
+                        yield from names(field.get('fields', []), name + '.')
+                signature = set(names(collection['fields'])) | set(collection.get('non_personal_fields', []))
+                collection['structure_digest'] = hashlib.sha256('\n'.join(sorted(signature)).encode()).hexdigest()
     export_nodes = {"dataset:" + node["fides_key"]: node for node in candidate.get("dataset", [])}
     export_nodes.update({"system:" + node["fides_key"]: node for node in candidate.get("system", [])})
     for node in export_nodes.values():
@@ -1284,10 +1349,13 @@ def main(argv=None):
     parser.add_argument("--repo", type=pathlib.Path, required=True)
     parser.add_argument("--fresh", action="store_true")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument('--candidate', action='store_true', help='Require candidate mode; otherwise follows the current cache collection mode')
     args = parser.parse_args(argv)
     repo = args.repo.resolve()
     path = repo / ".noru/.cache/privacy-datamap.analysis.json"
     document = analysis_storage.load(path) or {}
+    import investigation_status
+    investigation_status.mode(document, args.candidate)
     derived = derived_for(document, repo)
     if not derived:
         observed = repo / ".noru/.cache/privacy-datamap.derived.json"
@@ -1299,7 +1367,9 @@ def main(argv=None):
         build_contract(document, repo, fresh=args.fresh, derived=derived)
         analysis_storage.save(path, document)
     errors = validate_contract(document, derived, repo, require_complete=args.check)
-    print(json.dumps({"status": "classification incomplete" if errors or pending_requests(document.get("classification_review", {})) else "classification ready for review",
+    progress = investigation_status.progress(document, repo, path)
+    print(investigation_status.line(progress), file=sys.stderr)
+    print(json.dumps({"mode": progress['mode'], "progress": progress, "status": "classification incomplete" if errors or pending_requests(document.get("classification_review", {})) else "classification ready for review",
                       "counts": document.get("classification_review", {}).get("counts", {}), "errors": errors}))
     return 1 if errors else 0
 

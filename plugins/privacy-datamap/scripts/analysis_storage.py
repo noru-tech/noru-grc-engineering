@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import tempfile
+import pathlib
 from collections import Counter
 
 DERIVED_SECTIONS = {"evidence", "candidate", "reconciliation"}
@@ -58,10 +59,12 @@ def encode(document):
 
 
 def load(path):
+    path = pathlib.Path(path)
     return decode(json.loads(path.read_text(encoding="utf-8"))) if path.is_file() else None
 
 
 def save(path, document):
+    path = pathlib.Path(path)
     content = json.dumps(encode(document), ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
     temporary = None
     try:

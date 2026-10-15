@@ -6,6 +6,35 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Add read-only investigation status, small summary pages, entity detail lookup and explicit
+  candidate-mode assertions. Preserve source-scoped gap decisions across unrelated structural
+  additions; clarify investigation checkpoints, dependency registries and open-content errors.
+  Align non-personal system proposal schema with implementation and accept string cache paths.
+  Retain authenticated open-content assessments across policy refreshes when their structural
+  observations and source evidence remain unchanged, without retaining privacy classifications.
+
+- Give multi-use processing declarations unique per-use names and reject duplicate names during
+  review and validation. Preserve single-use names and recognize unchanged legacy expansions as
+  mechanical renames rather than processing-scope removals.
+
+- Preserve structural provenance for newly projected supplemental members and calculate applied
+  candidate source digests from an offline observation of the resulting manifest inputs.
+  Decode quoted-string escapes in the install-free YAML reader so rendered structural shapes
+  retain their values when reloaded.
+
+- Resolve literal, unconditional C# Compile links while preserving investigation for conditional
+  and multiply-owned sources.
+
+- Preserve evidence-bound gap resolutions across unrelated dataset edits; support shared semantic
+  reasoning and grouped migration submissions without removing per-finding accounting. Project system
+  activities and explicit non-personal reviews, refresh composite signatures and add recoverable
+  candidate application. Reuse modeled .NET runtime links and supply typed serialization/device
+  contract suggestions for agent investigation without adding publication gates.
+
+- Add compact privacy investigation output with a shared field/gap page limit, deduplicated
+  evidence and facts, shared instructions and page-scoped uncertainty templates. Keep full output
+  available for compatibility; scan instructions use compact output during enrichment.
+
 ## 0.15.0 — 2026-10-15
 
 - CI without a stored key. With `trust-id` (the `noru-ci` action and the GitLab `noru-ci.yml`

@@ -14,12 +14,13 @@ import reconcile as workflow
 
 
 def requested_systems(candidate):
-    return [system for system in candidate.get("system", []) if not system.get("privacy_declarations") or any(
+    return [system for system in candidate.get("system", []) if (not system.get("privacy_declarations") and (not system.get('meta', {}).get('non_personal_processing') or system.get('meta', {}).get('non_personal_processing', {}).get('needs_review'))) or any(
         declaration.get("needs_review") for declaration in system.get("privacy_declarations", [])
     )]
 
 
 def validate(document, result, candidate, repo):
+    requested = requested_systems(candidate)
     lock = workflow.load_json(repo / ".noru" / "privacy-datamap.lock.json")
     workflow.add_semantic_review(result, lock, candidate, document)
     errors = workflow.analysis_cache.refresh(document, repo)
@@ -110,7 +111,7 @@ def validate(document, result, candidate, repo):
     # Canonical field/member decisions own classification. The older proposal list
     # remains historical investigation data and never bypasses the recursive gate.
 
-    systems = {row["fides_key"]: row for row in requested_systems(candidate)}
+    systems = {row["fides_key"]: row for row in requested}
     datasets = {row["fides_key"] for row in candidate.get("dataset", [])}
     for identity, row in indexed("system_proposals", systems).items():
         evidence(row, identity)
@@ -120,9 +121,24 @@ def validate(document, result, candidate, repo):
             require(isinstance(investigation, dict) and text(investigation.get(scope)),
                     f"{identity}: record {scope} investigation, including evidence for absence or missing evidence")
         activities = row.get("processing_activities")
+        if row.get('personal_data') == 'no':
+            require(activities == [], f'{identity}: a non-personal system must not declare personal processing activities')
+            require(text(row.get('non_personal_rationale')), f'{identity}: explain the evidenced absence of personal processing')
+            linked = set(systems[identity].get('dataset_references', []))
+            for field in field_review.all_rows(document.get('classification_review', {}).get('fields', [])):
+                if field['entity_id'].split('/')[0] in linked:
+                    require(field.get('personal_data') == 'no' and field.get('status') == 'proposed',
+                            f'{identity}: non-personal outcome conflicts with linked personal or unresolved data')
+            continue
         require(isinstance(activities, list) and bool(activities), f"{identity}: separate processing activities")
         activity_ids = set()
+        declaration_names = set()
         for activity in activities if isinstance(activities, list) else []:
+            from processing_declarations import expanded_names
+            for name, _use in expanded_names(activity):
+                require(name not in declaration_names,
+                    f'{identity}: privacy declaration names must be unique; split processing into single-purpose activities with distinct names')
+                declaration_names.add(name)
             label = f"{identity}/{activity.get('activity_id')}"
             require(text(activity.get("activity_id")) and activity.get("activity_id") not in activity_ids,
                     f"{identity}: activities need unique identifiers")

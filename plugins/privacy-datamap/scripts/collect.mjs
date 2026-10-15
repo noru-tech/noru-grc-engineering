@@ -1232,16 +1232,16 @@ function assertUniqueKeys(kind, rows) {
   }
 }
 
-export function collectFacts(repo, { candidate = false } = {}) {
+export function collectFacts(repo, { candidate = false, inputDefinitions, relationshipDefinitions } = {}) {
   const listing = listFiles(repo);
-  const inputs = JSON.parse(execFileSync("python3", [join(HERE, "dataset_inputs.py"), `--repo=${repo}`, ...(candidate ? ["--candidate"] : [])], {encoding: "utf8"}));
+  const inputs = inputDefinitions ?? JSON.parse(execFileSync("python3", [join(HERE, "dataset_inputs.py"), `--repo=${repo}`, ...(candidate ? ["--candidate"] : [])], {encoding: "utf8"}));
   const supplementalDatasets = inputs.datasets;
   const manifestPath = join(repo, ".noru", "privacy-datamap.yml");
-  const relationships = candidate
+  const relationships = relationshipDefinitions ?? (candidate
     ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), "--candidate", repo], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }))
     : existsSync(manifestPath)
     ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), manifestPath], { encoding: "utf8" }))
-    : { bindings: {}, flows: {}, questions: [], errors: [] };
+    : { bindings: {}, flows: {}, questions: [], errors: [] });
   const drizzleTopology = discoverDrizzleTopology(repo, listing.files);
   const productionFiles = listing.files.filter((path) => !isNonRuntimePath(path)
     || relationships.bindings[path] || drizzleTopology.byPath.get(path)?.role === "canonical");
@@ -1440,6 +1440,14 @@ export function collectFacts(repo, { candidate = false } = {}) {
   assertUniqueKeys("dataset", datasets);
 
   const services = discoverServices(repo, files, dotnet.runtime_entrypoints ?? []);
+  for (const binding of dotnet.runtime_bindings ?? []) {
+    if (binding.status !== "modeled" || binding.conditions?.length || !binding.datastore) continue;
+    const root = binding.runtime_project?.split("/").slice(0, -1).join("/") ?? "";
+    const dataset = datasets.find(item => item.fides_key === binding.datastore);
+    if (dataset && services.some(service => service.root === root)) {
+      dataset.system_references = [...new Set([...(dataset.system_references ?? []), fidesKeyFor(root || "repository")])];
+    }
+  }
   for (const boundary of [...(dotnet.authentication_tickets ?? []), ...(dotnet.message_envelopes ?? [])]) {
     const dataset = datasets.find(d => d.fides_key === boundary.dataset);
     for (const project of boundary.runtime_projects?.length ? boundary.runtime_projects : [boundary.project]) {

@@ -72,11 +72,43 @@ def occurrence_ids(gap):
     return sorted(set('occurrence:' + digest(item) for item in occurrences))
 
 
-def binding(gap, contract):
+def affected_structure(gap, contract):
+    """Use evidenced target scopes; retain the global fallback for unscoped findings."""
+    decision = gap.get('resolution', {})
+    scope = gap.get('scope') or {}
+    datasets = {scope.get('datastore'), scope.get('dataset'), decision.get('coverage_binding', {}).get('datastore')}
+    datasets.update(key.split('/')[0] for key in decision.get('field_ids', []))
+    datasets.update(key.split(':', 1)[1] for key in decision.get('export_targets', []) if key.startswith('dataset:'))
+    datasets.discard(None)
+    datasets.discard('')
+    systems = set(decision.get('system_ids', [])) | set(gap.get('required_system_ids', []))
+    systems.update(key.split(':', 1)[1] for key in decision.get('export_targets', []) if key.startswith('system:'))
+    if scope.get('system'): systems.add(scope['system'])
+    if not datasets and not systems:
+        paths = {scope.get('path'), scope.get('project')}
+        paths.discard(None)
+        paths.discard('')
+        if paths:
+            project_dirs = [p.rsplit('/', 1)[0] + '/' if '/' in p else '' for p in paths if p.endswith(('.csproj', '.props', '.targets'))]
+            def affected(row):
+                refs = [contract.get('evidence', {}).get(key, {}).get('path', '') for key in row.get('evidence_ids', [])]
+                return any(ref in paths or any(ref.startswith(directory) for directory in project_dirs) for ref in refs)
+            return {'source_scope': sorted(paths), 'fields': sorted((row['entity_id'], row.get('observation_digest'))
+                for row in walk(contract.get('fields', [])) if affected(row)),
+                'systems': {key: row.get('observation_digest') for key, row in sorted(contract.get('runtime_definitions', {}).items()) if affected(row)}}
+        return contract.get('binding', {}).get('structural_digest')
+    return {'datasets': {key: sorted((row['entity_id'], row.get('observation_digest'))
+                for row in walk(contract.get('fields', [])) if row['entity_id'].split('/')[0] == key)
+                for key in sorted(datasets)},
+            'systems': {key: contract.get('runtime_definitions', {}).get(key, {}).get('observation_digest')
+                        for key in sorted(systems)}}
+
+
+def binding(gap, contract, legacy=False):
     resolution = gap.get('resolution', {})
     rows = {row['entity_id']: row for row in walk(contract.get('fields', []))}
     return digest({'observation': {k:v for k,v in gap.items() if k not in MUTABLE},
-                   'resolution': resolution, 'structure': contract.get('binding', {}).get('structural_digest'),
+                   'resolution': resolution, 'structure': contract.get('binding', {}).get('structural_digest') if legacy else affected_structure(gap, contract),
                    'evidence': {key:contract.get('evidence', {}).get(key) for key in resolution.get('evidence_ids', [])},
                    'targets': {key:rows.get(key, {}).get('observation_digest') for key in resolution.get('field_ids', [])},
                    'runtime_targets': {key:contract.get('runtime_definitions', {}).get(key, {}).get('observation_digest') for key in resolution.get('system_ids', [])}})

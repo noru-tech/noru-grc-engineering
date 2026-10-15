@@ -136,6 +136,65 @@ class InvestigationTests(unittest.TestCase):
         self.assertEqual(result.returncode,2)
         self.assertEqual(self.path.read_bytes(),before)
 
+    def test_compact_cli_pages_without_writing_or_losing_evidence(self):
+        before = self.path.read_bytes()
+        full = json.loads(self.command('--limit=2').stdout)
+        first = self.command('--format=compact', '--limit=1')
+        self.assertEqual(first.returncode, 0, first.stderr)
+        page = json.loads(first.stdout)
+        self.assertEqual(page['pagination']['next_offset'], 1)
+        row = page['requests'][0]
+        self.assertEqual(row['decision_template'], full['requests'][0]['decision_template'])
+        self.assertEqual(page['shared']['evidence'], full['requests'][0]['evidence'])
+        self.assertEqual(page['shared']['facts'], full['requests'][0]['facts'])
+        self.assertNotIn('decision_template', row['request'])
+        second = json.loads(self.command('--format=compact', '--limit=1', '--offset=1').stdout)
+        self.assertEqual(second['requests'][0]['request']['entity_id'], full['requests'][1]['request']['entity_id'])
+        self.assertIsNone(second['pagination']['next_offset'])
+        self.assertEqual(second['counts']['agent_pending'], 2)
+        self.assertEqual(before, self.path.read_bytes())
+        self.assertEqual(self.command('--offset=1').returncode, 2)
+        self.assertEqual(self.command('--format=compact', '--offset=-1').returncode, 2)
+
+    def test_compact_pages_every_gap_and_preserves_occurrences(self):
+        batch = investigate.prepare_batch(self.document, 24)
+        gaps = [{'gap_id': 'gap:' + str(i), 'occurrences': [{'path': str(i)}],
+                 'resolution_history': [{'outcome': 'unresolved', 'rationale': 'Earlier investigation'}],
+                 'decision_template': {'covered_occurrence_ids': [str(i)]},
+                 'investigation_steps': ['Read source'], 'fallback_review_template': {'source_review': ''}}
+                for i in range(70)]
+        batch['extraction_gaps'] = gaps
+        batch['counts'].update(agent_pending=72, agent_pending_gaps=70)
+        batch['uncertainty_candidates'] += [{'target_id': g['gap_id']} for g in gaps]
+        original = copy.deepcopy(batch)
+        pages = [investigate.compact_batch(batch, 24, offset) for offset in (0, 24, 48)]
+        self.assertTrue(all(p['counts']['included'] == 24 for p in pages))
+        self.assertEqual([g['gap_id'] for p in pages for g in p['extraction_gaps']], [g['gap_id'] for g in gaps])
+        for page in pages:
+            self.assertLessEqual(len(page['uncertainty_candidates']), 24)
+            for gap in page['extraction_gaps']:
+                source = next(g for g in gaps if g['gap_id'] == gap['gap_id'])
+                self.assertEqual(gap['occurrences'], source['occurrences'])
+                self.assertEqual(gap['decision_template'], source['decision_template'])
+                self.assertEqual(gap['resolution_history_summary']['count'], 1)
+                self.assertNotIn('resolution_history', gap)
+        self.assertEqual(batch, original)
+        empty = investigate.compact_batch(batch, 24, 100)
+        self.assertEqual(empty['counts']['agent_pending'], 72)
+        self.assertEqual(empty['counts']['included'], 0)
+
+    def test_compact_shared_context_reduces_repeated_payload(self):
+        batch = investigate.prepare_batch(self.document, 24)
+        row = batch['requests'][0]
+        # Repeated source evidence is common when members share one declaration.
+        row['evidence'] = {'evidence:shared': {'text': 'source declaration\n' * 500}}
+        batch['requests'] = [copy.deepcopy(row) for _ in range(24)]
+        batch['counts'].update(agent_pending=24, agent_pending_fields=24)
+        compact = investigate.compact_batch(batch, 24)
+        self.assertLess(len(json.dumps(compact)), len(json.dumps(batch)) / 2)
+        self.assertEqual(compact['shared']['evidence'], row['evidence'])
+        self.assertEqual(compact, investigate.compact_batch(batch, 24))
+
     def test_missing_contract_is_not_an_empty_successful_queue(self):
         del self.document['classification_review']
         analysis_storage.save(self.path,self.document)

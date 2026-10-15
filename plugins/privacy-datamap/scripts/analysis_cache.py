@@ -8,6 +8,7 @@ import re
 import subprocess
 
 import dependencies
+from processing_declarations import expanded_names, mechanical_renames
 
 DOC_SUFFIXES = {".md", ".rst", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".svg"}
 
@@ -327,9 +328,10 @@ def semantic_snapshot(manifest, proposals=None):
         prefix = system["entity_id"] + "/"
         snapshot["activities"] = {k: v for k, v in snapshot["activities"].items() if not k.startswith(prefix)}
         for row in activities:
-            snapshot["activities"][prefix + str(row.get("purpose", ""))] = activity(row,
-                uses=row.get("proposed_data_uses", []), subjects=row.get("proposed_data_subjects", []),
-                categories=row.get("proposed_categories", []), recipients=row.get("recipient_systems", []))
+            for name, use in expanded_names(row):
+                snapshot["activities"][prefix + name] = activity(row,
+                    uses=[use], subjects=row.get("proposed_data_subjects", []),
+                    categories=row.get("proposed_categories", []), recipients=row.get("recipient_systems", []))
     return snapshot
 
 
@@ -353,7 +355,10 @@ def semantic_changes(previous, current):
     for key in previous.get("collections", []):
         if visible(previous, key) and key in current.get("collections", []) and not visible(current, key):
             record("collection:" + key, "collection_filtered_from_export", True, False)
+    renamed = {row['previous'] for row in mechanical_renames(previous, current)}
     for key, before in previous.get("activities", {}).items():
+        if key in renamed:
+            continue
         after = current.get("activities", {}).get(key, {})
         lost = {dimension: sorted(set(values) - set(after.get(dimension, []))) for dimension, values in before.items()}
         lost = {dimension: values for dimension, values in lost.items() if values}

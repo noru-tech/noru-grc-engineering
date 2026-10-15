@@ -463,4 +463,7 @@ logical stores, deployed systems and external recipients distinct; establish bin
 construction/configuration and actual transfers. A directory or neighboring user ID proves neither
 boundary nor meaning. Maintenance retains supported accepted decisions and investigates relevant
 changes. Fresh assessment excludes earlier classifications as evidence; compare only afterward.
-Human acceptance records a decision; it cannot supply missing facts or close an extraction gap.
+Human acceptance cannot supply missing facts. Explicit, scoped uncertainty acceptance can account
+for an investigated extraction gap while retaining its unknown facts and map impact in the export.
+Follow [enrichment reuse](../../references/enrichment-reuse.md) to preserve unaffected resolutions,
+share reasoning, group migration investigations and apply a candidate without silently approving it.

@@ -13,6 +13,39 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --output=json
 **A scan combines deterministic collection with mandatory agent enrichment.** The commands above
 finish structure collection only. Continue the analysis below before reporting scan completion.
 
+### Investigation checkpoints and small views
+
+Use `investigate.py --repo=<repo> --status` for read-only recorded field/gap counts and the last
+cache-write time. Both investigation commands print a one-line progress report on stderr while
+keeping stdout machine-readable. Status is not validation or acceptance.
+Use `investigate.py --repo=<repo> --summary --limit=24` to page through identities, shapes,
+declaration locations and evidence counts without loading the evidence payload. Retrieve a
+selected field or gap with `--entity=<identity>` before judging it; summary omissions are not
+evidence of absence. Full and compact views remain available.
+
+Work in small batches by datastore. Submit supported decisions for the current batch before
+reading the next one. If a batch needs further investigation, report the files checked, the exact
+remaining question and next action; do not let source reading continue indefinitely without a
+checkpoint. For delegated work, require the same checkpoints. No helper can infer progress from
+unrecorded reading. Restart queue pagination at zero after submissions.
+
+`field_review.py` and `investigate.py` follow the current cache collection mode. Their optional
+`--candidate` flag asserts candidate mode and reports an error on manifest state; it does not
+switch or rebuild observations. Output reports the active mode.
+
+An activity's `unresolved_question` or `business_context_question` produces a `PROCESSING_QUESTION`
+diagnostic. Inspect it with `investigate.py`; record the investigation through `--gaps`, including
+`fallback_review` when evidence remains unavailable. A fallback record alone does not close the
+finding. Explicit scoped uncertainty acceptance remains available through `--uncertainties`.
+For candidate supplemental inputs, put dependencies under
+`structural_proposal.evidence_dependencies`; the registry is merged with manifest dependencies.
+A top-level analysis-cache `evidence_dependencies` list is not that registry.
+
+Prefer one data use per processing activity. Multi-use activities expand into one declaration per
+use, named `<purpose> (<data_use>)`; single-use activities retain the plain purpose. Declaration
+names must be unique within each system. Split colliding activities into distinct single-purpose
+activities rather than silently dropping a use.
+
 ### Accepting remaining uncertainty
 
 After investigation, present the exact residual uncertainty and map impact for human review.
@@ -612,15 +645,28 @@ questions before adoption; never clear flags just to make an export validate.
 
 ### Canonical classification review
 
+Use [enrichment reuse](../references/enrichment-reuse.md) for shared semantic reasoning,
+grouped migration investigations, explicit non-personal systems and recoverable candidate application.
+These paths preserve the agent's responsibility for ambiguity and existing uncertainty acceptance.
+
 After collection and reconciliation, build the shared evidence contract:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/field_review.py" --repo=<repo>
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/investigate.py" --repo=<repo> --limit=24
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/investigate.py" --repo=<repo> --format=compact --limit=24
 ```
 
 The contract lives in `classification_review` inside the existing `privacy-datamap.analysis.json`.
-The investigation command prints a bounded queue, cited compiler facts, and decision templates.
+Use compact output for agent enrichment: it limits fields and gaps together, emits each selected
+fact and evidence record once in `shared`, and supplies one copy of the shared investigation instructions.
+Resolve request `supporting_fact_ids` and `evidence_ids` against those shared tables; no source spans
+are truncated. Uncertainty templates cover the selected page. Human questions remain visible as
+summaries. Use `--format=full` for the legacy expanded response and human decision templates.
+Historical resolutions are summarized by count, outcomes and digest; full output and the canonical
+cache retain their complete rationale and provenance. Compact source inventories use a count and digest.
+After applying decisions, request offset zero again because the pending queue has changed.
+For browsing without applying decisions, follow `pagination.next_offset` with `--offset=<number>`.
+Counts describe all pending agent work, not just the page; an empty page is not proof of completion.
 Read each relevant source span and inspect alternative writers, imported helpers, identity targets,
 transformations and open branches. Explain value meaning and natural-person association separately.
 Read the bundled taxonomy definition before selecting a category. Security sensitivity is independent
@@ -629,7 +675,7 @@ of personal-data status. Keep nested members nested; an unclassified parent cann
 Submit investigated decisions as a JSON list:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/investigate.py" --repo=<repo> --decisions=<file>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/investigate.py" --repo=<repo> --format=compact --decisions=<file>
 ```
 
 A decision records meaning, evidence, person association, category fit, investigation and
@@ -681,9 +727,9 @@ Human acceptance records a decision; it cannot supply missing facts or close an 
 ## Resolve extraction diagnostics through investigation
 
 After collection and reconciliation, rebuild current evidence with `field_review.py --repo=<repo>`.
-Use `investigate.py --repo=<repo>` to obtain diagnostic templates and all covered occurrence IDs.
+Use `investigate.py --repo=<repo> --format=compact` to obtain paged diagnostic templates and all covered occurrence IDs for each included finding.
 Investigate each occurrence; submit `modeled`, `not_applicable` or `unresolved` decisions through
-`investigate.py --repo=<repo> --gaps=<decisions.json>`. Do not edit diagnostic status flags.
+`investigate.py --repo=<repo> --format=compact --gaps=<decisions.json>`. Do not edit diagnostic status flags.
 
 Modeled decisions reference current evidenced canonical field IDs, including validated supplemental
 structures where appropriate. They do not create fields or accept privacy meaning. Not-applicable

@@ -47,6 +47,50 @@ class ResolutionTests(unittest.TestCase):
         self.assertTrue(task['investigation_steps'])
         self.assertEqual(batch['human_questions'],[])
 
+    def test_unrelated_structure_preserves_resolution_but_affected_structure_reopens(self):
+        gap = self.gap()
+        self.assertEqual(field_review.apply_gap_decisions(self.document, [self.answer(gap)], self.repo), [])
+        self.derived['datasets'].append({'fides_key': 'other', 'collections': [
+            {'name': 'metrics', 'fields': [{'name': 'count', 'shape': 'integer', 'refs': ['schema.ts:1']}]}]})
+        field_review.build_contract(self.document, self.repo, self.compiler)
+        self.assertFalse(field_review.gap_partition(self.document, self.derived, self.repo)['active_blockers'])
+        self.derived['datasets'][0]['collections'][0]['fields'].append(
+            {'name': 'new_member', 'shape': 'text', 'refs': ['schema.ts:1']})
+        field_review.build_contract(self.document, self.repo, self.compiler)
+        self.assertTrue(field_review.gap_partition(self.document, self.derived, self.repo)['active_blockers'])
+
+    def test_legacy_binding_migrates_without_refreshing_changed_evidence(self):
+        gap = self.gap()
+        self.assertEqual(field_review.apply_gap_decisions(self.document, [self.answer(gap)], self.repo), [])
+        contract = self.document['classification_review']
+        stored = contract['gaps'][-1]
+        stored['resolution_binding'] = gap_resolution.binding(stored, contract, legacy=True)
+        field_review.build_contract(self.document, self.repo, self.compiler)
+        self.assertFalse(field_review.gap_partition(self.document, self.derived, self.repo)['active_blockers'])
+        (self.repo / 'schema.ts').write_text((self.repo / 'schema.ts').read_text() + '\n// producer changed\n')
+        with self.assertRaisesRegex(ValueError, 'evidence changed'):
+            field_review.build_contract(self.document, self.repo, self.compiler)
+        self.assertTrue(field_review.gap_partition(self.document, self.derived, self.repo)['active_blockers'])
+
+    def test_source_scoped_gap_survives_unrelated_candidate_addition(self):
+        (self.repo / 'other.ts').write_text('export const count = 1;\n')
+        self.gap()
+        self.derived['coverage']['unparsed_candidates'][0]['scope'] = {'path': 'schema.ts', 'kind': 'source'}
+        field_review.build_contract(self.document, self.repo, self.compiler)
+        gap = self.document['classification_review']['gaps'][-1]
+        self.assertEqual(field_review.apply_gap_decisions(self.document, [self.answer(gap, 'not_applicable')], self.repo), [])
+        # A valid old global signature can be migrated to the evidenced source scope.
+        contract = self.document['classification_review']
+        gap = contract['gaps'][-1]
+        gap['resolution_binding'] = gap_resolution.binding(gap, contract, legacy=True)
+        self.derived['datasets'].append({'fides_key': 'other', 'collections': [{'name': 'metrics',
+            'fields': [{'name': 'count', 'shape': 'integer', 'refs': ['other.ts:1']}]}]})
+        field_review.build_contract(self.document, self.repo, self.compiler)
+        self.assertFalse(field_review.gap_partition(self.document, self.derived, self.repo)['active_blockers'])
+        self.derived['datasets'][0]['collections'][0]['fields'].append({'name': 'new', 'shape': 'text', 'refs': ['schema.ts:1']})
+        field_review.build_contract(self.document, self.repo, self.compiler)
+        self.assertTrue(field_review.gap_partition(self.document, self.derived, self.repo)['active_blockers'])
+
     def test_fallback_attempt_is_audited_but_never_clears_a_gap(self):
         import investigate
         gap=self.gap(); self.resolve()

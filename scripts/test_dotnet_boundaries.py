@@ -15,6 +15,60 @@ class BoundaryTests(unittest.TestCase):
     put=fixtures.DotnetTests.put
     scan=fixtures.DotnetTests.scan
 
+    def test_typed_serialization_and_device_candidates_remain_agent_owned(self):
+        self.put('App.csproj', '<Project />')
+        self.put('Payload.cs', 'record Payload(string Message);')
+        self.put('Program.cs', 'System.Text.Json.JsonSerializer.SerializeToUtf8Bytes<Payload>(value); Microsoft.Maui.Storage.SecureStorage.Default.SetAsync("session", value); Microsoft.Maui.Storage.Preferences.Default.Set("theme", "dark");')
+        report = self.scan()
+        candidates = report['supplemental_candidates']
+        self.assertEqual(len(candidates), 3)
+        self.assertEqual(candidates[0]['fields'][0]['name'], 'Message')
+        self.assertTrue(all(c['binding_status'] == 'agent_investigation_required' for c in candidates))
+        self.assertEqual(report['tables'], [])
+        self.assertEqual(report, self.scan())
+        self.put('Program.cs', 'System.Text.Json.JsonSerializer.Serialize<Payload>(value, options); Microsoft.Maui.Storage.Preferences.Default.Set(dynamicKey, value);')
+        report = self.scan()
+        self.assertTrue(all(c.get('limitation') for c in report['supplemental_candidates']))
+        self.assertEqual(report['tables'], [])
+        self.assertFalse(any(g['code'] in {'DOTNET_SERIALIZER_OPTIONS', 'DOTNET_DEVICE_KEY'} for g in report['gaps']))
+
+    def test_serialization_candidates_keep_inheritance_and_json_mapping(self):
+        self.put('App.csproj', '<Project />')
+        self.put('Payload.cs', 'class Base { public int Id { get; set; } } class Payload : Base { [JsonPropertyName("message")] public string Text { get; set; } [JsonIgnore] public string Hidden { get; set; } }')
+        self.put('Program.cs', 'System.Text.Json.JsonSerializer.Deserialize<Payload>(json);')
+        fields = self.scan()['supplemental_candidates'][0]['fields']
+        self.assertEqual({f['name'] for f in fields}, {'Id', 'message'})
+        self.put('Program.cs', 'Custom.JsonSerializer.Deserialize<Payload>(json);')
+        self.assertEqual(self.scan()['supplemental_candidates'], [])
+
+    def test_build_only_conditions_and_alias_locations(self):
+        self.put('App.csproj', '<Project><PropertyGroup Condition="$(Configuration)"><PublishAot>true</PublishAot><Optimize>true</Optimize></PropertyGroup></Project>')
+        self.put('Code.cs', '\n\nusing Alias = Example.Value;\nclass Row {}')
+        report = self.scan()
+        self.assertFalse(any('MSBuild' in g['reason'] for g in report['gaps']))
+        alias = next(g for g in report['gaps'] if 'aliases' in g['reason'])
+        self.assertEqual(alias['ref'], 'Code.cs:3')
+        self.put('App.csproj', '<Project><PropertyGroup Condition="$(Configuration)"><DefineConstants>CUSTOM</DefineConstants></PropertyGroup><ItemGroup Condition="$(Platform)"><Compile Include="Shared.cs" /></ItemGroup></Project>')
+        self.assertTrue(any('MSBuild' in g['reason'] for g in self.scan()['gaps']))
+
+    def test_literal_compile_link_establishes_membership_without_dismissing_source(self):
+        self.put('app/App.csproj', '<Project><ItemGroup><Compile Include="../shared/Helper.cs"><Link>Helper.cs</Link></Compile></ItemGroup></Project>')
+        self.put('shared/Helper.cs', 'class Helper { public string Value { get; set; } }')
+        report = self.scan()
+        symbol = next(t for t in report['type_symbols'] if t['name'] == 'Helper')
+        self.assertEqual(symbol['project'], 'app/App.csproj')
+        self.assertFalse(any('Compile items' in g['reason'] for g in report['gaps']))
+        self.assertEqual(report['projects'][0]['compile_items'][0]['ref'], 'app/App.csproj:1')
+        self.put('other/Other.csproj', '<Project><ItemGroup><Compile Include="../shared/Helper.cs" /></ItemGroup></Project>')
+        self.assertTrue(any('multiple projects' in g['reason'] for g in self.scan()['gaps']))
+        self.put('other/Other.csproj', '<Project />')
+        self.put('shared/Shared.csproj', '<Project />')
+        report = self.scan()
+        self.assertTrue(any('multiple projects' in g['reason'] for g in report['gaps']))
+        self.assertFalse(any(t['name'] == 'Helper' for t in report['type_symbols']))
+        self.put('app/App.csproj', '<Project><ItemGroup Condition="$(Platform)"><Compile Include="../shared/Helper.cs" /></ItemGroup></Project>')
+        self.assertTrue(any('Compile items' in g['reason'] for g in self.scan()['gaps']))
+
     def auth(self, options='', version='10.0.12'):
         self.put('App.csproj','<Project><ItemGroup><PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="'+version+'" /></ItemGroup></Project>')
         self.put('Program.cs','using Microsoft.AspNetCore.Authentication.Cookies; using Microsoft.AspNetCore.Authentication.OpenIdConnect; var builder = WebApplication.CreateBuilder(args); builder.Services.AddAuthentication().AddCookie("session", o => { '+options+' }).AddOpenIdConnect("login", o => { o.SignInScheme="session"; o.SaveTokens=true; o.Scope.Add("profile"); }); builder.Build().Run();')
