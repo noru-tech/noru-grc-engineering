@@ -1,0 +1,56 @@
+{
+  "_comment": [
+    "Bundled vocabulary for the threat-model validator (contract requirement 3).",
+    "Kept in sync with contract/threat-model.schema.json by scripts/check_repo.py.",
+    "",
+    "These are the SHAPES a threat model and a risk can take: the Open Threat Model version this",
+    "piece reads, the kinds of element a threat can sit on, and the status/category/likelihood/impact",
+    "values Noru's own API publishes for a risk. They are not framework content: no control text, no",
+    "threat library, no catalogue of mitigations. Which risks already exist and which controls a risk",
+    "may be linked to come from the customer's organization at scan time, never from this file. See",
+    "contract/README.md, requirement 9.",
+    "",
+    "risk_status, risk_category, likelihood and impact are the published values for a Noru risk:",
+    "the 'Create risk' entry of https://api.noru.tech/llms.txt and the createRisk tool description",
+    "published by https://api.noru.tech/v1/mcp. Do not extend them here."
+  ],
+  "target_kind": ["component", "dataflow"],
+  "risk_status": ["identified", "assessing", "mitigating", "monitoring", "resolved", "accepted"],
+  "risk_category": [
+    "operational",
+    "financial",
+    "strategic",
+    "compliance",
+    "technical",
+    "security",
+    "reputational",
+    "legal",
+    "environmental",
+    "privacy"
+  ],
+  "likelihood": ["rare", "unlikely", "possible", "likely", "certain"],
+  "impact": ["negligible", "minor", "moderate", "major", "catastrophic"],
+  "_score_bands_comment": [
+    "How a threat's OTM likelihood and impact, each 0 to 100, become the values the skeleton proposes:",
+    "five equal bands, lowest first. A proposal only: the person who owns the risk decides."
+  ],
+  "score_bands": [20, 40, 60, 80, 100],
+  "signal_kind": ["provider", "vector_store", "dataset", "system", "resource"],
+  "undeclared_decision": ["out_of_scope"],
+  "_status_horizon_days_comment": [
+    "How long the judgement about a threat may stand, counted in days from the day the model was",
+    "observed (the commit date of the scanned state). A threat model goes stale as the system it",
+    "describes changes; this says when somebody has to look again, not when the risk is due.",
+    "Accepting a risk is a decision to live with it, and gets a longer window, never an unbounded one."
+  ],
+  "status_horizon_days": {
+    "identified": 180,
+    "assessing": 180,
+    "mitigating": 180,
+    "monitoring": 180,
+    "resolved": 365,
+    "accepted": 365,
+    "out_of_scope": 365
+  },
+  "queue_tools": ["getOrganizationRisks", "getOrganizationControls", "getRiskControlMappings"]
+}

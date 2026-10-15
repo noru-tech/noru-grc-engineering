@@ -112,6 +112,11 @@ at production scale. Treat a first run as something to check, not something to t
 - The Article 50 disclosure states are a *repository* fact. Whether that fact matches the running
   product — a notice injected by a design system, a disclosure that lives in another repo — is
   exactly what a scan cannot see. Check both directions by hand the first time.
+- `dev-agents` knows the agents acc knows. A change whose agent authorship acc did not establish
+  counts as a person's, and an agent missing from acc's vendor registry has no proposed vendor. It
+  reads five agent configuration files at the repository root, each against its tool's published
+  format; user-level configuration, `.claude/settings.local.json` and IDE settings stores are out of
+  scope, and a server configured only there is not in the inventory.
 - `governance-records`' extractor has only met documents written to its own conventions. A real
   minute book will not be.
 - The filename-to-expectation matcher in `evidence-push` has only met fixture catalogues.

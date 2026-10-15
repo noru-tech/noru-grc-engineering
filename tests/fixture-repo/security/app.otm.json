@@ -1,0 +1,91 @@
+{
+  "otmVersion": "0.2.0",
+  "project": {
+    "name": "Example application",
+    "id": "example-app",
+    "description": "Fixture threat model for the threat-model collector. Synthetic; nothing here describes a real system."
+  },
+  "trustZones": [
+    { "id": "internet", "name": "Internet", "risk": { "trustRating": 10 } },
+    { "id": "internal", "name": "Internal network", "risk": { "trustRating": 80 } }
+  ],
+  "components": [
+    {
+      "id": "web",
+      "name": "Web frontend",
+      "type": "web-client",
+      "parent": { "trustZone": "internet" },
+      "tags": ["deploy"]
+    },
+    {
+      "id": "api",
+      "name": "Contact API",
+      "type": "web-service",
+      "parent": { "trustZone": "internal" },
+      "threats": [
+        {
+          "threat": "sql-injection",
+          "state": "exposed",
+          "mitigations": [{ "mitigation": "parameterised-queries", "state": "implemented" }]
+        }
+      ]
+    },
+    {
+      "id": "store",
+      "name": "Account store",
+      "type": "database",
+      "parent": { "trustZone": "internal" }
+    },
+    {
+      "id": "assets-bucket",
+      "name": "Public assets bucket",
+      "type": "object-storage",
+      "parent": { "trustZone": "internal" },
+      "tags": ["signal:resource:aws_s3_bucket.public_assets"],
+      "threats": [
+        {
+          "threat": "public-object-storage",
+          "state": "mitigated",
+          "mitigations": [{ "mitigation": "bucket-policy", "state": "implemented" }]
+        }
+      ]
+    }
+  ],
+  "dataflows": [
+    {
+      "id": "web-to-api",
+      "name": "Browser calls the API",
+      "source": "web",
+      "destination": "api",
+      "threats": [{ "threat": "session-fixation", "state": "exposed" }]
+    },
+    { "id": "api-to-store", "name": "API reads accounts", "source": "api", "destination": "store" }
+  ],
+  "threats": [
+    {
+      "id": "sql-injection",
+      "name": "SQL injection",
+      "description": "Request input reaches a query unescaped.",
+      "categories": ["tampering"],
+      "cwes": ["CWE-89"],
+      "risk": { "likelihood": 60, "impact": 80, "impactComment": "Account data could be read or changed." }
+    },
+    {
+      "id": "public-object-storage",
+      "name": "Object storage readable by anyone",
+      "categories": ["information-disclosure"],
+      "risk": { "likelihood": 40, "impact": 60, "impactComment": "Only public assets are stored there." }
+    },
+    {
+      "id": "session-fixation",
+      "name": "Session fixation",
+      "categories": ["spoofing"],
+      "cwes": ["CWE-384"],
+      "risk": { "likelihood": 30, "impact": 50, "impactComment": "A session could be taken over." }
+    }
+  ],
+  "mitigations": [
+    { "id": "parameterised-queries", "name": "Parameterised queries", "riskReduction": 80 },
+    { "id": "bucket-policy", "name": "Bucket policy denies anonymous writes", "riskReduction": 90 }
+  ]
+}

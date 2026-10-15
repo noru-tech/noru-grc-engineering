@@ -25,6 +25,14 @@
         { "pattern": "(pull_request|workflow_dispatch|environment:|deploy|branch protection)", "reason": "change-approval or deployment behavior changed" }
       ]
     },
+    "dev-agents": {
+      "paths": [
+        { "pattern": "^(\\.mcp\\.json|\\.claude/settings\\.json|\\.cursor/mcp\\.json|\\.vscode/mcp\\.json|\\.gemini/settings\\.json)$", "reason": "a committed agent configuration at the repository root changed the MCP servers or plugins the development process loads" }
+      ],
+      "content": [
+        { "pattern": "(\"mcpServers\"|\"enabledPlugins\"|\"extraKnownMarketplaces\")", "reason": "an MCP server or plugin declaration changed" }
+      ]
+    },
     "evidence-push": {
       "paths": [
         { "pattern": "(^|/)(evidence|certificates?|reports?)(/|\\.)", "reason": "a local evidence, certificate or report path changed" },
@@ -66,6 +74,14 @@
       ],
       "content": [
         { "pattern": "(CREATE\\s+TABLE|model\\s+\\w+\\s*\\{|message\\s+\\w+\\s*\\{|type\\s+\\w+\\s*\\{|class\\s+\\w+.*(Model|Base))", "reason": "a stored-record or API schema definition changed" }
+      ]
+    },
+    "threat-model": {
+      "paths": [
+        { "pattern": "\\.otm\\.json$", "reason": "a threat model changed" }
+      ],
+      "content": [
+        { "pattern": "\"otmVersion\"\\s*:", "reason": "an Open Threat Model document changed" }
       ]
     },
     "review-signoff": {

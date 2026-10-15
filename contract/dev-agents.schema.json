@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/dev-agents.schema.json",
+  "title": "Noru Dev Agents manifest (.noru/dev-agents.yml)",
+  "description": "The coding agents, MCP servers and plugins a repository's development process depends on, as suppliers. Deliberately separate from ai-inventory, whose scope is the AI the product calls. The facts (agents, mcp_servers, plugins, changes) are derived offline from an agent-change-control manifest and the repository's committed agent configuration, and are pinned by source.derived_digest. The claims are the suppliers — which organization each one is, decided and signed by a person — and the attestation that the inventory was reviewed. Nothing here is per person: who ran which agent is never recorded, and no credential, environment value, header, argument or full URL from a configuration file is ever copied.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "piece",
+    "source",
+    "agents",
+    "mcp_servers",
+    "plugins",
+    "suppliers",
+    "queue_snapshot",
+    "attestation"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "piece": {
+      "const": "dev-agents"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "window": {
+      "$ref": "#/$defs/window"
+    },
+    "changes": {
+      "description": "How many changes the acc manifest holds for the window, and how many an agent authored. Totals only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "agent_authored", "refs"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "agent_authored": { "type": "integer", "minimum": 0 },
+        "refs": { "$ref": "#/$defs/refs" }
+      }
+    },
+    "agents": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/agent" }
+    },
+    "mcp_servers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/mcpServer" }
+    },
+    "plugins": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/plugin" }
+    },
+    "config_problems": {
+      "description": "Configuration the collector could not read or did not recognise. What is listed here is NOT in the inventory, and the validator says so.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "refs"],
+        "properties": {
+          "message": { "type": "string", "minLength": 1 },
+          "refs": { "$ref": "#/$defs/refs" }
+        }
+      }
+    },
+    "suppliers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/supplier" }
+    },
+    "queue_snapshot": {
+      "description": "What Noru said was due when :scan ran. Which controls this inventory is evidence for is Noru's answer, never this plugin's (requirement 9). Written from MCP output by the client; never invented here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fetched_at", "via", "controls"],
+      "properties": {
+        "fetched_at": { "type": "string", "minLength": 10 },
+        "via": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": ["getOrganizationControls", "getControlContext", "getEvidenceForControl"]
+          }
+        },
+        "controls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/queueControl" }
+        }
+      }
+    },
+    "control_mappings": {
+      "description": "The controls the window's evidence record is linked to. Every id must appear in queue_snapshot.controls.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/controlMapping" }
+    },
+    "attestation": {
+      "description": "The claim that a named person reviewed this inventory, as the evidence record says it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["refs", "interpretation"],
+      "properties": {
+        "refs": { "$ref": "#/$defs/refs" },
+        "needs_review": { "type": "boolean" },
+        "interpretation": { "$ref": "#/$defs/interpretation" }
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "commit_sha", "branch", "generated_by"],
+      "properties": {
+        "slug": { "type": "string", "minLength": 1 },
+        "commit_sha": { "type": "string", "minLength": 7 },
+        "branch": { "type": "string", "minLength": 1 },
+        "generated_by": { "type": "string", "minLength": 1 },
+        "input": {
+          "description": "Present when agents were read from an agent-change-control manifest.",
+          "enum": ["agent-change-control"]
+        },
+        "acp_version": {
+          "description": "The AI Change Provenance version of that manifest.",
+          "enum": ["0.3", "0.4"]
+        },
+        "acc_manifest_sha256": {
+          "description": "SHA-256 of the acc manifest, so drift detection covers the evidence underneath.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "derived_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "window": {
+      "description": "The acc manifest's collection window. Present when an acc manifest was read.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["opens_on", "closes_on"],
+      "properties": {
+        "opens_on": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "closes_on": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "complete": { "type": "boolean" }
+      }
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[^:\\s][^:]*:[0-9]+$"
+    },
+    "refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/ref" }
+    },
+    "supplierKey": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "agent": {
+      "description": "One coding agent from the acc actor registry, with the number of changes it authored and reviewed in the window. Never who ran it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "actor_id", "vendor", "changes_authored", "reviews", "supplier", "refs"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "actor_id": { "type": "string", "pattern": "^agent:" },
+        "vendor": {
+          "description": "The vendor acc's registry names for this agent, or null for an unregistered one.",
+          "type": ["string", "null"]
+        },
+        "changes_authored": { "type": "integer", "minimum": 0 },
+        "reviews": { "type": "integer", "minimum": 0 },
+        "supplier": { "$ref": "#/$defs/supplierKey" },
+        "refs": { "$ref": "#/$defs/refs" }
+      }
+    },
+    "mcpServer": {
+      "description": "One MCP server a committed agent configuration file declares. Recorded by the name of its command (stdio) or its host (remote) only — never env, headers, args or a full URL.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "file", "tool", "name", "transport", "supplier", "refs"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+        "file": {
+          "enum": [".mcp.json", ".cursor/mcp.json", ".vscode/mcp.json", ".gemini/settings.json"]
+        },
+        "tool": { "enum": ["claude-code", "cursor", "vscode", "gemini-cli"] },
+        "name": { "type": "string", "minLength": 1 },
+        "transport": { "enum": ["stdio", "http", "sse", "ws", "remote"] },
+        "command": {
+          "description": "The program's name only.",
+          "type": "string",
+          "pattern": "^([A-Za-z0-9][A-Za-z0-9._+-]{0,63}|\\(variable\\)|\\(unrecognised\\))$"
+        },
+        "host": {
+          "description": "The host name only.",
+          "type": "string",
+          "pattern": "^([a-z0-9.-]+|\\[[0-9a-f:.]+\\]|\\(variable\\)|\\(unrecognised\\))$"
+        },
+        "supplier": { "$ref": "#/$defs/supplierKey" },
+        "refs": { "$ref": "#/$defs/refs" }
+      }
+    },
+    "plugin": {
+      "description": "One plugin a committed .claude/settings.json enables, with its marketplace.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "file", "tool", "plugin", "marketplace", "supplier", "refs"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+        "file": { "enum": [".claude/settings.json"] },
+        "tool": { "enum": ["claude-code"] },
+        "plugin": { "type": "string", "minLength": 1 },
+        "marketplace": { "type": "string", "minLength": 1 },
+        "marketplace_source": { "type": "string", "minLength": 1 },
+        "marketplace_repo": { "type": "string", "minLength": 1 },
+        "marketplace_host": { "type": "string", "minLength": 1 },
+        "supplier": { "$ref": "#/$defs/supplierKey" },
+        "refs": { "$ref": "#/$defs/refs" }
+      }
+    },
+    "supplier": {
+      "description": "One organization the development process depends on, as it will land in Noru's vendor register. Its name and category are a person's decision: proposed from the acc vendor registry for an agent, never guessed for an MCP server or a plugin.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "vendor_name", "category", "refs", "interpretation"],
+      "properties": {
+        "key": { "$ref": "#/$defs/supplierKey" },
+        "vendor_name": { "type": "string", "minLength": 1 },
+        "category": {
+          "description": "The createVendor category. A supplier any agent depends on is an ai_model_provider.",
+          "enum": [
+            "infrastructure",
+            "software_as_a_service",
+            "finance",
+            "marketing",
+            "sales",
+            "hr",
+            "ai_model_provider",
+            "other"
+          ]
+        },
+        "website": { "type": "string", "pattern": "^https://" },
+        "refs": { "$ref": "#/$defs/refs" },
+        "needs_review": { "type": "boolean" },
+        "interpretation": { "$ref": "#/$defs/interpretation" }
+      }
+    },
+    "queueControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control_id"],
+      "properties": {
+        "control_id": {
+          "description": "The lowercase canonical id Noru returns, not the uppercase display id.",
+          "type": "string",
+          "minLength": 1
+        },
+        "display_id": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "controlMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control_id"],
+      "properties": {
+        "control_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "person": {
+      "type": "string",
+      "minLength": 3
+    },
+    "interpretation": {
+      "description": "Contract requirement 8. Who decided this, when, until when, and why.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "decided_at", "expires_at", "rationale"],
+      "properties": {
+        "owner": { "$ref": "#/$defs/person" },
+        "decided_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "expires_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "rationale": { "type": "string", "minLength": 10 },
+        "refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        }
+      }
+    }
+  }
+}

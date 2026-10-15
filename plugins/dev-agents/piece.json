@@ -1,0 +1,286 @@
+{
+  "$schema": "../../contract/piece.schema.json",
+  "piece": "dev-agents",
+  "contract_version": "0.1.0",
+  "artifact": ".noru/dev-agents.yml",
+  "manifest_schema": "contract/dev-agents.schema.json",
+  "commands": {
+    "scan": "commands/scan.md",
+    "diff": "commands/diff.md",
+    "push": "commands/push.md"
+  },
+  "skill": "skills/dev-agents/SKILL.md",
+  "collector": {
+    "entrypoint": "scripts/collect.mjs",
+    "deterministic": true,
+    "network": false,
+    "inputs": [
+      ".noru/.cache/acc-manifest.json",
+      ".mcp.json",
+      ".claude/settings.json",
+      ".cursor/mcp.json",
+      ".vscode/mcp.json",
+      ".gemini/settings.json"
+    ]
+  },
+  "validator": {
+    "entrypoint": "scripts/validate_manifest.py",
+    "runtime": "python3-stdlib",
+    "vocabulary": [
+      "references/vocabulary.json"
+    ],
+    "suggestions": true,
+    "exit_codes": {
+      "0": "manifest is valid; warnings may be present",
+      "1": "manifest has validation errors, including a supplier nobody has decided, per-person data, or a recorded configuration value that can hold a credential",
+      "2": "usage error, unreadable file, or unparseable YAML"
+    },
+    "fixtures": {
+      "valid": [
+        "fixtures/valid.dev-agents.yml"
+      ],
+      "invalid": [
+        {
+          "path": "fixtures/invalid-missing-interpretation.dev-agents.yml",
+          "expect_message": "missing required `interpretation`"
+        },
+        {
+          "path": "fixtures/invalid-needs-review.dev-agents.yml",
+          "expect_message": "still true"
+        },
+        {
+          "path": "fixtures/invalid-todo-vendor-name.dev-agents.yml",
+          "expect_message": "a person has to decide which organization this is"
+        },
+        {
+          "path": "fixtures/invalid-unknown-category.dev-agents.yml",
+          "expect_message": "unknown vendor category"
+        },
+        {
+          "path": "fixtures/invalid-agent-vendor-category.dev-agents.yml",
+          "expect_message": "is an AI model provider"
+        },
+        {
+          "path": "fixtures/invalid-unknown-supplier.dev-agents.yml",
+          "expect_message": "is not a supplier in this manifest"
+        },
+        {
+          "path": "fixtures/invalid-orphan-supplier.dev-agents.yml",
+          "expect_message": "nothing in this manifest depends on supplier"
+        },
+        {
+          "path": "fixtures/invalid-duplicate-vendor-name.dev-agents.yml",
+          "expect_message": "would land as one vendor"
+        },
+        {
+          "path": "fixtures/invalid-server-env-recorded.dev-agents.yml",
+          "expect_message": "can hold a credential"
+        },
+        {
+          "path": "fixtures/invalid-server-full-url.dev-agents.yml",
+          "expect_message": "must be a host name only"
+        },
+        {
+          "path": "fixtures/invalid-operator-counts.dev-agents.yml",
+          "expect_message": "per-person agent usage is employee activity data"
+        },
+        {
+          "path": "fixtures/invalid-off-queue-control.dev-agents.yml",
+          "expect_message": "is not in the queue snapshot"
+        },
+        {
+          "path": "fixtures/invalid-no-expiry.dev-agents.yml",
+          "expect_message": "missing required `expires_at`"
+        },
+        {
+          "path": "fixtures/invalid-expiry-beyond-horizon.dev-agents.yml",
+          "expect_message": "past the 400-day horizon"
+        },
+        {
+          "path": "fixtures/invalid-attestation-beyond-window-horizon.dev-agents.yml",
+          "expect_message": "days after the window closed, past the 400-day horizon"
+        },
+        {
+          "path": "fixtures/invalid-decided-before-window-closed.dev-agents.yml",
+          "expect_message": "cannot be drawn while the period is still running"
+        },
+        {
+          "path": "fixtures/invalid-unknown-transport.dev-agents.yml",
+          "expect_message": "unknown transport"
+        },
+        {
+          "path": "fixtures/invalid-acp-version.dev-agents.yml",
+          "expect_message": "is not an ACP version this reads"
+        },
+        {
+          "path": "fixtures/invalid-totals-disagree.dev-agents.yml",
+          "expect_message": "must agree"
+        }
+      ]
+    }
+  },
+  "push": {
+    "entrypoint": "scripts/push.mjs",
+    "mode": "keyed_upsert",
+    "collapses_to": {
+      "tool": "a single idempotency-keyed ingest that takes a development-supplier inventory for a window — the agents and their vendors, the MCP servers and plugins, and an owner with a validity period — and files the suppliers and the period record together, instead of one vendor call per supplier plus an evidence create and links the client has to thread",
+      "tracked_at": "https://github.com/noru-tech/noru-grc-engineering/issues"
+    },
+    "operations": [
+      {
+        "name": "createVendor",
+        "transport": "mcp",
+        "scope": "write:vendors",
+        "idempotency": {
+          "kind": "server_dedupe",
+          "key": [
+            "organizationId",
+            "name"
+          ],
+          "verified_at": "Published createVendor tool description at https://api.noru.tech/v1/mcp: \"If a vendor with the same name already exists, the existing record is returned.\""
+        }
+      },
+      {
+        "name": "createEvidence",
+        "transport": "mcp",
+        "scope": "write:evidence",
+        "idempotency": {
+          "kind": "client_probe",
+          "key": [
+            "description contains marker"
+          ],
+          "verified_at": "The createEvidence tool description published by https://api.noru.tech/v1/mcp documents creating text/note/link evidence with optional control mappings and documents no idempotency key. The \"Idempotency/Upsert Behavior\" section of https://api.noru.tech/llms.txt covers assets and security findings only.",
+          "gap": "No idempotency key is documented for evidence, so this piece embeds a marker built from the repository slug, the window and a digest of the rendered inventory in the evidence description, and probes getOrganizationEvidence before creating. A documented key would let the probe go away."
+        }
+      },
+      {
+        "name": "linkEvidenceToControl",
+        "transport": "mcp",
+        "scope": "write:evidence",
+        "idempotency": {
+          "kind": "client_probe",
+          "key": [
+            "evidenceId",
+            "controlId"
+          ],
+          "verified_at": "The linkEvidenceToControl tool description published by https://api.noru.tech/v1/mcp documents linking an evidence record to a control. Nothing published says whether linking the same pair twice is a no-op, so this piece does not assume it is.",
+          "gap": "The evidence id is learned from the create in the same plan, so the call carries depends_on and the executing client substitutes it; for evidence that already exists the piece compares the links the snapshot lists. A documented key on evidence would remove both probes."
+        }
+      }
+    ],
+    "provenance": {
+      "slug": true,
+      "commit_sha": true,
+      "branch": true
+    },
+    "diff_required": true,
+    "requires_confirmation": true
+  },
+  "scopes": {
+    "read": [
+      "read:organization",
+      "read:controls",
+      "read:evidence",
+      "read:vendors"
+    ],
+    "write": [
+      "write:vendors",
+      "write:evidence"
+    ]
+  },
+  "queue": {
+    "source": [
+      {
+        "kind": "repository",
+        "note": "The agents come from an agent-change-control manifest of the repository's own changes, and the MCP servers and plugins from its committed agent configuration — the development process's suppliers, which no server-side integration can see."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getOrganizationControls",
+        "note": "The organization's controls. Ids come from Noru; this plugin ships none."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getControlContext",
+        "note": "What a control expects and what is already linked, so a person can choose which controls this inventory is evidence for. Which ones apply is Noru's answer, never this plugin's."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getOrganizationVendors",
+        "note": "The vendors the organization already records, so the plan can say which suppliers already exist."
+      }
+    ],
+    "hardcoded_expectations": false
+  },
+  "state": {
+    "headless": true,
+    "reads": [
+      {
+        "into": "vendors",
+        "tool": "getOrganizationVendors",
+        "arguments": {
+          "fields": [
+            "id",
+            "name"
+          ]
+        },
+        "result": "vendors",
+        "page": {
+          "limit": 200
+        }
+      },
+      {
+        "into": "evidence",
+        "tool": "getOrganizationEvidence",
+        "arguments": {
+          "search": "noru-grc-engineering:dev-agents"
+        },
+        "result": "evidence",
+        "page": {
+          "limit": 200
+        }
+      }
+    ]
+  },
+  "interpretation": {
+    "required": true,
+    "level": "per_claim",
+    "unattributed": "error"
+  },
+  "ci": {
+    "output_json": true,
+    "quiet": true,
+    "validate": {
+      "runtime": "python3",
+      "entrypoint": "scripts/validate_manifest.py",
+      "arguments": [
+        "{manifest}",
+        "--output=json",
+        "--quiet"
+      ]
+    },
+    "drift_check": {
+      "runtime": "node",
+      "entrypoint": "scripts/collect.mjs",
+      "arguments": [
+        "--repo={repo}",
+        "--check",
+        "--output=json",
+        "--quiet"
+      ]
+    },
+    "watch_paths": [
+      ".mcp.json",
+      ".claude/settings.json",
+      ".cursor/mcp.json",
+      ".vscode/mcp.json",
+      ".gemini/settings.json",
+      ".noru/dev-agents.yml"
+    ],
+    "exit_codes": {
+      "0": "success",
+      "1": "drift, validation failure, an unusable acc manifest, a missing acc manifest the committed manifest was built from, or a stale plan",
+      "2": "usage error, including a push without --confirm"
+    }
+  }
+}

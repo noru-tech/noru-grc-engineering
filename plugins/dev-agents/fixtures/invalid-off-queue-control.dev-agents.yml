@@ -1,0 +1,180 @@
+# Invalid fixture: a control mapping the queue snapshot never offered.
+# Otherwise identical to valid.dev-agents.yml.
+version: 0.13.0
+piece: dev-agents
+source:
+  slug: example-org/example-app
+  commit_sha: 3f9a1c2e7b4d5a6f8e9d0c1b2a3f4e5d6c7b8a9f
+  branch: main
+  generated_by: dev-agents@0.13.0
+  input: agent-change-control
+  acp_version: "0.4"
+  acc_manifest_sha256: af31486b702690bd61620580cbbfdad2895687c9e57be56d22f781ddb843ea1d
+  derived_digest: a29520264cf0262c1fcedd2b5c2ecf971d24eb554a0c6c9328fb02025fa25da1
+window:
+  opens_on: 2026-07-01
+  closes_on: 2026-09-30
+  complete: true
+changes:
+  total: 5
+  agent_authored: 2
+  refs:
+    - ".noru/.cache/acc-manifest.json:1"
+agents:
+  - agent: codex
+    actor_id: "agent:codex"
+    vendor: openai
+    changes_authored: 2
+    reviews: 0
+    supplier: agent-vendor.openai
+    refs:
+      - ".noru/.cache/acc-manifest.json:1"
+mcp_servers:
+  - key: claude-code.docs
+    file: ".mcp.json"
+    tool: claude-code
+    name: docs
+    transport: http
+    host: mcp.docs.example.com
+    supplier: example-docs
+    refs:
+      - ".mcp.json:10"
+  - key: claude-code.tickets
+    file: ".mcp.json"
+    tool: claude-code
+    name: tickets
+    transport: stdio
+    command: npx
+    supplier: example-tickets
+    refs:
+      - ".mcp.json:3"
+  - key: cursor.docs
+    file: ".cursor/mcp.json"
+    tool: cursor
+    name: docs
+    transport: remote
+    host: mcp.docs.example.com
+    supplier: example-docs
+    refs:
+      - ".cursor/mcp.json:3"
+  - key: gemini-cli.search
+    file: ".gemini/settings.json"
+    tool: gemini-cli
+    name: search
+    transport: http
+    host: search.example.com
+    supplier: example-search
+    refs:
+      - ".gemini/settings.json:3"
+  - key: vscode.tickets
+    file: ".vscode/mcp.json"
+    tool: vscode
+    name: tickets
+    transport: stdio
+    command: npx
+    supplier: example-tickets
+    refs:
+      - ".vscode/mcp.json:11"
+plugins:
+  - key: claude-code.release-notes.example-tools
+    file: ".claude/settings.json"
+    tool: claude-code
+    plugin: release-notes
+    marketplace: example-tools
+    marketplace_source: github
+    marketplace_repo: example-org/agent-plugins
+    supplier: example-org-tools
+    refs:
+      - ".claude/settings.json:3"
+suppliers:
+  - key: agent-vendor.openai
+    vendor_name: OpenAI
+    category: ai_model_provider
+    refs:
+      - ".noru/.cache/acc-manifest.json:1"
+    interpretation:
+      owner: dana.whitfield@example.com
+      decided_at: 2026-10-05
+      expires_at: 2027-10-05
+      rationale: >
+        acc's registry names openai as the vendor of the codex agent, and our engineering
+        handbook names it as the coding agent we license. Confirmed with procurement.
+  - key: example-docs
+    vendor_name: Example Docs Inc.
+    category: software_as_a_service
+    refs:
+      - ".mcp.json:10"
+      - ".cursor/mcp.json:3"
+    interpretation:
+      owner: dana.whitfield@example.com
+      decided_at: 2026-10-05
+      expires_at: 2027-04-05
+      rationale: >
+        Both docs servers are the hosted documentation search our team subscribes to; the
+        publisher is named on the subscription, not inferred from the host name.
+  - key: example-tickets
+    vendor_name: Example Tickets Inc.
+    category: software_as_a_service
+    refs:
+      - ".mcp.json:3"
+      - ".vscode/mcp.json:11"
+    interpretation:
+      owner: dana.whitfield@example.com
+      decided_at: 2026-10-05
+      expires_at: 2027-04-05
+      rationale: >
+        The tickets server is the ticketing vendor's own published MCP server, run locally with
+        a per-developer token; checked against the vendor's documentation.
+  - key: example-search
+    vendor_name: Example Search Inc.
+    category: software_as_a_service
+    refs:
+      - ".gemini/settings.json:3"
+    interpretation:
+      owner: dana.whitfield@example.com
+      decided_at: 2026-10-05
+      expires_at: 2027-04-05
+      rationale: >
+        The search server is the search vendor's hosted MCP endpoint under our existing contract.
+  - key: example-org-tools
+    vendor_name: Example Org Platform Team
+    category: other
+    refs:
+      - ".claude/settings.json:3"
+    interpretation:
+      owner: dana.whitfield@example.com
+      decided_at: 2026-10-05
+      expires_at: 2027-04-05
+      rationale: >
+        The release-notes plugin comes from our own marketplace repository and is maintained
+        by the platform team, so it is recorded as an in-house supplier.
+queue_snapshot:
+  fetched_at: 2026-10-05T09:00:00Z
+  via:
+    - getOrganizationControls
+    - getControlContext
+  controls:
+    - control_id: zz-11
+      display_id: ZZ-11
+      name: Example supplier inventory control
+    - control_id: zz-12
+      display_id: ZZ-12
+      name: Example development tooling control
+control_mappings:
+  - control_id: zz-11
+  - control_id: zz-19
+attestation:
+  refs:
+    - ".noru/.cache/acc-manifest.json:1"
+    - ".claude/settings.json:1"
+    - ".cursor/mcp.json:1"
+    - ".gemini/settings.json:1"
+    - ".mcp.json:1"
+    - ".vscode/mcp.json:1"
+  interpretation:
+    owner: dana.whitfield@example.com
+    decided_at: 2026-10-05
+    expires_at: 2027-04-05
+    rationale: >
+      Reviewed the agents acc recorded for the third quarter and every MCP server and plugin the
+      committed agent configuration declares, against the supplier list procurement keeps.

@@ -1,0 +1,43 @@
+{
+  "name": "threat-model",
+  "version": "0.12.2",
+  "description": "Read the threat models a repository keeps in the Open Threat Model format, decide with the user what each threat means here, and land them in Noru's risk register linked to the organization's own controls — flagging the components other pieces found that the model leaves out.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech",
+    "url": "https://noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "threat-model",
+    "otm",
+    "risk-register",
+    "security",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Noru Threat Model",
+    "shortDescription": "Turn a committed threat model into reviewed, expiring risks.",
+    "longDescription": "Reads the Open Threat Model files a repository commits, asks Noru which risks this piece filed before and which controls the organization has, and proposes one risk per threat on each component or dataflow. A person decides whether each threat applies, how likely and how bad it is here, and until when that stands; the risks land in the register through a create-or-update keyed on an external id, linked to the organization's own controls, and the ones the model no longer names are resolved. Components that other pieces found and the model leaves out are reported for a decision.",
+    "developerName": "Noru",
+    "category": "Productivity",
+    "capabilities": [
+      "Local read: *.otm.json threat models and other pieces' derived facts",
+      "Local write: .noru/threat-model.yml and machine-only cache files",
+      "Noru read: organization, risks and controls",
+      "Noru write: risks and their control links only after diff and confirmation",
+      "One risk per threat on each component or dataflow",
+      "Expiring, attributed judgement on every threat",
+      "Undeclared components from ai-inventory, privacy-datamap and iac-scan",
+      "Resolves risks the model no longer names"
+    ],
+    "websiteURL": "https://noru.tech",
+    "defaultPrompt": "Read my threat model and show me what changed since the last scan. Do not push or write to Noru."
+  }
+}

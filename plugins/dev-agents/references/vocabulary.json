@@ -1,0 +1,48 @@
+{
+  "_comment": [
+    "Bundled vocabulary for the dev-agents collector and validator (contract requirement 3).",
+    "Kept in sync with contract/dev-agents.schema.json by scripts/check_repo.py (VOCAB_SYNC).",
+    "",
+    "vendor_category is the category enum of the createVendor tool description published by",
+    "https://api.noru.tech/v1/mcp. acp_versions are the AI Change Provenance versions whose",
+    "manifests this piece reads. config_files names each repository agent configuration file the",
+    "collector reads and the tool whose documentation defines it (cited in scripts/collect.mjs).",
+    "",
+    "acc_vendor_names maps the vendor identifiers of agent-change-control's built-in registry",
+    "(AI Change Provenance section 5: claude-code -> anthropic, copilot -> github, codex -> openai,",
+    "gemini-cli -> google, cursor -> cursor) to the vendor name the collector PROPOSES. A proposal",
+    "only: every supplier's name is a person's decision, and the skeleton flags it needs_review.",
+    "",
+    "What must NEVER go here: framework control text, guidance, or an evidence-item list. A piece",
+    "asks Noru what is needed. See contract/README.md, requirement 9."
+  ],
+  "vendor_category": [
+    "infrastructure",
+    "software_as_a_service",
+    "finance",
+    "marketing",
+    "sales",
+    "hr",
+    "ai_model_provider",
+    "other"
+  ],
+  "agent_vendor_category": "ai_model_provider",
+  "transport": ["stdio", "http", "sse", "ws", "remote"],
+  "config_tool": ["claude-code", "cursor", "vscode", "gemini-cli"],
+  "config_files": {
+    ".mcp.json": "claude-code",
+    ".claude/settings.json": "claude-code",
+    ".cursor/mcp.json": "cursor",
+    ".vscode/mcp.json": "vscode",
+    ".gemini/settings.json": "gemini-cli"
+  },
+  "acp_versions": ["0.3", "0.4"],
+  "acc_vendor_names": {
+    "anthropic": "Anthropic",
+    "cursor": "Cursor",
+    "github": "GitHub",
+    "google": "Google",
+    "openai": "OpenAI"
+  },
+  "queue_tools": ["getOrganizationControls", "getControlContext", "getEvidenceForControl"]
+}

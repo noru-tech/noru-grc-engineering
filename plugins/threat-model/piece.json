@@ -1,0 +1,226 @@
+{
+  "$schema": "../../contract/piece.schema.json",
+  "piece": "threat-model",
+  "contract_version": "0.1.0",
+  "artifact": ".noru/threat-model.yml",
+  "manifest_schema": "contract/threat-model.schema.json",
+  "commands": {
+    "scan": "commands/scan.md",
+    "diff": "commands/diff.md",
+    "push": "commands/push.md"
+  },
+  "skill": "skills/threat-model/SKILL.md",
+  "collector": {
+    "entrypoint": "scripts/collect.mjs",
+    "deterministic": true,
+    "network": false,
+    "inputs": [
+      "**/*.otm.json",
+      ".noru/.cache/threat-queue.json",
+      ".noru/.cache/ai-inventory.derived.json",
+      ".noru/.cache/privacy-datamap.derived.json",
+      ".noru/.cache/iac-scan.derived.json"
+    ]
+  },
+  "validator": {
+    "entrypoint": "scripts/validate_manifest.py",
+    "runtime": "python3-stdlib",
+    "vocabulary": [
+      "references/vocabulary.json"
+    ],
+    "suggestions": true,
+    "exit_codes": {
+      "0": "manifest is valid; warnings may be present",
+      "1": "manifest has validation errors, including a judgement already expired at --as-of",
+      "2": "usage error, unreadable file, or unparseable YAML"
+    },
+    "fixtures": {
+      "valid": [
+        "fixtures/valid.threat-model.yml"
+      ],
+      "invalid": [
+        {
+          "path": "fixtures/invalid-missing-interpretation.threat-model.yml",
+          "expect_message": "missing required `interpretation`"
+        },
+        {
+          "path": "fixtures/invalid-off-queue-control.threat-model.yml",
+          "expect_message": "may only be linked to a control the organization already has"
+        },
+        {
+          "path": "fixtures/invalid-no-expiry.threat-model.yml",
+          "expect_message": "missing required `expires_at`"
+        },
+        {
+          "path": "fixtures/invalid-expiry-beyond-horizon.threat-model.yml",
+          "expect_message": "may stand for at most"
+        },
+        {
+          "path": "fixtures/invalid-accepted-without-reasoning.threat-model.yml",
+          "expect_message": "has to be written down"
+        },
+        {
+          "path": "fixtures/invalid-undeclared-undecided.threat-model.yml",
+          "expect_message": "has to be added to the threat model"
+        },
+        {
+          "path": "fixtures/invalid-unknown-model.threat-model.yml",
+          "expect_message": "is not one of the models"
+        },
+        {
+          "path": "fixtures/invalid-duplicate-key.threat-model.yml",
+          "expect_message": "would overwrite each other on every push"
+        },
+        {
+          "path": "fixtures/invalid-unknown-status.threat-model.yml",
+          "expect_message": "unknown status"
+        },
+        {
+          "path": "fixtures/invalid-needs-review.threat-model.yml",
+          "expect_message": "still true"
+        }
+      ]
+    }
+  },
+  "push": {
+    "entrypoint": "scripts/push.mjs",
+    "mode": "keyed_upsert",
+    "collapses_to": {
+      "tool": "a documented upsert of a risk on externalId — the create already refuses a second risk with the same externalId, so a create-or-update keyed on it would let this piece drop the read-first probe — and a way to set a risk's control links in the same call",
+      "tracked_at": "https://github.com/noru-tech/noru-grc-engineering/issues"
+    },
+    "operations": [
+      {
+        "name": "createRisk",
+        "transport": "mcp",
+        "scope": "write:risks",
+        "idempotency": {
+          "kind": "client_probe",
+          "key": [
+            "externalId"
+          ],
+          "verified_at": "The \"Create risk\" entry of https://api.noru.tech/llms.txt: \"You may provide an optional `externalId` to represent your own risk identifier. If provided, `externalId` must be unique within the organization.\" The published createRisk tool description at https://api.noru.tech/v1/mcp takes the same externalId. Neither documents creating-or-updating on it.",
+          "gap": "No upsert on externalId is documented, so the piece reads the organization's risks first (getOrganizationRisks, matching the externalId or the marker on the first line of the description) and creates only what it does not find. Because externalId must be unique, a create the probe should have caught is refused rather than filed twice. A documented upsert on externalId would let the probe go."
+        }
+      },
+      {
+        "name": "updateRisk",
+        "transport": "mcp",
+        "scope": "write:risks",
+        "idempotency": {
+          "kind": "client_probe",
+          "key": [
+            "riskId"
+          ],
+          "verified_at": "Published updateRisk tool description at https://api.noru.tech/v1/mcp: \"Partially update an existing risk. Only fields provided are changed.\" The same call twice leaves the same record.",
+          "gap": "Updating needs the risk's id, which only the read-first probe supplies; the plan compares every field it writes and updates only when one differs."
+        }
+      },
+      {
+        "name": "linkRiskToControl",
+        "transport": "mcp",
+        "scope": "write:risks",
+        "idempotency": {
+          "kind": "client_probe",
+          "key": [
+            "riskId",
+            "controlId"
+          ],
+          "verified_at": "Published linkRiskToControl tool description at https://api.noru.tech/v1/mcp: \"Link a risk to a control (creates a control mapping). Idempotency: rejects if the link already exists.\"",
+          "gap": "A repeated link is refused, not ignored, so the plan links a new risk in the same push (the createRisk result supplies its id) and an existing risk only when the snapshot carries its current links from getRiskControlMappings, which a headless snapshot cannot read per risk."
+        }
+      }
+    ],
+    "provenance": {
+      "slug": true,
+      "commit_sha": true,
+      "branch": true
+    },
+    "diff_required": true,
+    "requires_confirmation": true
+  },
+  "scopes": {
+    "read": [
+      "read:organization",
+      "read:risks",
+      "read:controls"
+    ],
+    "write": [
+      "write:risks"
+    ]
+  },
+  "queue": {
+    "source": [
+      {
+        "kind": "repository",
+        "note": "The threat model itself is committed in the repository, in the Open Threat Model format: the piece reads what the team modelled, and nothing server-side can."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getOrganizationRisks",
+        "note": "The risks this piece filed before, found by the marker in their description, so a re-scan knows what is already in the register and what the model no longer names."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getOrganizationControls",
+        "note": "The organization's own controls, so a risk is linked only to a control it already has. This plugin ships no control catalogue."
+      },
+      {
+        "kind": "mcp_tool",
+        "tool": "getRiskControlMappings",
+        "note": "An existing risk's current control links, read interactively per risk, so a control added to an existing risk is linked once and never twice."
+      }
+    ],
+    "hardcoded_expectations": false
+  },
+  "state": {
+    "headless": true,
+    "reads": [
+      {
+        "into": "risks",
+        "tool": "getOrganizationRisks",
+        "arguments": {
+          "search": "noru-grc-engineering:threat-model:"
+        },
+        "result": "risks"
+      }
+    ]
+  },
+  "interpretation": {
+    "required": true,
+    "level": "per_claim",
+    "unattributed": "error"
+  },
+  "ci": {
+    "output_json": true,
+    "quiet": true,
+    "validate": {
+      "runtime": "python3",
+      "entrypoint": "scripts/validate_manifest.py",
+      "arguments": [
+        "{manifest}",
+        "--output=json",
+        "--quiet"
+      ]
+    },
+    "drift_check": {
+      "runtime": "node",
+      "entrypoint": "scripts/collect.mjs",
+      "arguments": [
+        "--repo={repo}",
+        "--check",
+        "--output=json",
+        "--quiet"
+      ]
+    },
+    "watch_paths": [
+      "**/*.otm.json",
+      ".noru/threat-model.yml"
+    ],
+    "exit_codes": {
+      "0": "success",
+      "1": "drift, validation failure, an expired judgement under --as-of, an invalid threat model, missing prerequisite input, or a stale plan",
+      "2": "usage error, including a push without --confirm"
+    }
+  }
+}

@@ -46,12 +46,14 @@ the plugins you want.
 /plugin marketplace add noru-tech/noru-grc-engineering
 /plugin install noru@noru-grc-engineering
 /plugin install ai-inventory@noru-grc-engineering
+/plugin install dev-agents@noru-grc-engineering
 /plugin install evidence-push@noru-grc-engineering
 /plugin install governance-records@noru-grc-engineering
 /plugin install review-signoff@noru-grc-engineering
 /plugin install audit-pack@noru-grc-engineering
 /plugin install iac-scan@noru-grc-engineering
 /plugin install findings-ingest@noru-grc-engineering
+/plugin install threat-model@noru-grc-engineering
 /plugin install privacy-datamap@noru-grc-engineering
 /plugin install change-control@noru-grc-engineering
 /plugin install compliance-assistant@noru-grc-engineering
@@ -65,12 +67,14 @@ Then configure the Noru MCP connection: [Claude guide](./docs/clients/claude-cod
 codex plugin marketplace add noru-tech/noru-grc-engineering
 codex plugin add noru@noru-grc-engineering
 codex plugin add ai-inventory@noru-grc-engineering
+codex plugin add dev-agents@noru-grc-engineering
 codex plugin add evidence-push@noru-grc-engineering
 codex plugin add governance-records@noru-grc-engineering
 codex plugin add review-signoff@noru-grc-engineering
 codex plugin add audit-pack@noru-grc-engineering
 codex plugin add iac-scan@noru-grc-engineering
 codex plugin add findings-ingest@noru-grc-engineering
+codex plugin add threat-model@noru-grc-engineering
 codex plugin add privacy-datamap@noru-grc-engineering
 codex plugin add change-control@noru-grc-engineering
 codex plugin add compliance-assistant@noru-grc-engineering
@@ -100,6 +104,7 @@ publication boundary, follow [developer onboarding](./docs/developer-onboarding.
 | Piece | Collects locally | Lands in Noru as |
 |---|---|---|
 | [`ai-inventory`](./plugins/ai-inventory/) | model/provider calls, agents, prompts, retrieval, evals, oversight points | assets + vendors + evidence (`iso_42001` / `eu_ai_act`) |
+| [`dev-agents`](./plugins/dev-agents/) | the coding agents that authored changes in a window (from an agent-change-control manifest) and the MCP servers and plugins the committed agent configuration declares | vendors, plus the window's inventory as evidence |
 | [`evidence-push`](./plugins/evidence-push/) | local artifacts, against Noru's own unmet evidence expectations | file evidence with control mappings |
 | [`governance-records`](./plugins/governance-records/) | minutes, ISMS scope, statement of applicability, audit plans and reports, findings, corrective action plans | attributed, dated records as evidence |
 | [`review-signoff`](./plugins/review-signoff/) | a periodic review of machine output, and the human decision about it | a named, dated, expiring sign-off as evidence |
@@ -107,6 +112,7 @@ publication boundary, follow [developer onboarding](./docs/developer-onboarding.
 | [`privacy-datamap`](./plugins/privacy-datamap/) | the schemas a repository holds — current ORM models, SQL DDL, protobuf, GraphQL — and the personal data in them | a Fides privacy data map (`read/write:datamaps`) |
 | [`iac-scan`](./plugins/iac-scan/) | compliance-relevant misconfiguration in Terraform, CloudFormation, Kubernetes and pipeline configuration | security findings, keyed and closed by the same call |
 | [`findings-ingest`](./plugins/findings-ingest/) | SARIF and OSV-Scanner results a repository's CI produces and never uploads to a forge alert store | security findings filed against risks the organization already carries, keyed and closed by the same call |
+| [`threat-model`](./plugins/threat-model/) | the threats in a committed Open Threat Model, and the components other pieces found that it leaves out | risks in the register, linked to the organization's own controls |
 | [`change-control`](./plugins/change-control/) | who wrote, approved, merged and deployed each change over one window, and the branch protection that was supposed to keep those apart | a finding per separation that did not hold, plus the window as evidence |
 | [`noru`](./plugins/noru/) | repository signals and shared provenance | the hub: route, `connect`, `doctor`, `context` |
 | [`repo-enforcement`](./plugins/repo-enforcement/) | all configured GRC manifests, exact legacy-debt acceptances, CODEOWNERS, and effective GitHub rules | no Noru record; this optional utility makes the offline checks and review rules mandatory |
@@ -136,6 +142,11 @@ one of them mostly assembles rather than discovers.
   actually present in the code. The Act does not require anyone to keep an AI register; ISO 42001 is
   what expects the documented inventory. See the piece README for what each instrument does and does
   not ask for.
+- `dev-agents` targets **the development process's own suppliers**: the vendor whose model wrote a
+  change, and whoever publishes each MCP server and plugin the repository tells its agents to load.
+  It is not `ai-inventory`, which is about the AI the product calls. A server is recorded by its
+  command's name or its host and nothing more, a person decides every supplier, and who ran which
+  agent is never counted unless asked — and then only into a local cache file.
 - `evidence-push` targets **whatever your organization's own evidence queue says is unmet** — it
   asks Noru rather than shipping an opinion, so it is not tied to one framework.
 - `governance-records` targets the **records of human decisions**: who met, when, what was decided,
@@ -333,6 +344,9 @@ Use least-privilege scopes:
 | Reading, `:scan`, `:diff` | `read:organization`, `read:frameworks`, `read:controls`, `read:evidence` |
 | `ai-inventory:diff` also | `read:assets`, `read:vendors` |
 | `ai-inventory:push` | adds `write:assets`, `write:vendors`, `write:evidence` |
+| `dev-agents:scan` | `read:controls` |
+| `dev-agents:diff` | adds `read:organization` to bind the plan, `read:vendors`, `read:evidence` |
+| `dev-agents:push` | adds `write:vendors`, `write:evidence` |
 | `evidence-push:push` | adds `write:evidence` |
 | `governance-records:push` | adds `write:evidence` |
 | `review-signoff:push` | adds `write:evidence` |
@@ -343,6 +357,9 @@ Use least-privilege scopes:
 | `findings-ingest:scan` | `read:risks`, `read:assets` |
 | `findings-ingest:diff` | adds `read:organization` to bind the plan |
 | `findings-ingest:push` | adds `write:risks` |
+| `threat-model:scan` | `read:risks`, `read:controls` |
+| `threat-model:diff` | adds `read:organization` to bind the plan |
+| `threat-model:push` | adds `write:risks` |
 | `privacy-datamap:scan` | `read:datamaps` |
 | `privacy-datamap:diff` | adds `read:organization` to bind the plan |
 | `privacy-datamap:push` | adds `write:datamaps` |
@@ -393,12 +410,14 @@ noru-grc-engineering/
 ├── plugins/
 │   ├── noru/                           # hub: connect, doctor, context
 │   ├── ai-inventory/                   # :scan :diff :push  (MCP)
+│   ├── dev-agents/                     # :scan :diff :push  (MCP)
 │   ├── evidence-push/                  # :scan :diff :push  (REST upload)
 │   ├── governance-records/             # :scan :diff :push  (MCP)
 │   ├── review-signoff/                 # :scan :diff :push  (MCP)
 │   ├── audit-pack/                     # :scan :diff :push  (MCP)
 │   ├── iac-scan/                       # :scan :diff :push  (MCP)
 │   ├── findings-ingest/                # :scan :diff :push  (MCP)
+│   ├── threat-model/                   # :scan :diff :push  (MCP)
 │   ├── privacy-datamap/                # :scan :diff :push  (MCP)
 │   ├── repo-enforcement/                # optional merge-boundary utility; no Noru write
 │   └── change-control/                 # :scan :diff :push  (MCP) + credentialed forge exporters

@@ -16,6 +16,7 @@ body:
         - a new piece
         - noru (hub)
         - ai-inventory
+        - dev-agents
         - evidence-push
         - governance-records
         - review-signoff
@@ -23,6 +24,7 @@ body:
         - privacy-datamap
         - iac-scan
         - findings-ingest
+        - threat-model
         - change-control
         - repo-enforcement
         - noru-ci action

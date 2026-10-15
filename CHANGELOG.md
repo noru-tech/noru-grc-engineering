@@ -35,6 +35,27 @@ one version number; the release workflow fails if they disagree.
   token to any step. `test_ci_mode.py` runs every case under a GitHub Actions environment and again
   under a GitLab CI one. New test script: `scripts/test_gitlab_ci.py`.
 
+- New piece, `dev-agents`: the coding agents, MCP servers and plugins a repository's development
+  process depends on, as suppliers — deliberately separate from `ai-inventory`, which is about the
+  AI the product calls. Agents come from an agent-change-control manifest (ACP 0.3 or 0.4) at
+  `.noru/.cache/acc-manifest.json`, with their vendor and the changes each authored in the window;
+  MCP servers and plugins from the tracked `.mcp.json`, `.claude/settings.json`, `.cursor/mcp.json`,
+  `.vscode/mcp.json` and `.gemini/settings.json`, each server recorded by its command's name or its
+  host only — never env, headers, args or a URL. An agent's vendor is proposed from acc's vendor
+  registry; an MCP server's or plugin's publisher is never guessed. Per-operator counts are computed
+  only with `--operator-counts`, and written only to `.noru/.cache/dev-agents.operators.json`. Push
+  is one `createVendor` per supplier, one `createEvidence` for the window and a
+  `linkEvidenceToControl` per control chosen from the queue snapshot.
+- New piece, `threat-model`: the threats in a committed Open Threat Model (`*.otm.json`) become
+  risks in Noru's register, one per threat on each component or dataflow, keyed on the project, the
+  element and the threat, each with an owner, a rationale and an expiry measured from when the model
+  was observed. Risks are linked to controls chosen from the organization's own (`linkRiskToControl`;
+  a new risk in the same push), created or updated by externalId after a read-first probe, and
+  resolved when the model no longer names them. Providers, vector stores, datasets, systems and
+  resources that ai-inventory, privacy-datamap or iac-scan found and no component of the model names
+  are reported as undeclared, and each must be added to the model or decided out of scope. New tools
+  in the contract: `createRisk`, `updateRisk`, `linkRiskToControl`, `getRiskControlMappings`.
+
 ## 0.13.0 — 2026-10-14
 
 - Add explicit scoped uncertainty acceptance for investigated fields and coverage findings. Preserve

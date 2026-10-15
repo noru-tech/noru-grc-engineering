@@ -30,7 +30,7 @@ copilot plugin install noru@noru-grc-engineering
 copilot plugin install ai-inventory@noru-grc-engineering
 ```
 
-Pieces: `ai-inventory`, `evidence-push`, `governance-records`, `review-signoff`, `audit-pack`, `iac-scan`, `findings-ingest`, `privacy-datamap`, `change-control`; the hub `noru`; the optional `repo-enforcement` utility; and `compliance-assistant`, listed from its own repository.
+Pieces: `ai-inventory`, `dev-agents`, `evidence-push`, `governance-records`, `review-signoff`, `audit-pack`, `iac-scan`, `findings-ingest`, `threat-model`, `privacy-datamap`, `change-control`; the hub `noru`; the optional `repo-enforcement` utility; and `compliance-assistant`, listed from its own repository.
 
 Three GitHub Actions run the offline checks with no credential, so they work on a pull request from a fork. `@v0` follows the newest 0.x release:
 

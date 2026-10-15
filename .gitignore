@@ -31,3 +31,5 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+# …except the fixture repository's workspace MCP configuration, which dev-agents reads.
+!tests/fixture-repo/.vscode/

@@ -501,6 +501,7 @@
         "getOrganizationControls",
         "getOrganizationRisks",
         "getRiskTreatments",
+        "getRiskControlMappings",
         "getSecurityFindings",
         "getPendingControls",
         "getControlStatus",
@@ -518,6 +519,9 @@
         "updateAsset",
         "createVendor",
         "createEvidence",
+        "createRisk",
+        "updateRisk",
+        "linkRiskToControl",
         "updateEvidence",
         "linkEvidenceToControl",
         "ingestDatamap"
