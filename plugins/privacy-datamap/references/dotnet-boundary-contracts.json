@@ -1,0 +1,309 @@
+{
+  "authentication": [
+    {
+      "adapter": "aspnet-ticket-v5",
+      "version": "10.0.12",
+      "license": "MIT",
+      "sources": [
+        {
+          "version": "10.0.12",
+          "contract": "ticket",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Security/Authentication/Core/src/TicketSerializer.cs",
+          "sha256": "1c5d56b37fdf513fb11c5cc9b3b31bad3b856d40fe82fdfc061085c6db526ca6"
+        },
+        {
+          "version": "10.0.12",
+          "contract": "properties",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Security/Authentication/Core/src/PropertiesSerializer.cs",
+          "sha256": "8c38d1f063496586857dde6a0e1a787774295ea21ab63da7a399f7135174464e"
+        },
+        {
+          "version": "10.0.12",
+          "contract": "cookie",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Security/Authentication/Cookies/src/CookieAuthenticationHandler.cs",
+          "sha256": "496bd25b09b7e7c98fecf811993db455a21e8fbe772ed0fcf5016ff1e060f30c"
+        },
+        {
+          "version": "10.0.12",
+          "contract": "cookie_options",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Security/Authentication/Cookies/src/PostConfigureCookieAuthenticationOptions.cs",
+          "sha256": "4306b4bc2a044d675974174f4a44c9041e6a76c0ba7cbfd464ebcf84cd52c5ba"
+        },
+        {
+          "version": "10.0.12",
+          "contract": "oidc",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Security/Authentication/OpenIdConnect/src/OpenIdConnectHandler.cs",
+          "sha256": "1d999aa4cf01f324f252e30ab74e0eb2fa33a2419b9aac0bd1237827b1d71e3f"
+        },
+        {
+          "version": "10.0.12",
+          "contract": "oidc_options",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Security/Authentication/OpenIdConnect/src/OpenIdConnectOptions.cs",
+          "sha256": "62acdce093ac363a0ebcb97fbdf3b4d397ccf640721912a3783bd9f5cf880b38"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Http/Authentication.Abstractions/src/TokenExtensions.cs",
+          "sha256": "d90ba1b4385f42d204cec19b5f0c4cf29d7cad4093b11ef057b15c73507aa23f",
+          "contract": "token_properties",
+          "version": "10.0.12"
+        }
+      ],
+      "fields": {
+        "format_version": {
+          "kind": "number"
+        },
+        "authentication_scheme": {
+          "kind": "string"
+        },
+        "identities": {
+          "kind": "array",
+          "element": {
+            "kind": "object",
+            "members": {
+              "authentication_type": {
+                "kind": "string"
+              },
+              "name_claim_type": {
+                "kind": "string"
+              },
+              "role_claim_type": {
+                "kind": "string"
+              },
+              "claims": {
+                "kind": "array",
+                "element": {
+                  "kind": "object",
+                  "members": {
+                    "type": {
+                      "kind": "string"
+                    },
+                    "value": {
+                      "kind": "string"
+                    },
+                    "value_type": {
+                      "kind": "string"
+                    },
+                    "issuer": {
+                      "kind": "string"
+                    },
+                    "original_issuer": {
+                      "kind": "string"
+                    },
+                    "properties": {
+                      "kind": "record",
+                      "open": true,
+                      "key_type": "string",
+                      "value_type": "string"
+                    }
+                  }
+                },
+                "open": true
+              },
+              "bootstrap_context": {
+                "kind": "string"
+              },
+              "actor": {
+                "kind": "unknown_object",
+                "open": true
+              }
+            }
+          },
+          "open": true
+        },
+        "properties": {
+          "kind": "record",
+          "open": true,
+          "key_type": "string",
+          "value_type": "string"
+        }
+      },
+      "saved_token_keys": [
+        ".TokenNames",
+        ".Token.access_token",
+        ".Token.id_token",
+        ".Token.refresh_token",
+        ".Token.token_type",
+        ".Token.expires_at"
+      ]
+    },
+    {
+      "adapter": "aspnet-ticket-v5",
+      "version": "8.0.0",
+      "license": "MIT",
+      "sources": [
+        {
+          "version": "8.0.0",
+          "contract": "ticket",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v8.0.0/src/Security/Authentication/Core/src/TicketSerializer.cs",
+          "sha256": "1c5d56b37fdf513fb11c5cc9b3b31bad3b856d40fe82fdfc061085c6db526ca6"
+        },
+        {
+          "version": "8.0.0",
+          "contract": "properties",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v8.0.0/src/Security/Authentication/Core/src/PropertiesSerializer.cs",
+          "sha256": "8c38d1f063496586857dde6a0e1a787774295ea21ab63da7a399f7135174464e"
+        },
+        {
+          "version": "8.0.0",
+          "contract": "cookie",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v8.0.0/src/Security/Authentication/Cookies/src/CookieAuthenticationHandler.cs",
+          "sha256": "756379f059e5074cec6aaa49e4abcc26633cc30cf31bc1afb8a44142e35d457a"
+        },
+        {
+          "version": "8.0.0",
+          "contract": "cookie_options",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v8.0.0/src/Security/Authentication/Cookies/src/PostConfigureCookieAuthenticationOptions.cs",
+          "sha256": "4306b4bc2a044d675974174f4a44c9041e6a76c0ba7cbfd464ebcf84cd52c5ba"
+        },
+        {
+          "version": "8.0.0",
+          "contract": "oidc",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v8.0.0/src/Security/Authentication/OpenIdConnect/src/OpenIdConnectHandler.cs",
+          "sha256": "8f1b0a38afd855f123ccff0be518ede0c4581227739dfea4238d235f121e7c2c"
+        },
+        {
+          "version": "8.0.0",
+          "contract": "oidc_options",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v8.0.0/src/Security/Authentication/OpenIdConnect/src/OpenIdConnectOptions.cs",
+          "sha256": "9a99503ac861cbeee0211f79fba0c968ae3302f9f51fcf4bc1c6dc3f7f3875a5"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v8.0.0/src/Http/Authentication.Abstractions/src/TokenExtensions.cs",
+          "sha256": "71bd9d06425d01b3468328fb069fcb92d442b8dce7f54dc18cb7fb975298a187",
+          "contract": "token_properties",
+          "version": "8.0.0"
+        }
+      ],
+      "fields": {
+        "format_version": {
+          "kind": "number"
+        },
+        "authentication_scheme": {
+          "kind": "string"
+        },
+        "identities": {
+          "kind": "array",
+          "element": {
+            "kind": "object",
+            "members": {
+              "authentication_type": {
+                "kind": "string"
+              },
+              "name_claim_type": {
+                "kind": "string"
+              },
+              "role_claim_type": {
+                "kind": "string"
+              },
+              "claims": {
+                "kind": "array",
+                "element": {
+                  "kind": "object",
+                  "members": {
+                    "type": {
+                      "kind": "string"
+                    },
+                    "value": {
+                      "kind": "string"
+                    },
+                    "value_type": {
+                      "kind": "string"
+                    },
+                    "issuer": {
+                      "kind": "string"
+                    },
+                    "original_issuer": {
+                      "kind": "string"
+                    },
+                    "properties": {
+                      "kind": "record",
+                      "open": true,
+                      "key_type": "string",
+                      "value_type": "string"
+                    }
+                  }
+                },
+                "open": true
+              },
+              "bootstrap_context": {
+                "kind": "string"
+              },
+              "actor": {
+                "kind": "unknown_object",
+                "open": true
+              }
+            }
+          },
+          "open": true
+        },
+        "properties": {
+          "kind": "record",
+          "open": true,
+          "key_type": "string",
+          "value_type": "string"
+        }
+      },
+      "saved_token_keys": [
+        ".TokenNames",
+        ".Token.access_token",
+        ".Token.id_token",
+        ".Token.refresh_token",
+        ".Token.token_type",
+        ".Token.expires_at"
+      ]
+    }
+  ],
+  "propagation": [
+    {
+      "version": "1.19.1",
+      "license": "Apache-2.0",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-dotnet/core-1.19.1/src/OpenTelemetry.Api/Context/Propagation/Propagators.cs",
+          "sha256": "1666b3ddbf83529695a05357a60ec9c369e9c0c474235429fb307c4620300737"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-dotnet/core-1.19.1/src/OpenTelemetry.Api/Context/Propagation/TraceContextPropagator.cs",
+          "sha256": "3a1b52ca4e5caef3f82aa63f0a9fbd99ad387688928da7a4c65de1feba3bd984"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-dotnet/core-1.19.1/src/OpenTelemetry.Api/Context/Propagation/BaggagePropagator.cs",
+          "sha256": "cd176446cb96ad138cccfcc4b2bd0aec718504a233a2b2bae12f68e28cd591fb"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-dotnet/core-1.19.1/src/OpenTelemetry/Sdk.cs",
+          "sha256": "d4d22e9002cad7ecee5904a4cf072827a55b69f562b3910ea97312bbc49a8166"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-dotnet/core-1.19.1/src/OpenTelemetry.Extensions.Hosting/OpenTelemetryServicesExtensions.cs",
+          "sha256": "722030515365cacb58a4d2a8e48592b01c709cd76d7bfb2dab2e5612dd3eedda"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-dotnet/core-1.19.1/src/OpenTelemetry.Extensions.Hosting/OpenTelemetryBuilder.cs",
+          "sha256": "10ff57eb8d96af6b06067bf4aba241bb07c5077e91e1508f3eb66f5101017175"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-dotnet/core-1.19.1/src/OpenTelemetry/Internal/Builder/ProviderBuilderServiceCollectionExtensions.cs",
+          "sha256": "2ec6843d9e5fb36c95a7f2180c897a61c0ed011061463abb1e5902b2c57af997"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-dotnet/core-1.19.1/src/OpenTelemetry.Extensions.Hosting/OpenTelemetry.Extensions.Hosting.csproj",
+          "sha256": "93665968ac407ed993cf8419564a2b04bc1b01040ee16e4f92a3ab1aee95456a"
+        }
+      ],
+      "propagators": {
+        "TraceContextPropagator": [
+          "traceparent",
+          "tracestate"
+        ],
+        "BaggagePropagator": [
+          "baggage"
+        ]
+      },
+      "sdk_default_propagators": [
+        "TraceContextPropagator",
+        "BaggagePropagator"
+      ]
+    }
+  ]
+}

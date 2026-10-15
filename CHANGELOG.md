@@ -35,6 +35,69 @@ one version number; the release workflow fails if they disagree.
   token to any step. `test_ci_mode.py` runs every case under a GitHub Actions environment and again
   under a GitLab CI one. New test script: `scripts/test_gitlab_ci.py`.
 
+## 0.13.0 — 2026-10-14
+
+- Add explicit scoped uncertainty acceptance for investigated fields and coverage findings. Preserve
+  unknown meaning, reviewer attribution and map impact through review, sealing and Fides export;
+  reopen changed evidence and retain acceptance history. Supply a batch command and review templates.
+
+- Permit evidenced, reviewed open content through classification and sealing without requiring
+  bounded values; preserve residual uncertainty in exported descriptions and retain evidence checks.
+
+- Keep collector gaps in the agent investigation queue even when all fields are classified. Supply
+  supplemental-model fallback steps and require actionable evidence investigations instead of
+  plugin-development outcomes
+  without clearing structural, semantic or approval gates.
+
+- Model supported authentication-ticket and RabbitMQ header structures independently of database
+  records, using pinned framework contracts and retaining open-content and customization gaps.
+- Trace injected default propagators through referenced projects and evidenced SDK initialization;
+  retain blockers for custom overrides, conditional activation and unsupported header decoding.
+- Discover Aspire YARP forwarding runtimes and source-defined routes separately from provisioners;
+  permit evidenced supplemental provisioned systems without labeling them external recipients.
+- Count enrichment-discovered storage gaps as technical blockers across the shared review gates.
+  Allow evidenced known-open record structure to resolve extraction without accepting its meaning.
+- Resolve explicitly scoped runtime findings against evidenced systems and flows; reopen them on
+  structural changes without requiring a fabricated dataset or accepting privacy meaning.
+
+- Privacy: add a pinned ASP.NET Identity 10.0.12 field contract and provisional default Identity tables. Configuration and framework model diagnostics still require evidence-backed investigation.
+- Privacy: discover C# web, worker, Aspire and MAUI runtime entrypoints from lexical source evidence and project boundaries.
+
+- Honor evidence-bound extraction-gap dispositions consistently across review, validation, sealing,
+  export, publication preflight and CI. Preserve observed diagnostics, resolution history and active
+  blockers; reopen stale or incomplete evidence instead of clearing acceptance safeguards.
+- Replace migration directory-proximity coverage with explicit context/configuration adapters and
+  separate datastore-identity and current-schema checks, including cross-project EF models.
+
+- Discover .NET entities through explicit model-builder registrations and bounded source extension
+  calls, retaining provenance and diagnosing cycles, ambiguity and conditional bindings. Separate
+  CLR, storage and serialization facts, source/adapter-backed inheritance and entity relationships.
+- Carry stable categorized .NET diagnostics and all grouped source occurrences through collection
+  and canonical review; show extraction counts separately from classification and acceptance.
+  Add synthetic feature tests and a repeatable multi-repository before/after comparison tool.
+
+- Apply bounded, explicitly registered EF configurations for stored names, exclusions, backing
+  and typed shadow fields, simple owned-object columns and enum-to-string conversions. Keep
+  conditional mappings, custom converters and unsupported configuration as review gaps.
+
+- Recover source-defined inherited fields with origin evidence and Identity custom user fields;
+  leave unavailable framework definitions and ambiguous inheritance as explicit gaps.
+
+- Trace literal PostgreSQL registrations across project references and straight-line Aspire
+  PostgreSQL database wiring, keeping ambiguous or dynamic connections unresolved.
+
+- Keep C# declarations when diagnostic strings use interpolation or raw literals; resolve
+  source-declared enums while retaining gaps for malformed literals and ambiguous types.
+
+- Resolve Entity Framework global namespace imports from separate C# files within the same
+  project, retaining import evidence on extracted datastore relationships.
+
+- Discover .NET projects and relevant dependencies, extract bounded C# persisted model fields,
+  and trace modeled Entity Framework, MongoDB, DynamoDB and literal typed SQL relationships.
+  Report unresolved configuration and extraction gaps with source evidence; preserve nested
+  member review and C# source freshness. Support SQL schema-qualified names, .NET review routing
+  and .NET AI dependency signatures without running target code.
+
 - New piece, `findings-ingest`: SARIF 2.1.0 and OSV-Scanner JSON reports your CI writes and does
   not upload anywhere become reviewed security findings, through the same `createSecurityFinding`
   upsert as `iac-scan`, and findings no input reports any more are closed. The committed
@@ -47,6 +110,7 @@ one version number; the release workflow fails if they disagree.
   snapshot, and no finding carries a due date: the queue records the due date of the linked risk's
   treatment as Noru holds it (new queue tool `getRiskTreatments`), and `--as-of` reports an open
   finding past it.
+
 - `change-control` can take its change history from an agent-change-control manifest instead of its
   own exporter: `scripts/export/acc.mjs --manifest=acc-manifest.json [--forge-export=…]` writes the
   same `.noru/.cache/change-events.json`, offline, with acc's verdict on each change. ACC002, ACC003

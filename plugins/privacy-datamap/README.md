@@ -25,6 +25,7 @@ for business context or accountable acceptance.
 | SQL DDL | current `*.sql` schemas | declarative `CREATE TABLE`; recognized migrations are excluded |
 | Drizzle | `*.ts`, `*.tsx`, `*.js`, `*.jsx` | common multiline `pgTable`, `mysqlTable` and `sqliteTable` declarations, including nested builder calls |
 | Prisma | `*.prisma` | `model` → collection, each field |
+| C#/.NET | `*.cs` and project metadata | bounded persisted model/property extraction and modeled EF, MongoDB, DynamoDB and literal typed SQL bindings; [support and limits](references/dotnet-support.md) |
 | Python ORM | `*.py` | Django `models.Model` and SQLAlchemy declarative classes; an attribute assigned from `Column(...)`, `mapped_column(...)` or a `*Field(...)` call |
 | Protobuf | `*.proto` | `message` → collection, each numbered field |
 | GraphQL SDL | `*.graphql`, `*.gql`, `*.graphqls` | `type` and `input` → collection, each field |
@@ -87,8 +88,10 @@ filenames. Static Drizzle `out` paths exclude generated files even when the dire
 name or its current schema is missing. Custom layouts that match none of these conventions remain
 a discovery limitation; do not treat historical declarations as current schemas during agent review.
 
-`coverage.excluded_migrations` lists paths only, without reading their contents. A boundary with
-recognized migrations but no collected current schema is reported in `coverage.migration_gaps`;
+`coverage.excluded_migrations` lists paths. A separate bounded adapter reads identity metadata and
+fingerprints migration evidence; historical declarations never supply current fields. Explicit context
+or configuration evidence links migrations to current schemas, with identity and completeness checked
+separately. Incomplete or ambiguous coverage is reported in `coverage.migration_gaps`;
 it contributes no guessed fields. Migrations cannot override current schemas through explicit
 connection bindings. An accepted map that previously used migrations needs normal removal/identity
 review against current evidence; do not silently carry obsolete fields forward.
@@ -192,6 +195,18 @@ blocks. Machine work left by an analysis budget remains agent work, not a reques
 A manifest carrying any `needs_review: true` **cannot be pushed**. That is the mechanism, not a
 lint: a confidently wrong data category is worse than a gap, because the gap gets reviewed and the
 wrong answer gets signed.
+
+## Accepting uncertainty
+
+An investigated field or coverage finding can be explicitly accepted with uncertainty.
+The agent presents the remaining uncertainty and map impact; a named human reviewer decides.
+`investigate.py` supplies scoped `uncertainty_candidates` and accepts approved records through
+`--uncertainties=<decisions.json>`. See [the workflow](references/accepted-uncertainty.md).
+
+Accepted uncertainty clears the affected pending review, stays visible in the exported map,
+and reopens when its evidence changes. Zero active gaps means zero unaccounted-for findings,
+including those explicitly accepted with uncertainty. Unknown meaning is not relabeled non-personal.
+Normal map acceptance and publication confirmation still apply.
 
 ## Incremental reconciliation
 
@@ -632,3 +647,11 @@ Run `scripts/check_privacy.py --repo=<repository>` from this plugin to check the
 baseline and export offline. `scripts/publish_datamap.py` provides opt-in REST publication
 with provider-neutral source metadata. See [portable privacy CI](../../docs/privacy-ci.md)
 for inputs, exit codes and the supported document format.
+
+### Extraction diagnostic resolutions
+
+Investigate raw findings through the canonical gap-decision API. Valid evidence-bound resolutions
+are honored by review, validation, sealing, export and publication preflight; unresolved, partial,
+conflicting or stale findings still block. Raw diagnostics and prior rationale remain auditable.
+See [the investigation workflow](references/extraction-resolutions.md) for commands, migration
+coverage adapters, supplemental definitions and cache compatibility.

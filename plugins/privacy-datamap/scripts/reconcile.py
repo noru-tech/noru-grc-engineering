@@ -27,6 +27,7 @@ import analysis_cache
 import copy
 import analysis_storage
 import field_review
+import gap_resolution
 
 
 PIECE = "privacy-datamap"
@@ -567,7 +568,7 @@ def build_candidate(derived, scan, manifest, lock):
 
     provenance = scan.get("provenance") or {}
     return {
-        "version": manifest.get("version", "0.12.2") if manifest else "0.12.2",
+        "version": manifest.get("version", "0.13.0") if manifest else "0.13.0",
         "piece": PIECE,
         "source": {**provenance, "derived_digest": scan.get("derived_digest")},
         "dataset": datasets,
@@ -753,8 +754,10 @@ def reconcile(derived, scan, manifest, lock, manifest_path):
         control_changes.append({"kind": "taxonomy_changed", "reason": "Taxonomy changed; review tooling compatibility separately from repository changes."})
     if (lock and lock.get("observation_format") != "structural-v2") or (mode == "migration" and accepted_digest != scan.get("derived_digest")):
         control_changes.append({"kind": "baseline_upgrade", "reason": "Refresh the observation format without reclassifying unchanged decisions."})
-    coverage_gaps = {key: list((derived.get("coverage") or {}).get(key) or [])
-                     for key in ("unparsed_candidates", "migration_gaps", "schema_conflicts")}
+    resolution_document = analysis_storage.load(manifest_path.parent / ".cache/privacy-datamap.analysis.json") or {}
+    disposition = field_review.gap_partition(resolution_document, derived, manifest_path.parent.parent)
+    coverage_gaps = {key: [gap for gap in disposition["active_blockers"] if gap.get("coverage_key", "unparsed_candidates") == key]
+                     for key in gap_resolution.COVERAGE_KEYS}
     reconciler_drift = bool(mode == "maintenance" and (system_changes or any(
         action["action"] in {"add", "remove", "material_change"} for action in actions)))
     discovered = analysis_cache.discover(repo)
@@ -780,6 +783,7 @@ def reconcile(derived, scan, manifest, lock, manifest_path):
         "removal_required": removal_required,
         "control_changes": control_changes,
         "coverage_gaps": coverage_gaps,
+        "extraction_diagnostics": disposition,
         "blocked": blocked,
         "observation_digest": scan.get("derived_digest"),
         "baseline_manifest_matches_lock": not baseline_mismatch,

@@ -113,6 +113,9 @@
           "additionalProperties": {
             "type": "object"
           }
+        },
+        "accepted_uncertainties": {
+          "type": "object"
         }
       }
     },
@@ -203,6 +206,39 @@
                 "type": "object"
               }
             }
+          }
+        },
+        "coverage_digest": {
+          "type": "string"
+        },
+        "gap_resolutions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "gap_evidence": {
+          "type": "object"
+        },
+        "diagnostic_history": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "runtime_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "uncertainty_fields": {
+          "type": "object"
+        },
+        "uncertainty_evidence": {
+          "type": "object"
+        },
+        "uncertainty_history": {
+          "type": "array",
+          "items": {
+            "type": "object"
           }
         }
       }

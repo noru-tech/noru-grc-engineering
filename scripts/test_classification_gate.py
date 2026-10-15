@@ -325,6 +325,65 @@ class ClassificationGateTests(unittest.TestCase):
         field_review.build_contract(self.document, self.repo, self.compiler, fresh=True)
         self.assertTrue(field_review.validate_contract(self.document, self.derived, self.repo, candidate=manifest))
 
+    def test_reviewed_arbitrary_content_can_be_certified_and_exported(self):
+        import review
+        self.compiler['tables'][0]['fields'][-1]['type']['open'] = True
+        self.compiler['gaps'] = [{'kind': 'external_contract', 'subject': 'records.payload', 'message': 'Investigate additional content.', 'evidence': [field_review.span_from_ref(self.repo, 'schema.ts:1')]}]
+        field_review.build_contract(self.document, self.repo, self.compiler, fresh=True)
+        self.resolve()
+        parent = self.decision('payload', 'mixed', [], 'mixed')
+        parent['open_content_resolution'] = {
+            'outcome': 'reviewed_open_content',
+            'rationale': 'The producer permits additional arbitrary values.',
+            'evidence_ids': self.row('payload')['evidence_ids'],
+            'residual_uncertainty': 'Additional values are unconstrained and may contain personal or sensitive information.'}
+        invalid = copy.deepcopy(parent)
+        del invalid['open_content_resolution']['residual_uncertainty']
+        self.assertTrue(field_review.apply_decisions(self.document, [invalid], self.repo))
+        invalid = copy.deepcopy(parent)
+        invalid['open_content_resolution']['evidence_ids'] = ['missing']
+        self.assertTrue(field_review.apply_decisions(self.document, [invalid], self.repo))
+        self.assertEqual(field_review.apply_decisions(self.document, [parent], self.repo), [])
+        self.assertTrue(self.row('payload')['open_content'])
+        self.assertEqual(review.member_coverage(self.row('payload'))['state'], 'reviewed members')
+        gap = self.document['classification_review']['gaps'][0]
+        answer = {'gap_id': gap['gap_id'], 'outcome': 'modeled', 'field_ids': ['db/records/payload'],
+            'rationale': 'Known members and the evidenced open content are represented with residual uncertainty.',
+            'evidence_ids': gap['evidence_ids'],
+            'investigation': [{'question': 'Is the producer bounded?', 'outcome': 'Additional values are permitted and documented.'}]}
+        self.assertEqual(field_review.apply_gap_decisions(self.document, [answer], self.repo), [])
+        self.assertEqual(field_review.gap_partition(self.document, self.derived, self.repo)['active_blockers'], [])
+        manifest = self.accepted_fixture(resolve=False)
+        payload = next(row for row in manifest['dataset'][0]['collections'][0]['fields'] if row['name'] == 'payload')
+        self.assertIn('Additional values are unconstrained', payload['description'])
+        self.assertEqual(field_review.validate_repository(self.document, self.derived, self.repo, candidate=manifest), [])
+        omitted = copy.deepcopy(manifest)
+        next(row for row in omitted['dataset'][0]['collections'][0]['fields'] if row['name'] == 'payload')['description'] = 'Payload'
+        self.assertTrue(field_review.validate_projection(self.document['classification_review'], omitted))
+        self.document.pop('classification_review')
+        field_review.build_contract(self.document, self.repo, self.compiler)
+        self.assertEqual(field_review.validate_repository(self.document, self.derived, self.repo, candidate=manifest), [])
+        (self.repo / 'schema.ts').write_text('changed source')
+        self.assertTrue(field_review.validate_repository(self.document, self.derived, self.repo, candidate=manifest))
+
+    def test_reviewed_open_object_without_known_members(self):
+        import review
+        self.compiler['tables'][0]['fields'][-1]['type'] = {'kind': 'object', 'open': True, 'members': []}
+        self.compiler['tables'][0]['fields'][-1]['members'] = []
+        field_review.build_contract(self.document, self.repo, self.compiler, fresh=True)
+        decisions = [self.decision('email', 'yes', ['user.contact.email']), self.decision('enabled'), self.decision('created_at')]
+        parent = self.decision('payload', 'mixed', ['user.content'], 'mixed')
+        parent['open_content_resolution'] = {'outcome': 'reviewed_open_content',
+            'rationale': 'Source permits arbitrary submitted content without known members.',
+            'evidence_ids': self.row('payload')['evidence_ids'],
+            'residual_uncertainty': 'Submitted content may contain additional personal information.'}
+        self.assertEqual(field_review.apply_decisions(self.document, decisions + [parent], self.repo), [])
+        self.assertEqual(review.member_coverage(self.row('payload'))['state'], 'reviewed members')
+        manifest = self.accepted_fixture(resolve=False)
+        self.document.pop('classification_review')
+        field_review.build_contract(self.document, self.repo, self.compiler)
+        self.assertEqual(field_review.validate_repository(self.document, self.derived, self.repo, candidate=manifest), [])
+
     def test_accepted_certificate_cannot_restore_changed_extraction_gap_set(self):
         self.accepted_fixture()
         self.document.pop('classification_review')

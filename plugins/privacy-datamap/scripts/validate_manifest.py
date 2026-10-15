@@ -720,7 +720,7 @@ def check_fields(rep, path, fields, vocab, counts):
             rep.err(
                 f"{fpath}.needs_review",
                 "still true — the collector could not classify this field and nobody has. "
-                "Classify the field, or accept it as non-personal so reconciliation can compact "
+                "Classify the field, record scoped accepted uncertainty, or accept it as non-personal so reconciliation can compact "
                 "it into `non_personal_fields`. Then remove the flag",
             )
         elif not cats:
@@ -731,7 +731,7 @@ def check_fields(rep, path, fields, vocab, counts):
                 for child in (field.get("fields") or [])
                 if isinstance(child, dict)
             )
-            if not has_review_child:
+            if not has_review_child and not field.get("meta", {}).get("accepted_uncertainties"):
                 # Accepted 0.8.0 manifests used full empty-category objects. Keep them valid so
                 # reconciliation can compact them without discarding the accepted decision.
                 rep.warn(

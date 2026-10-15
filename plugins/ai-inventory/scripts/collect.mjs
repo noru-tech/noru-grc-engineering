@@ -26,7 +26,7 @@ import { join, relative, sep, basename } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const PIECE = "ai-inventory";
-export const VERSION = "0.12.2";
+export const VERSION = "0.13.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 // Directories that are in the repository but are not the repository: a checked-in vendor/ or dist/
@@ -36,13 +36,13 @@ const GENERATED_BY = `${PIECE}@${VERSION}`;
 const SKIP_DIRS = new Set([
   ".git", "node_modules", "dist", "build", "out", ".next", ".turbo", ".cache", "coverage",
   "vendor", "target", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache",
-  ".gradle", ".idea", ".vscode", "Pods", ".terraform", ".noru",
+  "bin", "obj", ".gradle", ".idea", ".vscode", "Pods", ".terraform", ".noru",
 ]);
 
 const CODE_EXT = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".go", ".rb", ".java", ".kt", ".rs",
   ".cs", ".php", ".swift", ".scala", ".ex", ".exs", ".yml", ".yaml", ".toml", ".json", ".env",
-  ".md", ".mdx", ".sh",
+  ".md", ".mdx", ".sh", ".csproj", ".props",
 ]);
 
 const MAX_FILE_BYTES = 1_500_000;
@@ -55,7 +55,7 @@ export const PROVIDER_SIGNATURES = [
   { id: "anthropic", vendor: "Anthropic", patterns: ["@anthropic-ai", "anthropic", "@ai-sdk/anthropic"] },
   { id: "aws-bedrock", vendor: "Amazon Web Services", patterns: ["bedrock-runtime", "@aws-sdk/client-bedrock", "boto3.client(\"bedrock", "BedrockRuntime"] },
   { id: "google-vertex", vendor: "Google Cloud", patterns: ["@google-cloud/vertexai", "vertexai", "google.generativeai", "@ai-sdk/google"] },
-  { id: "azure-openai", vendor: "Microsoft Azure", patterns: ["azure.ai.openai", "@azure/openai", "AZURE_OPENAI"] },
+  { id: "azure-openai", vendor: "Microsoft Azure", patterns: ["azure.ai.openai", "@azure/openai", "AZURE_OPENAI", "Azure.AI.OpenAI"] },
   { id: "mistral", vendor: "Mistral AI", patterns: ["@mistralai", "mistralai", "@ai-sdk/mistral"] },
   { id: "cohere", vendor: "Cohere", patterns: ["cohere-ai", "cohere"] },
   { id: "ollama", vendor: "Ollama", patterns: ["ollama"] },
@@ -67,7 +67,7 @@ export const FRAMEWORK_SIGNATURES = [
   { id: "vercel-ai-sdk", label: "Vercel AI SDK", patterns: ["\"ai\"", "'ai'", "@ai-sdk/", "generateObject", "streamText"] },
   { id: "langchain", label: "LangChain", patterns: ["langchain", "@langchain/"] },
   { id: "llamaindex", label: "LlamaIndex", patterns: ["llama_index", "llamaindex"] },
-  { id: "semantic-kernel", label: "Semantic Kernel", patterns: ["semantic_kernel", "semantic-kernel"] },
+  { id: "semantic-kernel", label: "Semantic Kernel", patterns: ["semantic_kernel", "semantic-kernel", "Microsoft.SemanticKernel"] },
   { id: "mcp", label: "Model Context Protocol", patterns: ["@modelcontextprotocol", "modelcontextprotocol"] },
 ];
 

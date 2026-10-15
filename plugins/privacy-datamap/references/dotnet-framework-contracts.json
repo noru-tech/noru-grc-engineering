@@ -1,0 +1,367 @@
+{
+  "schema_version": 1,
+  "contracts": [
+    {
+      "adapter_id": "aspnet-identity-user@8.0.0",
+      "version": "8.0.0",
+      "type": "Microsoft.AspNetCore.Identity.IdentityUser",
+      "source_url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v8.0.0/src/Identity/Extensions.Stores/src/IdentityUser.cs",
+      "source_sha256": "e52a70dae11948fa5bfb33d03f0d2e7d9b6ece182647aa4d9b1221413ac57dc7",
+      "license": "MIT",
+      "fields": [
+        {
+          "name": "Id",
+          "clr_type": "TKey"
+        },
+        {
+          "name": "UserName",
+          "clr_type": "string?"
+        },
+        {
+          "name": "NormalizedUserName",
+          "clr_type": "string?"
+        },
+        {
+          "name": "Email",
+          "clr_type": "string?"
+        },
+        {
+          "name": "NormalizedEmail",
+          "clr_type": "string?"
+        },
+        {
+          "name": "EmailConfirmed",
+          "clr_type": "bool"
+        },
+        {
+          "name": "PasswordHash",
+          "clr_type": "string?"
+        },
+        {
+          "name": "SecurityStamp",
+          "clr_type": "string?"
+        },
+        {
+          "name": "ConcurrencyStamp",
+          "clr_type": "string?"
+        },
+        {
+          "name": "PhoneNumber",
+          "clr_type": "string?"
+        },
+        {
+          "name": "PhoneNumberConfirmed",
+          "clr_type": "bool"
+        },
+        {
+          "name": "TwoFactorEnabled",
+          "clr_type": "bool"
+        },
+        {
+          "name": "LockoutEnd",
+          "clr_type": "DateTimeOffset?"
+        },
+        {
+          "name": "LockoutEnabled",
+          "clr_type": "bool"
+        },
+        {
+          "name": "AccessFailedCount",
+          "clr_type": "int"
+        }
+      ]
+    },
+    {
+      "adapter_id": "aspnet-identity-user@10.0.0",
+      "version": "10.0.0",
+      "type": "Microsoft.AspNetCore.Identity.IdentityUser",
+      "source_url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.0/src/Identity/Extensions.Stores/src/IdentityUser.cs",
+      "source_sha256": "e52a70dae11948fa5bfb33d03f0d2e7d9b6ece182647aa4d9b1221413ac57dc7",
+      "license": "MIT",
+      "fields": [
+        {
+          "name": "Id",
+          "clr_type": "TKey"
+        },
+        {
+          "name": "UserName",
+          "clr_type": "string?"
+        },
+        {
+          "name": "NormalizedUserName",
+          "clr_type": "string?"
+        },
+        {
+          "name": "Email",
+          "clr_type": "string?"
+        },
+        {
+          "name": "NormalizedEmail",
+          "clr_type": "string?"
+        },
+        {
+          "name": "EmailConfirmed",
+          "clr_type": "bool"
+        },
+        {
+          "name": "PasswordHash",
+          "clr_type": "string?"
+        },
+        {
+          "name": "SecurityStamp",
+          "clr_type": "string?"
+        },
+        {
+          "name": "ConcurrencyStamp",
+          "clr_type": "string?"
+        },
+        {
+          "name": "PhoneNumber",
+          "clr_type": "string?"
+        },
+        {
+          "name": "PhoneNumberConfirmed",
+          "clr_type": "bool"
+        },
+        {
+          "name": "TwoFactorEnabled",
+          "clr_type": "bool"
+        },
+        {
+          "name": "LockoutEnd",
+          "clr_type": "DateTimeOffset?"
+        },
+        {
+          "name": "LockoutEnabled",
+          "clr_type": "bool"
+        },
+        {
+          "name": "AccessFailedCount",
+          "clr_type": "int"
+        }
+      ]
+    },
+    {
+      "adapter_id": "aspnet-identity-user@10.0.12",
+      "version": "10.0.12",
+      "type": "Microsoft.AspNetCore.Identity.IdentityUser",
+      "source_url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Identity/Extensions.Stores/src/IdentityUser.cs",
+      "source_sha256": "e52a70dae11948fa5bfb33d03f0d2e7d9b6ece182647aa4d9b1221413ac57dc7",
+      "license": "MIT",
+      "fields": [
+        {
+          "name": "Id",
+          "clr_type": "TKey"
+        },
+        {
+          "name": "UserName",
+          "clr_type": "string?"
+        },
+        {
+          "name": "NormalizedUserName",
+          "clr_type": "string?"
+        },
+        {
+          "name": "Email",
+          "clr_type": "string?"
+        },
+        {
+          "name": "NormalizedEmail",
+          "clr_type": "string?"
+        },
+        {
+          "name": "EmailConfirmed",
+          "clr_type": "bool"
+        },
+        {
+          "name": "PasswordHash",
+          "clr_type": "string?"
+        },
+        {
+          "name": "SecurityStamp",
+          "clr_type": "string?"
+        },
+        {
+          "name": "ConcurrencyStamp",
+          "clr_type": "string?"
+        },
+        {
+          "name": "PhoneNumber",
+          "clr_type": "string?"
+        },
+        {
+          "name": "PhoneNumberConfirmed",
+          "clr_type": "bool"
+        },
+        {
+          "name": "TwoFactorEnabled",
+          "clr_type": "bool"
+        },
+        {
+          "name": "LockoutEnd",
+          "clr_type": "DateTimeOffset?"
+        },
+        {
+          "name": "LockoutEnabled",
+          "clr_type": "bool"
+        },
+        {
+          "name": "AccessFailedCount",
+          "clr_type": "int"
+        }
+      ],
+      "schema_sources": [
+        {
+          "path": "EntityFrameworkCore/src/IdentityUserContext.cs",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Identity/EntityFrameworkCore/src/IdentityUserContext.cs",
+          "sha256": "e6d3582d3363edd9954529bbfc2c83ae3f49238f643a51ec1ee9962a1fabc99a",
+          "license": "MIT"
+        },
+        {
+          "path": "EntityFrameworkCore/src/IdentityDbContext.cs",
+          "url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Identity/EntityFrameworkCore/src/IdentityDbContext.cs",
+          "sha256": "86d7db5bf8ef1558ee00b678808b0d9a72d8642c13d78f28a3458664f795d7c4",
+          "license": "MIT"
+        }
+      ],
+      "default_tables": [
+        {
+          "type": "IdentityRole",
+          "table": "AspNetRoles",
+          "source_url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Identity/Extensions.Stores/src/IdentityRole.cs",
+          "source_sha256": "c58249696990ec21cb152737726080e91e269cb11f183089417da9214927f00a",
+          "fields": [
+            {
+              "name": "Id",
+              "clr_type": "TKey"
+            },
+            {
+              "name": "Name",
+              "clr_type": "string?"
+            },
+            {
+              "name": "NormalizedName",
+              "clr_type": "string?"
+            },
+            {
+              "name": "ConcurrencyStamp",
+              "clr_type": "string?"
+            }
+          ]
+        },
+        {
+          "type": "IdentityUserClaim",
+          "table": "AspNetUserClaims",
+          "source_url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Identity/Extensions.Stores/src/IdentityUserClaim.cs",
+          "source_sha256": "69cf9472100b553935c2aee28b1c2aeaeac94010c3b1293e083a5f3c568f1ff7",
+          "fields": [
+            {
+              "name": "Id",
+              "clr_type": "int"
+            },
+            {
+              "name": "UserId",
+              "clr_type": "TKey"
+            },
+            {
+              "name": "ClaimType",
+              "clr_type": "string?"
+            },
+            {
+              "name": "ClaimValue",
+              "clr_type": "string?"
+            }
+          ]
+        },
+        {
+          "type": "IdentityUserLogin",
+          "table": "AspNetUserLogins",
+          "source_url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Identity/Extensions.Stores/src/IdentityUserLogin.cs",
+          "source_sha256": "29ddd713b7380964cd7e59bcb949b129768c6c36aa10533051935a91307c4f1e",
+          "fields": [
+            {
+              "name": "LoginProvider",
+              "clr_type": "string"
+            },
+            {
+              "name": "ProviderKey",
+              "clr_type": "string"
+            },
+            {
+              "name": "ProviderDisplayName",
+              "clr_type": "string?"
+            },
+            {
+              "name": "UserId",
+              "clr_type": "TKey"
+            }
+          ]
+        },
+        {
+          "type": "IdentityUserToken",
+          "table": "AspNetUserTokens",
+          "source_url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Identity/Extensions.Stores/src/IdentityUserToken.cs",
+          "source_sha256": "54448e9e06ef1efbf16ae496c1e25bae20cff8101384377c4662274e22bfe56c",
+          "fields": [
+            {
+              "name": "UserId",
+              "clr_type": "TKey"
+            },
+            {
+              "name": "LoginProvider",
+              "clr_type": "string"
+            },
+            {
+              "name": "Name",
+              "clr_type": "string"
+            },
+            {
+              "name": "Value",
+              "clr_type": "string?"
+            }
+          ]
+        },
+        {
+          "type": "IdentityRoleClaim",
+          "table": "AspNetRoleClaims",
+          "source_url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Identity/Extensions.Stores/src/IdentityRoleClaim.cs",
+          "source_sha256": "a389129e43eba3eca2bbd386f897d5167c41a38c6d798ba0e8b4e430ed6a5c4e",
+          "fields": [
+            {
+              "name": "Id",
+              "clr_type": "int"
+            },
+            {
+              "name": "RoleId",
+              "clr_type": "TKey"
+            },
+            {
+              "name": "ClaimType",
+              "clr_type": "string?"
+            },
+            {
+              "name": "ClaimValue",
+              "clr_type": "string?"
+            }
+          ]
+        },
+        {
+          "type": "IdentityUserRole",
+          "table": "AspNetUserRoles",
+          "source_url": "https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.12/src/Identity/Extensions.Stores/src/IdentityUserRole.cs",
+          "source_sha256": "23672c13d259bd41f578574ea7ea9f45eb56293c2ec35388459e6ccb6796ad34",
+          "fields": [
+            {
+              "name": "UserId",
+              "clr_type": "TKey"
+            },
+            {
+              "name": "RoleId",
+              "clr_type": "TKey"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

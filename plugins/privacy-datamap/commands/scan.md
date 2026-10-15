@@ -13,11 +13,72 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --output=json
 **A scan combines deterministic collection with mandatory agent enrichment.** The commands above
 finish structure collection only. Continue the analysis below before reporting scan completion.
 
+### Accepting remaining uncertainty
+
+After investigation, present the exact residual uncertainty and map impact for human review.
+Use `investigate.py`'s `uncertainty_candidates` and, only after explicit acceptance, apply the
+selected records with `--uncertainties=<decisions.json>`. Follow
+`references/accepted-uncertainty.md`. Never invent an owner or infer consent.
+A scoped acceptance accounts for that finding and clears its pending field review; it remains
+visible in the map and does not resolve unknown facts. Zero active gaps includes accepted
+uncertainties. Complete the normal map acceptance, sealing and publication confirmation separately.
+
+### Reviewing deliberately open content
+
+Evidence that arbitrary values are allowed can complete the content investigation. Submit
+`open_content_resolution` with `outcome: reviewed_open_content`, a rationale, current
+`evidence_ids` and a nonempty `residual_uncertainty` describing the remaining content risk.
+Keep known members and their classifications; do not claim unknown additions are non-personal.
+A justified category for arbitrary additional content may be recorded on the container without
+inventing named members.
+The residual uncertainty is preserved in the exported field description. The field's
+`uncertainty` queue property is for unanswered investigation questions; record established
+openness in `residual_uncertainty` instead. Normal accountable acceptance still applies.
+Unreviewed missing evidence, stale decisions and uninvestigated known members remain pending.
+
+### Agent fallback is part of every scan
+
+Every collector gap starts agent investigation. The agent must never delegate investigation to the
+plugin or stop evidence gathering because further development might improve automatic extraction.
+Work every `extraction_gaps` item returned by `investigate.py`, even when `requests` is empty.
+`counts.agent_pending` includes fields and gaps; an empty field batch is not scan completion.
+Read the source, producers/consumers, configuration and available pinned framework contracts.
+When evidence supports the missing structure, use `structural_proposal.dataset`, supplemental
+systems/relationships or `--shapes`; register evidence dependencies, rebuild the candidate and submit
+`modeled` or `not_applicable` through `--gaps`. Complete semantic investigation separately. Do not
+modify the plugin or target application merely because the deterministic collector missed a pattern.
+
+For a finding that remains unresolved after this attempt, complete the supplied `fallback_review`:
+what source was inspected, cited evidence IDs, the supplemental representation attempted, the exact
+missing fact, required evidence, next concrete evidence-gathering action and map-changing impact.
+Use `evidence_unavailable` for unresolved facts. Technical limitations may be recorded as
+implementation facts, but declaring a plugin limitation is never a scan outcome.
+The API checks this record when supplied. Legacy unresolved records without a current actionable
+record remain queued as `investigation_required`; their existence is not completed agent work.
+These records document an attempt, not proof that its reasoning is correct, and never clear blockers.
+
+Continue source investigation, relationship tracing and evidence-backed supplemental modeling through
+the canonical workflow even when automatic extraction falls short. Ask the user only for a specific
+unavailable map-changing fact after source investigation; continue independent work. Preserve the
+next evidence action on blocked attempts and revisit them when evidence becomes available.
+Preserve uncertainty and publication blocks rather than inventing a closed
+schema or treating approval as missing structural evidence. Collection and validation remain offline;
+use available local sources/contracts and report unavailable evidence without executing target code.
+
 The collector parses SQL DDL, Drizzle TypeScript, Prisma, Django/SQLAlchemy models, protobuf and
-GraphQL SDL into file-shaped observations, then normalizes them into logical datastores and runtime
+GraphQL SDL plus bounded C# persisted models into file-shaped observations, then normalizes them into logical datastores and runtime
 systems. A source file is evidence for a dataset, not automatically a dataset. Every current field
 retains all contributing `file:line` references. Names are candidate hints only; every new field remains `needs_review: true` until
 evidence-backed investigation and accountable acceptance.
+
+For .NET repositories, read `references/dotnet-support.md` and
+`references/dotnet-boundaries.md`. Inspect authentication tickets, message envelopes and
+infrastructure-provisioned runtimes separately from database models. Inspect `dotnet.projects`,
+`dotnet.technologies`, `dotnet.relationships` and the `dotnet` coverage gaps. These are modeled
+source relationships, not proof of deployed physical databases. Resolve aliases, serializer
+configuration, connection identity and unparsed source before claiming complete coverage. Do not
+run `dotnet`, MSBuild, NuGet restore, target assemblies or source generators. A C# class is not a
+store unless a supported persistence binding connects it. Keep any unknown members explicit.
 
 Schema declarations in `.test.*` and `.spec.*` files are excluded as fixtures unless explicitly
 bound by a connection relationship or a Drizzle configuration. Test files remain in the repository
@@ -32,7 +93,7 @@ For object storage, queues, indexes and third-party records without supported sc
 ordinary datasets in the proposal cache's `structural_proposal.dataset`. Use dataset
 `meta.noru.origin: supplemental` and `meta.noru.refs`; fields carry source `refs` plus
 `meta.noru.shape` and `meta.noru.evidence_kind`. Keep nested payloads nested and opaque content
-explicitly unresolved until evidence supports classification. Never derive fields from SDK calls.
+explicitly unresolved until evidence supports classification. An SDK call alone does not establish fields; trace its concrete payload, typed contract and serializer for structural evidence.
 
 Propose external services in `structural_proposal.system`, using `meta.noru.origin: external`,
 `meta.noru.refs`, native `dataset_references`, and evidenced `ingress`/`egress`. Register supporting
@@ -169,7 +230,7 @@ Keep the reports separate:
   An unresolved item also identifies the missing answer and its decision impact.
 - `control_changes`: baseline edits, taxonomy changes or observation-format upgrades. These need
   maintenance, not a claim that repository privacy behavior changed.
-- `coverage_gaps`: incomplete extraction, kept visible and separate from confirmed changes.
+- `coverage_gaps`: active extraction blockers after evidence-bound resolutions; `extraction_diagnostics` also retains observed and resolved findings.
 
 Unique identical evidence moved to a new file permits a mechanical citation/path refresh in the
 candidate. Missing or multiple possible matches require investigation. After acceptance, update the
@@ -329,8 +390,9 @@ collection identities and relationships against actual client and connection bin
 location and matching schemas do not establish a shared datastore. Do not treat a mistaken database
 identity as a privacy classification question. Record an unresolved structural problem in
 `structural_errors` with `kind`, `detail`, and `resolution_needed`. Correct the source or collector,
-then rerun collection and reconciliation. Schema conflicts, migration gaps and ambiguous identities
-also block review readiness. While blocked, the renderer defers privacy decisions and retains all
+then rerun collection and reconciliation. Active schema conflicts, migration gaps and ambiguous identities
+also block review readiness. Investigate extraction diagnostics using the resolution workflow below;
+raw observations remain visible after a valid disposition. While blocked, the renderer defers privacy decisions and retains all
 independent analysis in evidence. Missing payload evidence can remain an explicit coverage gap;
 a known incorrect structure cannot be accepted away.
 
@@ -615,3 +677,21 @@ construction/configuration and actual transfers. A directory or neighboring user
 boundary nor meaning. Maintenance retains supported accepted decisions and investigates relevant
 changes. Fresh assessment excludes earlier classifications as evidence; compare only afterward.
 Human acceptance records a decision; it cannot supply missing facts or close an extraction gap.
+
+## Resolve extraction diagnostics through investigation
+
+After collection and reconciliation, rebuild current evidence with `field_review.py --repo=<repo>`.
+Use `investigate.py --repo=<repo>` to obtain diagnostic templates and all covered occurrence IDs.
+Investigate each occurrence; submit `modeled`, `not_applicable` or `unresolved` decisions through
+`investigate.py --repo=<repo> --gaps=<decisions.json>`. Do not edit diagnostic status flags.
+
+Modeled decisions reference current evidenced canonical field IDs, including validated supplemental
+structures where appropriate. They do not create fields or accept privacy meaning. Not-applicable
+decisions require an evidenced explanation of why represented data is unaffected. Grouped findings
+require explicit coverage of every occurrence. Migration findings require separate evidence for
+context/datastore identity and current schema completeness; directory proximity is insufficient.
+
+Rerun review and validation before requesting acceptance. The shared gate retains raw observations,
+uses only current valid resolutions, and reopens changed evidence or structure while preserving the
+prior rationale. Read [extraction-resolutions.md](../references/extraction-resolutions.md) for the
+contract, compatibility behavior, supplemental-schema requirements and end-to-end demonstration.

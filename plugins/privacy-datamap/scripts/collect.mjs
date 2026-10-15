@@ -20,7 +20,7 @@ import { toFideslang } from "./lib/fides.mjs";
 import { extractRepository } from "./typescript_evidence.mjs";
 
 export const PIECE = "privacy-datamap";
-export const VERSION = "0.12.2";
+export const VERSION = "0.13.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -38,7 +38,7 @@ const MANIFEST_INPUT_PATH = ".noru/privacy-datamap.yml";
 // ever name the directories its author has already seen.
 const SKIP_DIRS = new Set([
   ".git", "node_modules", "dist", "build", "out", ".next", ".turbo", "coverage",
-  "vendor", "target", ".venv", "venv", "__pycache__", ".noru",
+  "vendor", "target", ".venv", "venv", "__pycache__", ".noru", "bin", "obj",
 ]);
 const USAGE =
   "usage: collect.mjs [--repo=<path>] [--check | --candidate | --export] [--output=json|text] [--quiet]\n";
@@ -227,7 +227,7 @@ export function normalizeSqlShape(value) {
 }
 
 const SQL_SKIP = /^(primary|foreign|unique|constraint|key|index|check|partition|using|with|like|exclude)\b/i;
-const SQL_CREATE = /create\s+table\s+(?:if\s+not\s+exists\s+)?[`"[]?([A-Za-z0-9_.]+)[`"\]]?\s*\(/i;
+const SQL_CREATE = /create\s+table\s+(?:if\s+not\s+exists\s+)?((?:\[[A-Za-z_][A-Za-z0-9_]*\]|"[A-Za-z_][A-Za-z0-9_]*"|`[A-Za-z_][A-Za-z0-9_]*`|[A-Za-z_][A-Za-z0-9_]*)(?:\s*\.\s*(?:\[[A-Za-z_][A-Za-z0-9_]*\]|"[A-Za-z_][A-Za-z0-9_]*"|`[A-Za-z_][A-Za-z0-9_]*`|[A-Za-z_][A-Za-z0-9_]*))*)\s*\(/i;
 
 export function parseSqlDdl(text) {
   const lines = text.split("\n");
@@ -235,7 +235,7 @@ export function parseSqlDdl(text) {
   for (let i = 0; i < lines.length; i += 1) {
     const match = lines[i].match(SQL_CREATE);
     if (!match) continue;
-    const name = match[1].split(".").pop();
+    const name = match[1].replace(/[[\]"`\s]/g, "");
     const startLine = i + 1;
     const fields = [];
     let depth = 0;
@@ -251,11 +251,11 @@ export function parseSqlDdl(text) {
       // CHECK expressions are constraint bodies, not columns; accepting every depth used to turn
       // multiline boolean expressions into fields named `OR` and referenced column names.
       if (j > i && depthBefore === 1) {
-        const body = line.trim().replace(/^[`"[]/, "");
-        const first = body.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+        const body = line.trim();
+        const first = body.match(/^(?:\[([A-Za-z_][A-Za-z0-9_]*)\]|"([A-Za-z_][A-Za-z0-9_]*)"|`([A-Za-z_][A-Za-z0-9_]*)`|([A-Za-z_][A-Za-z0-9_]*))/);
         if (first && !SQL_SKIP.test(body)) {
           fields.push({
-            name: first[1],
+            name: first.slice(1).find(Boolean),
             line: j + 1,
             // SQL type and constraint keywords are case-insensitive. Formatting them differently
             // must not turn an unchanged column into a material privacy delta.
@@ -1132,7 +1132,7 @@ function safeText(repo, rel) {
 }
 
 /** Package metadata is consulted only when an executable script points to an existing entrypoint. */
-export function discoverServices(repo, files) {
+export function discoverServices(repo, files, dotnetEntrypoints = []) {
   const evidence = new Map();
   const runtimeFiles = files.filter((rel) => rel !== MANIFEST_INPUT_PATH);
   const fileSet = new Set(runtimeFiles);
@@ -1197,6 +1197,11 @@ export function discoverServices(repo, files) {
           }
         }
       } catch { /* Invalid package metadata is not runtime evidence. */ }
+    }
+  }
+  for (const entry of dotnetEntrypoints) {
+    if (!isNonRuntimePath(entry.ref.replace(/:\d+$/, ""))) {
+      add(entry.root, entry.ref, entry.kind);
     }
   }
   if (evidence.size === 0) {
@@ -1272,10 +1277,58 @@ export function collectFacts(repo, { candidate = false } = {}) {
   const compilerGaps = compilerReport.gaps.filter((gap) => compilerStructuralKinds.has(gap.kind)).map((gap) => ({
     format: "drizzle", ref: `${gap.evidence[0]?.path ?? "."}:${gap.evidence[0]?.start_line ?? 1}`, reason: gap.message,
   }));
-  const observations = [];
+  const dotnet = files.some((path) => /\.(?:cs|csproj|slnx?|props|targets)$/.test(path))
+    ? JSON.parse(execFileSync("python3", [join(HERE, "dotnet.py"), repo],
+      { input: JSON.stringify({ files, excluded: excludedNonRuntime, reviewed_bindings: relationships.bindings }), encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }))
+    : { projects: [], technologies: [], relationships: [], observations: [], tables: [], gaps: [] };
+  const resolvedDotnetStores = new Map();
+  const observations = dotnet.observations.map((observation) => {
+    const bindings = relationships.bindings[observation.path];
+    const targets = resolvedDotnetStores.get(observation.boundary) ?? new Set();
+    targets.add(bindings?.length === 1 ? bindings[0] : observation.boundary);
+    resolvedDotnetStores.set(observation.boundary, targets);
+    if (bindings?.length === 1) {
+      for (const table of dotnet.tables) {
+        if (table.dataset === observation.boundary && table.schema_path === observation.path) table.dataset = bindings[0];
+      }
+      for (const edge of [...dotnet.relationships, ...(dotnet.entity_relationships ?? [])]) {
+        if (edge.dataset === observation.boundary && edge.schema_path === observation.path) edge.dataset = bindings[0];
+      }
+      return { ...observation, boundary: bindings[0] };
+    }
+    return observation;
+  });
+  for (const binding of dotnet.runtime_bindings ?? []) {
+    const targets = resolvedDotnetStores.get(binding.datastore);
+    if (targets) {
+      binding.modeled_datastore = binding.datastore;
+      binding.datastores = [...targets].sort();
+      binding.datastore = targets.size === 1 ? [...targets][0] : null;
+    }
+  }
+  const structuralValue = (value) => Array.isArray(value) ? value.map(structuralValue)
+    : value && typeof value === "object" ? Object.fromEntries(Object.entries(value)
+      .filter(([key]) => !["evidence", "line"].includes(key)).map(([key, item]) => [key, structuralValue(item)])) : value;
+  const canonicalTables = new Map();
+  const mergeEvidence = (target, source) => {
+    target.evidence = [...new Map([...(target.evidence ?? []), ...(source.evidence ?? [])].map((span) => [JSON.stringify(span), span])).values()];
+    for (const member of source.members ?? []) {
+      const existing = (target.members ?? []).find((row) => row.name === member.name);
+      if (existing) mergeEvidence(existing, member);
+    }
+  };
+  for (const table of dotnet.tables) {
+    const key = JSON.stringify(structuralValue(table));
+    const existing = canonicalTables.get(key);
+    if (existing) table.fields.forEach((field, index) => mergeEvidence(existing.fields[index], field));
+    else canonicalTables.set(key, table);
+  }
+  dotnet.tables = [...canonicalTables.values()];
   const parsedFiles = new Set();
   const parsedByKind = {};
   const sourceReadGaps = [];
+  for (const observation of observations) parsedFiles.add(observation.path);
+  if (parsedFiles.size) parsedByKind.dotnet = parsedFiles.size;
   for (const configPath of drizzleTopology.parsedConfigs) parsedFiles.add(configPath);
   if (drizzleTopology.parsedConfigs.length > 0) {
     parsedByKind.drizzle_config = drizzleTopology.parsedConfigs.length;
@@ -1339,19 +1392,13 @@ export function collectFacts(repo, { candidate = false } = {}) {
     needsReview += normalized.counts.needsReview;
     specialRefs.push(...normalized.specialRefs);
   }
-  const migrationBoundaries = new Map();
-  for (const path of excludedMigrations) {
-    const topology = drizzleTopology.byPath.get(path);
-    const boundary = topology?.boundary ?? datastoreBoundary(path);
-    if (!migrationBoundaries.has(boundary)) migrationBoundaries.set(boundary, path);
-  }
-  for (const [boundary, path] of migrationBoundaries) {
-    if (!observations.some((item) => item.boundary === boundary
-      || (drizzleTopology.byPath.get(item.path)?.boundary ?? datastoreBoundary(item.path)) === boundary)) {
-      migrationGaps.push({format: "excluded_migrations", ref: `${path}:1`,
-        reason: "Migration files are excluded; supply a current ORM or declarative schema for this boundary."});
-    }
-  }
+  const migrationCoverage = JSON.parse(execFileSync("python3", [join(HERE, "migration_coverage.py"), repo], {
+    input: JSON.stringify({ migrations: excludedMigrations, dotnet, observations, datastore_keys: Object.fromEntries(datasets.map((d) => [d.name, d.fides_key])),
+      current_schema_claims: Object.fromEntries([...drizzleTopology.byPath].filter(([, claim]) => claim.role === "canonical")),
+      topology: Object.fromEntries(excludedMigrations.filter((path) => drizzleTopology.byPath.has(path)).map((path) => [path, drizzleTopology.byPath.get(path)])),
+      source_gaps: [...compilerGaps, ...sourceReadGaps, ...schemaConflicts] }), encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
+  }));
+  migrationGaps.push(...migrationCoverage.gaps);
   for (const store of supplementalDatasets) {
     parsedFiles.add(MANIFEST_INPUT_PATH);
     const normalized = normalizedDataset(
@@ -1392,8 +1439,29 @@ export function collectFacts(repo, { candidate = false } = {}) {
   }
   assertUniqueKeys("dataset", datasets);
 
-  const services = discoverServices(repo, files);
-  const systemKeys = new Set([...services.map(({ root }) => fidesKeyFor(root || "repository")), ...inputs.external_systems.map(s => s.fides_key)]);
+  const services = discoverServices(repo, files, dotnet.runtime_entrypoints ?? []);
+  for (const boundary of [...(dotnet.authentication_tickets ?? []), ...(dotnet.message_envelopes ?? [])]) {
+    const dataset = datasets.find(d => d.fides_key === boundary.dataset);
+    for (const project of boundary.runtime_projects?.length ? boundary.runtime_projects : [boundary.project]) {
+      const root = project?.split("/").slice(0,-1).join("/") ?? "";
+      if (dataset && services.some(service => service.root === root)) {
+        dataset.system_references = [...new Set([...(dataset.system_references ?? []), fidesKeyFor(root || "repository")])];
+      }
+    }
+  }
+  const provisioned = (dotnet.provisioned_runtimes ?? []).map(resource => ({
+    fides_key: resource.identity, name: resource.name, refs: resource.refs,
+    dataset_references: [], runtime_evidence: resource.refs.map(ref => ({ref, kind: "provisioned_proxy"})),
+    meta: {noru: {origin: "provisioned", provisioner: fidesKeyFor(resource.provisioner_root), refs: resource.refs}},
+    egress: [...new Set(resource.routes.filter(route => route.destination).map(route => fidesKeyFor(route.destination.root)))].map(fides_key => ({type: "system", fides_key})),
+  }));
+  const inputRuntimeMap = new Map([...inputs.external_systems, ...(inputs.provisioned_systems ?? [])].map(s => [s.fides_key, s]));
+  for (const runtime of provisioned) {
+    if (inputRuntimeMap.has(runtime.fides_key) && inputRuntimeMap.get(runtime.fides_key).meta?.noru?.origin !== "provisioned") throw new Error("Provisioned runtime conflicts with external system identity");
+    inputRuntimeMap.set(runtime.fides_key, runtime);
+  }
+  const inputRuntimes = [...inputRuntimeMap.values()];
+  const systemKeys = new Set([...services.map(({ root }) => fidesKeyFor(root || "repository")), ...inputRuntimes.map(s => s.fides_key)]);
   for (const dataset of datasets) {
     for (const systemKey of dataset.system_references ?? []) {
       if (!systemKeys.has(systemKey)) {
@@ -1423,13 +1491,16 @@ export function collectFacts(repo, { candidate = false } = {}) {
         .map((dataset) => dataset.fides_key).sort(BY_PATH),
     };
   });
-  for (const external of inputs.external_systems) {
-    systems.push({...external, ref: external.refs[0], runtime_evidence: []});
+  for (const external of inputRuntimes) {
+    systems.push({...external, ref: external.refs[0], runtime_evidence: external.runtime_evidence ?? []});
   }
   for (const system of systems) {
+    if (system.meta?.noru?.origin === "provisioned" && !systemKeys.has(system.meta.noru.provisioner)) {
+      throw new Error("Provisioned runtime must reference an evidenced provisioner system");
+    }
     const declared = inputs.systems.find(s => s.fides_key === system.fides_key);
     for (const direction of ["ingress", "egress"]) {
-      if (declared?.[direction]) system[direction] = declared[direction];
+      if (declared?.[direction] && !provisioned.some(p => p.fides_key === system.fides_key)) system[direction] = declared[direction];
     }
     if (declared?.meta) system.meta = declared.meta;
     for (const edge of [...(system.ingress ?? []), ...(system.egress ?? [])]) {
@@ -1447,6 +1518,8 @@ export function collectFacts(repo, { candidate = false } = {}) {
     input_dependencies: inputs.evidence_dependencies,
     observations,
     datastore_links: drizzleTopology.links,
+    ...(dotnet.projects.length || dotnet.technologies.length || dotnet.gaps.length || dotnet.observations.length
+      ? { dotnet: { ...dotnet, observations: undefined } } : {}),
     relationship_mapping: relationships,
     discovery,
     migration_operations: migrationOperations,
@@ -1479,6 +1552,7 @@ export function collectFacts(repo, { candidate = false } = {}) {
       unparsed_candidates: [...new Map([
         ...findUnparsedCandidates(repo, files, parsedFiles, new Set((compilerReport.sources ?? []).map((source) => source.path).filter((path) => !compilerUnboundFiles.has(path)))),
         ...compilerGaps,
+        ...dotnet.gaps,
         ...drizzleTopology.gaps,
         ...sourceReadGaps,
         ...relationships.errors.map((reason) => ({ format: "relationship_graph", ref: ".noru/privacy-datamap.yml:1", reason })),
@@ -1488,9 +1562,10 @@ export function collectFacts(repo, { candidate = false } = {}) {
           .map((path) => ({ format: "relationship_payload", ref: `${path}:1`, reason: "Bound schema/payload has no supported extracted structure; supply typed supplemental evidence." })),
         ...Object.values(relationships.flows).flat().filter((key) => !systems.some((s) => s.fides_key === key))
           .map((key) => ({ format: "relationship_runtime", ref: ".noru/privacy-datamap.yml:1", reason: `Runtime '${key}' is not discovered; supply runtime evidence.` })),
-      ].map((item) => [`${item.format}\0${item.ref}`, item])).values()].sort((a, b) =>
+      ].map((item) => [`${item.format}\0${item.ref}\0${item.diagnostic_id ?? item.reason}`, item])).values()].sort((a, b) =>
         a.ref === b.ref ? BY_PATH(a.format, b.format) : BY_PATH(a.ref, b.ref)
       ),
+      migration_coverage: migrationCoverage,
       migration_gaps: migrationGaps.sort((a, b) => BY_PATH(a.ref, b.ref)),
       schema_conflicts: schemaConflicts.sort((a, b) => BY_PATH(a.ref, b.ref)),
     },
@@ -1668,6 +1743,7 @@ export function buildSkeleton(derived, provenance) {
       fides_key: system.fides_key,
       name: system.name,
       system_type: "Application",
+      ...Object.fromEntries(["ingress", "egress", "meta"].filter(key => system[key]).map(key => [key, system[key]])),
       dataset_references: system.dataset_references,
       privacy_declarations: [
         {
@@ -1872,7 +1948,7 @@ function main(argv) {
           ? `special-category data at: ${derived.special_category_refs.join(", ")}`
           : "",
         summary.coverage_gaps > 0
-          ? `coverage gaps: ${summary.coverage_gaps} (see ${summary.derived_facts})`
+          ? `observed coverage diagnostics: ${summary.coverage_gaps} (see ${summary.derived_facts})`
           : "",
         `derived facts: ${summary.derived_facts}`,
         wroteSkeleton ? `wrote skeleton: ${summary.manifest}` : "",
