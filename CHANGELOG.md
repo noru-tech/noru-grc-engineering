@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.16.0 — 2026-10-15
+
 - Add read-only investigation status, small summary pages, entity detail lookup and explicit
   candidate-mode assertions. Preserve source-scoped gap decisions across unrelated structural
   additions; clarify investigation checkpoints, dependency registries and open-content errors.

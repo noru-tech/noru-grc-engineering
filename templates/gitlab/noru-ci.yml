@@ -109,7 +109,7 @@ spec:
       default: https://github.com/noru-tech/noru-grc-engineering.git
     toolkit-version:
       description: "The toolkit release tag to run. The same tag this file was included from."
-      default: v0.15.0
+      default: v0.16.0
       regex: ^v[0-9]+\.[0-9]+\.[0-9]+$
     toolkit-sha:
       description: "Optional: the full commit the tag must resolve to. The job stops when it does not."

@@ -1,6 +1,6 @@
 {
   "name": "findings-ingest",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Ingest the SARIF and OSV-Scanner results that never reach a forge alert store, decide with the user what each one means here, and land them in Noru as security findings filed against risks the organization already carries — closing the ones no longer reported.",
   "author": {
     "name": "Noru",
