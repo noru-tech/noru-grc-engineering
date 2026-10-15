@@ -6,6 +6,10 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Add client-independent privacy Python runtime discovery and checksum-pinned provisioning for
+  Windows, macOS and Linux. Route nested processes through the resolved runtimes and preserve
+  nonzero errors when setup or analysis fails.
+
 ## 0.16.0 — 2026-10-15
 
 - Add read-only investigation status, small summary pages, entity detail lookup and explicit

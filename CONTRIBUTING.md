@@ -65,7 +65,7 @@ Ask instead of guessing — an unanswered question is cheaper than a public leak
   source analysis. Keep its upstream license, source provenance and integrity checks with the
   bundle. Do not load a target repository compiler, compiler plugin, executable configuration or
   application code. No `npm install`, no `pip install`, no network during `:scan` or validation.
-  Other third-party runtime dependencies remain excluded. PyYAML may be used opportunistically,
+  The privacy plugin may provision a checksum-pinned CPython distribution during runtime preflight, before offline analysis, when no compatible interpreter is available. Its cross-platform setup tests deliberately exercise this download; ordinary scan tests reuse a verified runtime. Other third-party runtime dependencies remain excluded. PyYAML may be used opportunistically,
   but the bundled fallback loader must keep working without it. CI needs no install step.
 - **No framework catalogue.** No control text, no guidance, no evidence-item list, ever. Licensing
   and drift, and the contract test enforces it.

@@ -12,6 +12,7 @@ import json
 import pathlib
 import re
 import subprocess
+from runtime_context import NODE
 import sys
 
 import analysis_storage
@@ -194,7 +195,7 @@ def compiler_facts(repo):
     adapter = HERE / "typescript_evidence.mjs"
     if not adapter.is_file():
         return {"adapter": {"name": "unavailable", "version": 0}, "tables": [], "facts": [], "gaps": [{"kind": "adapter_unavailable", "message": "Compiler evidence adapter is unavailable."}]}
-    result = subprocess.run(["node", str(adapter), "--repo=" + str(repo)], capture_output=True, text=True)
+    result = subprocess.run([NODE, str(adapter), "--repo=" + str(repo)], capture_output=True, text=True)
     if result.returncode:
         raise ValueError("Compiler evidence extraction failed: " + result.stderr.strip()[:2000])
     return json.loads(result.stdout)

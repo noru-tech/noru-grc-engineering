@@ -1,0 +1,44 @@
+{
+  "version": "3.13.16",
+  "release": "20261003",
+  "source": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261003",
+  "license_notice": "Upstream Python and bundled-library license files are retained in each installed distribution. See https://docs.astral.sh/python-build-standalone/licensing/.",
+  "platforms": {
+    "darwin-arm64": {
+      "name": "cpython-3.13.16+20261003-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "sha256": "9e01f63bbb08576cd9c8bc2d0564d098cb30c8453a0cd4bcf6aef458f6d2a147",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.13.16%2B20261003-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "executable": "python/bin/python3"
+    },
+    "win32-arm64": {
+      "name": "cpython-3.13.16+20261003-aarch64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "sha256": "653107de456cbb467c8057d5465655c906f0cc1e852333bc24a4477b4132aaa1",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.13.16%2B20261003-aarch64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "executable": "python/python.exe"
+    },
+    "linux-arm64": {
+      "name": "cpython-3.13.16+20261003-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "sha256": "6e9641400f8debd9b7924b27b5ff0662c372852382e291a76c450c7b67414cf6",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.13.16%2B20261003-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "executable": "python/bin/python3"
+    },
+    "darwin-x64": {
+      "name": "cpython-3.13.16+20261003-x86_64-apple-darwin-install_only_stripped.tar.gz",
+      "sha256": "b4dad38ba6a344555ccb71a1b08caad0a6c0dda88c5803658bc95bd7f04e9f5c",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.13.16%2B20261003-x86_64-apple-darwin-install_only_stripped.tar.gz",
+      "executable": "python/bin/python3"
+    },
+    "win32-x64": {
+      "name": "cpython-3.13.16+20261003-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "sha256": "ec43f1a85c29f147d7ae2d13218c52c70b24a983a82ab22d6c607c0593060e10",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.13.16%2B20261003-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "executable": "python/python.exe"
+    },
+    "linux-x64": {
+      "name": "cpython-3.13.16+20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "sha256": "4595c5589fff7bf0cb158d9a88a797e0d791fa33830770fcb7bf3f4b104feeae",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.13.16%2B20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "executable": "python/bin/python3"
+    }
+  }
+}

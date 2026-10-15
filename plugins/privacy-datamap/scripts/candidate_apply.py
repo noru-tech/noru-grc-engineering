@@ -5,6 +5,7 @@ import os
 import pathlib
 import tempfile
 import subprocess
+from runtime_context import NODE
 import analysis_storage
 
 
@@ -24,7 +25,7 @@ def refresh_digest(repo, candidate):
 const {collectFacts, digestOf} = await import(process.argv[1]);
 const input = JSON.parse(readFileSync(0, 'utf8'));
 console.log(digestOf(collectFacts(process.argv[2], input)));"""
-    result = subprocess.run(['node', '--input-type=module', '-e', script,
+    result = subprocess.run([NODE, '--input-type=module', '-e', script,
         pathlib.Path(__file__).with_name('collect.mjs').as_uri(), str(repo)],
         input=json.dumps({'inputDefinitions': inputs, 'relationshipDefinitions': mapping}), capture_output=True, text=True)
     if result.returncode:

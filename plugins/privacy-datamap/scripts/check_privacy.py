@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import subprocess
+from runtime_context import NODE
 import sys
 
 
@@ -65,7 +66,7 @@ def check(repo):
     if failures:
         return failures
     scripts = PACKAGE / 'scripts'
-    collected, _ = run_json(['node', str(scripts / 'collect.mjs'), f'--repo={repo}', '--check', '--output=json', '--quiet'], repo, (0, 1))
+    collected, _ = run_json([NODE, str(scripts / 'collect.mjs'), f'--repo={repo}', '--check', '--output=json', '--quiet'], repo, (0, 1))
     if collected:
         failures.append('SCHEMA_DRIFT: observed source does not match the reviewed manifest')
     parsed = repo / '.noru/.cache/privacy-gate.parsed.json'
@@ -87,7 +88,7 @@ def check(repo):
             failures.append('PROCESSING_BASELINE_MISSING: register evidence dependencies for processing decisions; structural coverage alone is insufficient')
         # Reuse the exact upstream projection; never regenerate committed files in CI.
         projection = "import {readFileSync} from 'node:fs'; import {pathToFileURL} from 'node:url'; const {toFideslang}=await import(pathToFileURL(process.argv[1])); console.log(JSON.stringify(toFideslang(JSON.parse(readFileSync(process.argv[2],'utf8')))));"
-        _, expected = run_json(['node', '--input-type=module', '-e', projection, str(scripts / 'lib/fides.mjs'), str(parsed)], repo)
+        _, expected = run_json([NODE, '--input-type=module', '-e', projection, str(scripts / 'lib/fides.mjs'), str(parsed)], repo)
         # Use the publisher's duplicate-key rejecting YAML loader.
         from publish_datamap import read_manifest
         if read_manifest(repo / REQUIRED[2]) != expected:

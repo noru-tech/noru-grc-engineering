@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // Deterministic, offline collector for the privacy-datamap piece (contract requirement 2).
 //
-// Node built-ins only. Opens no socket. Same repository state in, byte-identical derived output —
+// Node built-ins only. Runtime setup precedes offline analysis. Same repository state in, byte-identical derived output —
 // scripts/contract_test.py runs this twice and diffs the result, so a timestamp or an unsorted
 // directory listing anywhere in here will fail the build.
 //
 // Usage: node collect.mjs [--repo=<path>] [--check | --candidate | --export] [--output=json|text] [--quiet]
 // Exit codes: 0 ok, 1 drift against the manifest (--check), 2 usage/IO error.
 
+import { execPythonSync } from "./python-runtime.mjs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
@@ -725,7 +726,7 @@ export function isMigrationPath(rel) {
 }
 
 function readMigrationSupport(repo, files) {
-  const rows = JSON.parse(execFileSync("python3", [join(HERE, "migration_support.py"), repo], {encoding: "utf8"}));
+  const rows = JSON.parse(execPythonSync([join(HERE, "migration_support.py"), repo], {encoding: "utf8"}));
   for (const row of rows) {
     const path = join(repo, row.path);
     if (!files.includes(row.path) || !isMigrationPath(row.path) || isNonRuntimePath(row.path)) {
@@ -1234,13 +1235,13 @@ function assertUniqueKeys(kind, rows) {
 
 export function collectFacts(repo, { candidate = false, inputDefinitions, relationshipDefinitions } = {}) {
   const listing = listFiles(repo);
-  const inputs = inputDefinitions ?? JSON.parse(execFileSync("python3", [join(HERE, "dataset_inputs.py"), `--repo=${repo}`, ...(candidate ? ["--candidate"] : [])], {encoding: "utf8"}));
+  const inputs = inputDefinitions ?? JSON.parse(execPythonSync([join(HERE, "dataset_inputs.py"), `--repo=${repo}`, ...(candidate ? ["--candidate"] : [])], {encoding: "utf8"}));
   const supplementalDatasets = inputs.datasets;
   const manifestPath = join(repo, ".noru", "privacy-datamap.yml");
   const relationships = relationshipDefinitions ?? (candidate
-    ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), "--candidate", repo], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }))
+    ? JSON.parse(execPythonSync([join(HERE, "relationships.py"), "--candidate", repo], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }))
     : existsSync(manifestPath)
-    ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), manifestPath], { encoding: "utf8" }))
+    ? JSON.parse(execPythonSync([join(HERE, "relationships.py"), manifestPath], { encoding: "utf8" }))
     : { bindings: {}, flows: {}, questions: [], errors: [] });
   const drizzleTopology = discoverDrizzleTopology(repo, listing.files);
   const productionFiles = listing.files.filter((path) => !isNonRuntimePath(path)
@@ -1251,10 +1252,10 @@ export function collectFacts(repo, { candidate = false, inputDefinitions, relati
   const excludedPaths = new Set(excludedMigrations);
   const files = productionFiles.filter((path) => !excludedPaths.has(path));
   const staticBindings = files.some((path) => path.endsWith(".py"))
-    ? JSON.parse(execFileSync("python3", [join(HERE, "static_bindings.py"), repo],
+    ? JSON.parse(execPythonSync([join(HERE, "static_bindings.py"), repo],
       { input: JSON.stringify(files), encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })) : {};
   const enumeratedBy = listing.enumeratedBy;
-  const discovery = JSON.parse(execFileSync("python3", [join(HERE, "dependencies.py"), "--discover", `--repo=${repo}`],
+  const discovery = JSON.parse(execPythonSync([join(HERE, "dependencies.py"), "--discover", `--repo=${repo}`],
     { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
   // The compiler resolves imported constructors, aliases and static object composition. The
   // legacy parser remains a structural fallback for declarations without an import binding.
@@ -1278,7 +1279,7 @@ export function collectFacts(repo, { candidate = false, inputDefinitions, relati
     format: "drizzle", ref: `${gap.evidence[0]?.path ?? "."}:${gap.evidence[0]?.start_line ?? 1}`, reason: gap.message,
   }));
   const dotnet = files.some((path) => /\.(?:cs|csproj|slnx?|props|targets)$/.test(path))
-    ? JSON.parse(execFileSync("python3", [join(HERE, "dotnet.py"), repo],
+    ? JSON.parse(execPythonSync([join(HERE, "dotnet.py"), repo],
       { input: JSON.stringify({ files, excluded: excludedNonRuntime, reviewed_bindings: relationships.bindings }), encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }))
     : { projects: [], technologies: [], relationships: [], observations: [], tables: [], gaps: [] };
   const resolvedDotnetStores = new Map();
@@ -1392,7 +1393,7 @@ export function collectFacts(repo, { candidate = false, inputDefinitions, relati
     needsReview += normalized.counts.needsReview;
     specialRefs.push(...normalized.specialRefs);
   }
-  const migrationCoverage = JSON.parse(execFileSync("python3", [join(HERE, "migration_coverage.py"), repo], {
+  const migrationCoverage = JSON.parse(execPythonSync([join(HERE, "migration_coverage.py"), repo], {
     input: JSON.stringify({ migrations: excludedMigrations, dotnet, observations, datastore_keys: Object.fromEntries(datasets.map((d) => [d.name, d.fides_key])),
       current_schema_claims: Object.fromEntries([...drizzleTopology.byPath].filter(([, claim]) => claim.role === "canonical")),
       topology: Object.fromEntries(excludedMigrations.filter((path) => drizzleTopology.byPath.has(path)).map((path) => [path, drizzleTopology.byPath.get(path)])),
@@ -1869,7 +1870,7 @@ function main(argv) {
     const scanState = {
       piece: PIECE,
       ...(opts.candidate ? { candidate_context: derived.relationship_mapping.candidate_context,
-        candidate_artifact_sha256: execFileSync("python3", ["-c", "import json,sys,hashlib; print(hashlib.sha256(json.dumps(json.load(sys.stdin), sort_keys=True, separators=(\",\", \":\")).encode()).hexdigest())"], {input: JSON.stringify(derived), encoding: "utf8"}).trim() } : {}),
+        candidate_artifact_sha256: execPythonSync(["-c", "import json,sys,hashlib; print(hashlib.sha256(json.dumps(json.load(sys.stdin), sort_keys=True, separators=(\",\", \":\")).encode()).hexdigest())"], {input: JSON.stringify(derived), encoding: "utf8"}).trim() } : {}),
       derived_digest: digest,
       legacy_derived_digest: legacyDigest,
       previous_derived_digest: previousDigestOf(derived),
@@ -1896,7 +1897,7 @@ function main(argv) {
     let exportValidated = false;
     if (opts.export) {
       try {
-        execFileSync("python3", [join(dirname(fileURLToPath(import.meta.url)), "validate_manifest.py"), manifestPath,
+        execPythonSync([join(dirname(fileURLToPath(import.meta.url)), "validate_manifest.py"), manifestPath,
           `--emit-parsed=${join(opts.repo, ".noru", ".cache", `${PIECE}.parsed.json`)}`, "--quiet"], { stdio: "pipe" });
         exportValidated = true;
       } catch {

@@ -3,7 +3,7 @@ name: privacy-datamap
 version: 0.16.0
 description: Build a privacy data map (Fides/Fideslang dataset + system manifest) for this repository by reading its schemas and evidence-backed supplemental stores, classifying the personal data in them, then landing it in Noru. Use when the user wants a data map, a RoPA, a record of processing, a fideslang manifest, or to work out what personal data a codebase actually holds and where.
 requires:
-  bins: ["node", "python3", "git"]
+  bins: ["node", "git"]
 ---
 
 # privacy-datamap
@@ -15,6 +15,10 @@ owner for every judgement.
 Build the map from current declarative schemas, models and payload contracts, and trace the code
 that writes and uses their fields. Migration history never supplies classified fields. Repository
 evidence establishes intended structure and processing; it does not prove deployed database state.
+
+## Runtime setup
+
+Use `node "<plugin>/scripts/python-runtime.mjs" --setup` before analysis and route every Python script through that launcher. It verifies or provisions Python on Windows, macOS and Linux independently of the agent client. Use the resolved absolute plugin path in Codex or PowerShell; quote paths and repository arguments containing spaces. Runtime setup may download the pinned interpreter once; analysis remains offline. Do not report setup failures or unfinished enrichment as successful scans.
 
 ## The three commands
 

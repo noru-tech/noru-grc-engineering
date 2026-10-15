@@ -13,7 +13,7 @@
 //   2 = usage error
 
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawnPythonSync } from "./python-runtime.mjs";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -113,7 +113,7 @@ export function validateCurrentManifest(repo) {
   const manifestPath = join(repo, ".noru", "privacy-datamap.yml");
   const parsedPath = join(repo, ".noru", ".cache", "privacy-datamap.parsed.json");
   const validator = fileURLToPath(new URL("./validate_manifest.py", import.meta.url));
-  const checked = spawnSync("python3", [validator, manifestPath, "--output=json", "--quiet", `--emit-parsed=${parsedPath}`],
+  const checked = spawnPythonSync([validator, manifestPath, "--output=json", "--quiet", `--emit-parsed=${parsedPath}`],
     { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
   if (checked.error || checked.status !== 0) {
     let detail = checked.stderr?.trim() || checked.error?.message || "Classification evidence is incomplete or stale.";

@@ -465,9 +465,9 @@ not, that is a bug — `scripts/test_idempotency.py` asserts it.
 
 ```bash
 node    plugins/privacy-datamap/scripts/collect.mjs --repo=. --output=json
-python3 plugins/privacy-datamap/scripts/reconcile.py --repo=. --output=json
-python3 plugins/privacy-datamap/scripts/validate_manifest.py .noru/privacy-datamap.yml
-python3 plugins/privacy-datamap/scripts/reconcile.py --repo=. --seal
+node "<plugin>/scripts/python-runtime.mjs" plugins/privacy-datamap/scripts/reconcile.py --repo=. --output=json
+node "<plugin>/scripts/python-runtime.mjs" plugins/privacy-datamap/scripts/validate_manifest.py .noru/privacy-datamap.yml
+node "<plugin>/scripts/python-runtime.mjs" plugins/privacy-datamap/scripts/reconcile.py --repo=. --seal
 node    plugins/privacy-datamap/scripts/diff.mjs --repo=.
 node    plugins/privacy-datamap/scripts/push.mjs --repo=. --confirm
 ```
@@ -546,9 +546,9 @@ decision or reasoning group. Group shared reasoning before writing, keeping fiel
 Generate views only when needed:
 
 ```bash
-python3 <plugin>/scripts/reconcile.py --repo=. --render-candidate
-python3 <plugin>/scripts/review.py --repo=. --output=json
-python3 <plugin>/scripts/review.py --repo=. --output=evidence
+node "<plugin>/scripts/python-runtime.mjs" reconcile.py --repo=. --render-candidate
+node "<plugin>/scripts/python-runtime.mjs" review.py --repo=. --output=json
+node "<plugin>/scripts/python-runtime.mjs" review.py --repo=. --output=evidence
 node <plugin>/scripts/collect.mjs --repo=. --export
 ```
 
@@ -593,8 +593,8 @@ proves deployed behavior. Missing deployed evidence must remain visible.
 After collection and reconciliation, run:
 
 ```bash
-python3 scripts/field_review.py --repo=<repo>
-python3 scripts/investigate.py --repo=<repo> --limit=24
+node "<plugin>/scripts/python-runtime.mjs" field_review.py --repo=<repo>
+node "<plugin>/scripts/python-runtime.mjs" investigate.py --repo=<repo> --limit=24
 ```
 
 The first command builds `classification_review` inside
@@ -659,3 +659,38 @@ are honored by review, validation, sealing, export and publication preflight; un
 conflicting or stale findings still block. Raw diagnostics and prior rationale remain auditable.
 See [the investigation workflow](references/extraction-resolutions.md) for commands, migration
 coverage adapters, supplemental definitions and cache compatibility.
+
+
+## Portable Python runtime
+
+Codex and Claude use the same Node launcher. Node 18+ and Git remain prerequisites;
+Python does not need to be installed or placed on PATH. Before the first analysis command,
+run `node "<plugin>/scripts/python-runtime.mjs" --setup`. The collector also performs this
+runtime preflight automatically. Run Python tools through this launcher, for example:
+
+```text
+node "<plugin>/scripts/python-runtime.mjs" reconcile.py "--repo=C:\Work Projects\Example"
+node "<plugin>/scripts/python-runtime.mjs" investigate.py "--repo=C:\Work Projects\Example" --summary
+node "<plugin>/scripts/python-runtime.mjs" review.py "--repo=C:\Work Projects\Example" --output=json
+```
+
+The launcher verifies Python 3.9+ and its required standard-library modules. It tries existing
+interpreters, including `python.exe` and the Windows Python launcher, then automatically downloads
+a pinned CPython distribution from Astral's python-build-standalone releases. SHA-256 values and
+URLs are committed in `references/python-runtime.json`. It retains upstream license files,
+installs into the user's Noru runtime cache without administrator access, and passes the resolved
+Python and Node executable paths to nested subprocesses. No Codex or Claude runtime paths are used.
+
+Managed builds cover Windows and macOS on x64/ARM64, and glibc Linux on x64/ARM64. The host must
+support the upstream build; older operating systems or musl Linux may need an existing compatible
+interpreter. Extraction uses the OS's built-in `tar` (Windows 10/11, macOS, Linux).
+Only runtime setup downloads files; collection and semantic investigation do not fetch target
+packages, run target applications or install Python packages. First setup needs HTTPS access to
+GitHub release assets. A failed setup exits nonzero and does not count as a completed scan.
+
+Optional environment controls: `NORU_PYTHON` is an absolute executable path (without shell quotes);
+`NORU_RUNTIME_CACHE` changes the user cache; `NORU_PYTHON_MODE=managed` bypasses installed-interpreter
+discovery; `NORU_RUNTIME_OFFLINE=1` forbids provisioning and fails if no usable runtime exists.
+These are support/testing controls, not required setup. An unusable explicit override fails clearly
+rather than silently choosing a different interpreter. Retry `--setup` after correcting the reported
+network, permissions or runtime-cache problem. A warm cache supports offline work.

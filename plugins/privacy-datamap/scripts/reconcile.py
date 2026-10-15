@@ -19,6 +19,7 @@ import pathlib
 import re
 import sys
 import subprocess
+from runtime_context import NODE
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import dependencies
@@ -978,7 +979,7 @@ def main(argv):
     lock_path = repo / ".noru" / "privacy-datamap.lock.json"
     try:
         if opts["seal"]:
-            fresh = subprocess.run(["node", str(HERE / "collect.mjs"), f"--repo={repo}", "--check", "--output=json", "--quiet"], capture_output=True, text=True)
+            fresh = subprocess.run([NODE, str(HERE / "collect.mjs"), f"--repo={repo}", "--check", "--output=json", "--quiet"], capture_output=True, text=True)
             if fresh.returncode not in (0, 1):
                 raise ValueError("cannot seal: fresh collection failed: " + fresh.stderr.strip())
         derived, scan = load_observations(repo, opts["candidate"])
