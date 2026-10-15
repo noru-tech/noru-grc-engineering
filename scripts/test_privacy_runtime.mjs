@@ -1,9 +1,9 @@
 // Run with --provision in OS CI: installed Python is deliberately not considered.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { verifyArchive } from '../plugins/privacy-datamap/scripts/provision-python.mjs';
@@ -26,6 +26,19 @@ function python(script, args = [], environment = env, expected = 0) {
 }
 try {
   cpSync(join(root, 'plugins/privacy-datamap'), dirname(scripts), { recursive: true });
+  if (env.NORU_PYTHON_MODE === 'managed') {
+    // Poison executable names so accidental hardcoded subprocesses cannot use runner Python.
+    const hidden = join(temporary, 'no installed python'); mkdirSync(hidden);
+    for (const name of ['python3', 'python', 'py']) {
+      const path = join(hidden, name + (process.platform === 'win32' ? '.exe' : ''));
+      if (process.platform === 'win32') copyFileSync(process.execPath, path);
+      else { writeFileSync(path, '#!/bin/sh\nexit 91\n'); chmodSync(path, 0o755); }
+    }
+    // Windows environment keys are case-insensitive; supply just one PATH key.
+    const original = env.PATH || env.Path || '';
+    delete env.Path;
+    env.PATH = hidden + delimiter + original;
+  }
   const bytes = Buffer.from('runtime archive');
   verifyArchive(bytes, createHash('sha256').update(bytes).digest('hex'));
   assert.throws(() => verifyArchive(bytes, '0'.repeat(64)), /SHA-256 mismatch/);
