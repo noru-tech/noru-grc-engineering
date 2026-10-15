@@ -76,8 +76,9 @@ suggestions, not registered stores or accepted fields. The agent traces actual R
 message publications, activation and device/container identity before constructing supplemental
 inputs. Serializer options, dynamic keys, unsupported overloads, custom converters, aliases and
 unqualified/inferred generic calls still need source investigation. Candidate limitations do not
-add new publication gates. Explicit Compile links still require membership investigation; they
-are not automatically dismissed as helpers.
+add new publication gates. Literal, unconditional Compile links establish source membership with
+the project declaration retained as evidence. Conditional, wildcard and multiply-owned links still
+require membership investigation; linked files are not automatically dismissed as helpers.
 
 The API contracts used for these suggestions are documented by Microsoft:
 - https://learn.microsoft.com/en-us/dotnet/api/system.text.json.jsonserializer.serialize

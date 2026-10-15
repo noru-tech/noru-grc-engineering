@@ -6,6 +6,9 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Resolve literal, unconditional C# Compile links while preserving investigation for conditional
+  and multiply-owned sources.
+
 - Preserve evidence-bound gap resolutions across unrelated dataset edits; support shared semantic
   reasoning and grouped migration submissions without removing per-finding accounting. Project system
   activities and explicit non-personal reviews, refresh composite signatures and add recoverable

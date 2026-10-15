@@ -51,6 +51,24 @@ class BoundaryTests(unittest.TestCase):
         self.put('App.csproj', '<Project><PropertyGroup Condition="$(Configuration)"><DefineConstants>CUSTOM</DefineConstants></PropertyGroup><ItemGroup Condition="$(Platform)"><Compile Include="Shared.cs" /></ItemGroup></Project>')
         self.assertTrue(any('MSBuild' in g['reason'] for g in self.scan()['gaps']))
 
+    def test_literal_compile_link_establishes_membership_without_dismissing_source(self):
+        self.put('app/App.csproj', '<Project><ItemGroup><Compile Include="../shared/Helper.cs"><Link>Helper.cs</Link></Compile></ItemGroup></Project>')
+        self.put('shared/Helper.cs', 'class Helper { public string Value { get; set; } }')
+        report = self.scan()
+        symbol = next(t for t in report['type_symbols'] if t['name'] == 'Helper')
+        self.assertEqual(symbol['project'], 'app/App.csproj')
+        self.assertFalse(any('Compile items' in g['reason'] for g in report['gaps']))
+        self.assertEqual(report['projects'][0]['compile_items'][0]['ref'], 'app/App.csproj:1')
+        self.put('other/Other.csproj', '<Project><ItemGroup><Compile Include="../shared/Helper.cs" /></ItemGroup></Project>')
+        self.assertTrue(any('multiple projects' in g['reason'] for g in self.scan()['gaps']))
+        self.put('other/Other.csproj', '<Project />')
+        self.put('shared/Shared.csproj', '<Project />')
+        report = self.scan()
+        self.assertTrue(any('multiple projects' in g['reason'] for g in report['gaps']))
+        self.assertFalse(any(t['name'] == 'Helper' for t in report['type_symbols']))
+        self.put('app/App.csproj', '<Project><ItemGroup Condition="$(Platform)"><Compile Include="../shared/Helper.cs" /></ItemGroup></Project>')
+        self.assertTrue(any('Compile items' in g['reason'] for g in self.scan()['gaps']))
+
     def auth(self, options='', version='10.0.12'):
         self.put('App.csproj','<Project><ItemGroup><PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="'+version+'" /></ItemGroup></Project>')
         self.put('Program.cs','using Microsoft.AspNetCore.Authentication.Cookies; using Microsoft.AspNetCore.Authentication.OpenIdConnect; var builder = WebApplication.CreateBuilder(args); builder.Services.AddAuthentication().AddCookie("session", o => { '+options+' }).AddOpenIdConnect("login", o => { o.SignInScheme="session"; o.SaveTokens=true; o.Scope.Add("profile"); }); builder.Build().Run();')

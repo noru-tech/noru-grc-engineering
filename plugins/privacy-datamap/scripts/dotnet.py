@@ -63,7 +63,15 @@ class Reader(ModelDiscovery):
             self.gap(path, 1, 'Source is unreadable or exceeds the inspection limit'); return None
 
     def project(self, path):
+        linked = [p for p, spec in self.projects.items() if any(item['path'] == path for item in spec.get('compile_items', []))]
         parents = [p for p in self.projects if pathlib.PurePosixPath(path).is_relative_to(pathlib.PurePosixPath(p).parent)]
+        if linked:
+            depth = max((len(pathlib.PurePosixPath(p).parts) for p in parents), default=0)
+            owners = set(linked) | {p for p in parents if len(pathlib.PurePosixPath(p).parts) == depth}
+            if len(owners) == 1:
+                return next(iter(owners))
+            self.gap(path, 1, 'Explicit source links and directory membership include this file in multiple projects; investigate each compilation scope', code='DOTNET_BUILD_MEMBERSHIP')
+            return None
         if not parents:
             self.gap(path, 1, 'No project boundary established; confirm source membership and logical connection scope')
             return '.'
@@ -104,7 +112,7 @@ class Reader(ModelDiscovery):
                 targets = [node.get('Path', '') for node in root.iter() if node.tag.split('}')[-1] == 'Project']
                 self.solutions.append({'path': path, 'project_references': self.solution_targets(path, targets)})
                 continue
-            project = {'path': path, 'refs': [f'{path}:1'], 'project_references': [], 'packages': []}
+            project = {'path': path, 'refs': [f'{path}:1'], 'project_references': [], 'packages': [], 'compile_items': []}
             tag_offsets = {}
             for node in root.iter():
                 tag = node.tag.split('}')[-1]
@@ -117,7 +125,17 @@ class Reader(ModelDiscovery):
                 if not property_only and ('Condition' in node.attrib or tag in {'Import', 'Choose', 'Target'} or '$(' in ''.join(node.attrib.values())):
                     self.gap(path, node_line, 'Conditional/imported MSBuild settings are not evaluated; confirm source membership and package configuration')
                 if tag == 'Compile':
-                    self.gap(path, node_line, 'Explicit Compile items require source-membership investigation')
+                    target = node.get('Include', '').replace('\\', '/')
+                    conditional = any('Condition' in ancestor.attrib for ancestor in root.iter() if node in list(ancestor.iter()))
+                    full = (self.repo / pathlib.PurePosixPath(path).parent / target).resolve()
+                    if (path.endswith('.csproj') and target.endswith('.cs') and not conditional
+                            and not any(char in target for char in '*?;$') and full.is_relative_to(self.repo)
+                            and full.relative_to(self.repo).as_posix() in self.files
+                            and set(node.attrib) <= {'Include', 'Link'}
+                            and all(child.tag.split('}')[-1] == 'Link' for child in node)):
+                        project['compile_items'].append({'path': full.relative_to(self.repo).as_posix(), 'ref': f'{path}:{node_line}'})
+                    else:
+                        self.gap(path, node_line, 'Explicit Compile items require source-membership investigation')
                 if tag == 'EnableDefaultCompileItems' and (node.text or '').strip().lower() == 'false':
                     self.gap(path, node_line, 'Default C# source inclusion is disabled; confirm included sources')
                 if tag == 'ProjectReference':
