@@ -78,6 +78,10 @@
           "expect_message": "duplicate dataset key"
         },
         {
+          "path": "fixtures/invalid-duplicate-declaration-name.privacy-datamap.yml",
+          "expect_message": "Names must be unique within their parent"
+        },
+        {
           "path": "fixtures/invalid-structure-changed.privacy-datamap.yml",
           "expect_message": "no longer a statement about this table"
         },
