@@ -655,7 +655,7 @@ def row_errors(row, contract, structural_only=False):
             errors.append("classification decision is unbound or modified; submit it through plugin investigation")
         content = row.get("open_content_resolution")
         if row.get("open_content") and not accepted and (not isinstance(content, dict) or not content.get("rationale") or not content.get("evidence_ids") or not set(content["evidence_ids"]) <= set(row.get("evidence_ids", [])) or content.get("outcome") not in CONTENT_OUTCOMES):
-            errors.append("open or unmodeled content requires an evidenced content assessment")
+            errors.append("open or unmodeled content requires an evidenced content assessment: submit open_content_resolution on this parent; resolving known members does not account for additional open content")
         if content and content.get("outcome") == "reviewed_open_content" and (not isinstance(content.get("residual_uncertainty"), str) or not content["residual_uncertainty"].strip()):
             errors.append("reviewed open content must describe its residual uncertainty")
         if content and content.get("outcome") == "accepted_certificate" and (row.get("decision_origin") != "accepted-certificate" or content.get("certificate_digest") != contract.get("accepted_certificate") or not contract.get("accepted_certificate")):
@@ -1326,10 +1326,13 @@ def main(argv=None):
     parser.add_argument("--repo", type=pathlib.Path, required=True)
     parser.add_argument("--fresh", action="store_true")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument('--candidate', action='store_true', help='Require candidate mode; otherwise follows the current cache collection mode')
     args = parser.parse_args(argv)
     repo = args.repo.resolve()
     path = repo / ".noru/.cache/privacy-datamap.analysis.json"
     document = analysis_storage.load(path) or {}
+    import investigation_status
+    investigation_status.mode(document, args.candidate)
     derived = derived_for(document, repo)
     if not derived:
         observed = repo / ".noru/.cache/privacy-datamap.derived.json"
@@ -1341,7 +1344,9 @@ def main(argv=None):
         build_contract(document, repo, fresh=args.fresh, derived=derived)
         analysis_storage.save(path, document)
     errors = validate_contract(document, derived, repo, require_complete=args.check)
-    print(json.dumps({"status": "classification incomplete" if errors or pending_requests(document.get("classification_review", {})) else "classification ready for review",
+    progress = investigation_status.progress(document, repo, path)
+    print(investigation_status.line(progress), file=sys.stderr)
+    print(json.dumps({"mode": progress['mode'], "progress": progress, "status": "classification incomplete" if errors or pending_requests(document.get("classification_review", {})) else "classification ready for review",
                       "counts": document.get("classification_review", {}).get("counts", {}), "errors": errors}))
     return 1 if errors else 0
 

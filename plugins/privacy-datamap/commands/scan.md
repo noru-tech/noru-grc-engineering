@@ -13,6 +13,34 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --output=json
 **A scan combines deterministic collection with mandatory agent enrichment.** The commands above
 finish structure collection only. Continue the analysis below before reporting scan completion.
 
+### Investigation checkpoints and small views
+
+Use `investigate.py --repo=<repo> --status` for read-only recorded field/gap counts and the last
+cache-write time. Both investigation commands print a one-line progress report on stderr while
+keeping stdout machine-readable. Status is not validation or acceptance.
+Use `investigate.py --repo=<repo> --summary --limit=24` to page through identities, shapes,
+declaration locations and evidence counts without loading the evidence payload. Retrieve a
+selected field or gap with `--entity=<identity>` before judging it; summary omissions are not
+evidence of absence. Full and compact views remain available.
+
+Work in small batches by datastore. Submit supported decisions for the current batch before
+reading the next one. If a batch needs further investigation, report the files checked, the exact
+remaining question and next action; do not let source reading continue indefinitely without a
+checkpoint. For delegated work, require the same checkpoints. No helper can infer progress from
+unrecorded reading. Restart queue pagination at zero after submissions.
+
+`field_review.py` and `investigate.py` follow the current cache collection mode. Their optional
+`--candidate` flag asserts candidate mode and reports an error on manifest state; it does not
+switch or rebuild observations. Output reports the active mode.
+
+An activity's `unresolved_question` or `business_context_question` produces a `PROCESSING_QUESTION`
+diagnostic. Inspect it with `investigate.py`; record the investigation through `--gaps`, including
+`fallback_review` when evidence remains unavailable. A fallback record alone does not close the
+finding. Explicit scoped uncertainty acceptance remains available through `--uncertainties`.
+For candidate supplemental inputs, put dependencies under
+`structural_proposal.evidence_dependencies`; the registry is merged with manifest dependencies.
+A top-level analysis-cache `evidence_dependencies` list is not that registry.
+
 Prefer one data use per processing activity. Multi-use activities expand into one declaration per
 use, named `<purpose> (<data_use>)`; single-use activities retain the plain purpose. Declaration
 names must be unique within each system. Split colliding activities into distinct single-purpose

@@ -10,6 +10,7 @@ import analysis_storage
 import field_review
 import gap_resolution
 import uncertainty
+import investigation_status
 
 HINTS = json.loads((pathlib.Path(__file__).resolve().parent.parent / "references/classification.json").read_text())
 
@@ -260,12 +261,42 @@ def compact_batch(batch, limit, offset=0):
     return result
 
 
+def summary_batch(document, limit, offset, repo):
+    contract = document['classification_review']
+    evidence = contract.get('evidence', {})
+    work = []
+    for row in field_review.all_rows(contract.get('fields', [])):
+        if row.get('status') == 'proposed':
+            continue
+        ids = row.get('evidence_ids', [])
+        definition = next((contract.get('facts', {}).get(key) for key in row.get('supporting_fact_ids', [])
+                           if contract.get('facts', {}).get(key, {}).get('kind') == 'field_definition'), {})
+        declaration_ids = definition.get('evidence_ids', []) or ids
+        span = evidence.get(declaration_ids[0], {}) if declaration_ids else {}
+        work.append({'kind': 'field', 'entity_id': row['entity_id'], 'shape': str(row.get('shape', ''))[:240],
+                     'owner': row.get('resolution_owner', 'agent'),
+                     'declaration': {key: span[key] for key in ('path', 'start_line', 'end_line') if key in span},
+                     'evidence_count': len(ids), 'detail_command': 'investigate.py --entity=' + row['entity_id']})
+    gaps = field_review.gap_partition(document, field_review.derived_for(document, repo) or {}, repo)['active_blockers']
+    work.extend({'kind': 'gap', 'gap_id': gap['gap_id'], 'code': gap.get('code'),
+                 'ref': gap.get('ref'), 'evidence_count': len(gap.get('evidence_ids', [])),
+                 'detail_command': 'investigate.py --entity=' + gap['gap_id']} for gap in gaps)
+    return {'format': 'summary', 'work': work[offset:offset + limit],
+            'pagination': {'offset': offset, 'limit': limit, 'total': len(work),
+                           'next_offset': offset + limit if offset + limit < len(work) else None},
+            'instructions': 'Navigation only; omitted evidence is not reviewed evidence. Retrieve entity details and investigate before submitting decisions.'}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', type=pathlib.Path, default=pathlib.Path.cwd())
     parser.add_argument('--limit', type=int, default=24)
     parser.add_argument('--format', choices=('full', 'compact'), default='full', help='Compact pages fields and gaps together and shares repeated context; full preserves the legacy response')
     parser.add_argument('--offset', type=int, default=0, help='Offset into unchanged compact agent work; restart at zero after applying decisions')
+    parser.add_argument('--status', action='store_true', help='Read-only progress, without generating investigation batches')
+    parser.add_argument('--summary', action='store_true', help='Small navigation page with declaration locations and evidence counts; use --entity for full evidence')
+    parser.add_argument('--entity', help='Return full pending details for one field or gap identity')
+    parser.add_argument('--candidate', action='store_true', help='Require candidate mode; otherwise follows the current cache collection mode')
     parser.add_argument('--decisions', type=pathlib.Path, help='JSON list of investigated decisions; use - for stdin')
     parser.add_argument('--shapes', type=pathlib.Path, help='JSON list of source-evidenced nested-member or scalar-array refinements')
     parser.add_argument('--gaps', type=pathlib.Path, help='JSON list of investigated extraction-gap resolutions')
@@ -275,7 +306,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not 1 <= args.limit <= 200:
         parser.error('--limit must be between 1 and 200')
-    if args.offset < 0 or (args.offset and args.format != 'compact'):
+    if args.offset < 0 or (args.offset and args.format != 'compact' and not args.summary):
         parser.error('--offset must be nonnegative and requires --format=compact')
     repo = args.repo.resolve()
     path = repo / '.noru/.cache/privacy-datamap.analysis.json'
@@ -283,6 +314,14 @@ def main(argv=None):
         document = analysis_storage.load(path)
         if not isinstance(document, dict):
             raise ValueError('No canonical analysis cache. Run collection and reconciliation first.')
+        investigation_status.mode(document, args.candidate)
+        if args.status:
+            if any((args.decisions, args.shapes, args.gaps, args.gap_groups, args.feedback, args.uncertainties, args.entity, args.summary)):
+                raise ValueError('--status is read-only and cannot be combined with submissions or batch views')
+            status = investigation_status.progress(document, repo, path)
+            print(investigation_status.line(status), file=sys.stderr)
+            print(json.dumps(status))
+            return 0
         if document.get('classification_review'):
             derived = field_review.derived_for(document, repo)
             if not derived:
@@ -327,11 +366,30 @@ def main(argv=None):
             if errors:
                 raise ValueError('; '.join(errors))
             document = updated
-        result = prepare_batch(document, args.limit + args.offset, repo)
-        if args.format == 'compact':
+        if args.summary and args.entity:
+            raise ValueError('--summary and --entity are separate views')
+        if args.summary:
+            result = summary_batch(document, args.limit, args.offset, repo)
+        else:
+            count = len(list(field_review.all_rows(document.get('classification_review', {}).get('fields', [])))) if args.entity else args.limit + args.offset
+            result = prepare_batch(document, count, repo)
+        if args.entity:
+            result['requests'] = [row for row in result['requests'] if row['request']['entity_id'] == args.entity]
+            result['extraction_gaps'] = [row for row in result['extraction_gaps'] if row['gap_id'] == args.entity]
+            result['human_questions'] = [row for row in result['human_questions'] if row['entity_id'] == args.entity]
+            result['uncertainty_candidates'] = [row for row in result['uncertainty_candidates'] if row['target_id'] == args.entity]
+            result['migration_groups'] = [row for row in result['migration_groups'] if args.entity in row['gap_ids']]
+            result['supplemental_candidates'] = []
+            result['counts']['included'] = len(result['requests']) + len(result['extraction_gaps'])
+            if not result['counts']['included'] and not result['human_questions']:
+                raise ValueError('No pending field or gap matches --entity; use --summary to find current identities')
+        if args.format == 'compact' and not args.summary:
             result = compact_batch(result, args.limit, args.offset)
         if document is not original:
             analysis_storage.save(path, document)
+        status = investigation_status.progress(document, repo, path)
+        result.update(mode=status['mode'], progress=status)
+        print(investigation_status.line(status), file=sys.stderr)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (OSError, ValueError, KeyError, TypeError) as exc:

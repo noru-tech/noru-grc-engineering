@@ -9,6 +9,8 @@ import sys
 import tempfile
 import subprocess
 import unittest
+import contextlib
+import io
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'plugins/privacy-datamap/scripts'))
 import candidate_apply
@@ -24,6 +26,80 @@ class WorkflowTests(unittest.TestCase):
     row = fixtures.ClassificationGateTests.row
     decision = fixtures.ClassificationGateTests.decision
     resolve = fixtures.ClassificationGateTests.resolve
+
+    def test_status_is_read_only_and_candidate_mode_is_explicit(self):
+        import analysis_storage
+        path = self.repo / '.noru/.cache/privacy-datamap.analysis.json'
+        path.parent.mkdir(parents=True)
+        self.document['collection_mode'] = 'candidate'
+        analysis_storage.save(str(path), self.document)
+        before, mtime = path.read_bytes(), path.stat().st_mtime_ns
+        output, errors = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            self.assertEqual(investigate.main(['--repo', str(self.repo), '--status', '--candidate']), 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result['mode'], 'candidate')
+        self.assertEqual(result['fields']['pending'], 6)
+        self.assertIn('fields 0 decided / 6 pending', errors.getvalue())
+        self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), (before, mtime))
+        checked = subprocess.run([sys.executable, str(ROOT / 'plugins/privacy-datamap/scripts/field_review.py'),
+            '--repo', str(self.repo), '--candidate', '--check'], capture_output=True, text=True)
+        self.assertEqual(checked.returncode, 1)
+        self.assertEqual(json.loads(checked.stdout)['mode'], 'candidate')
+        self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), (before, mtime))
+        self.assertEqual(analysis_storage.load(str(path)), self.document)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(investigate.main(['--repo', str(self.repo), '--summary', '--limit=2', '--candidate']), 0)
+        summary = json.loads(output.getvalue())
+        self.assertEqual(summary['format'], 'summary')
+        self.assertEqual(len(summary['work']), 2)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(investigate.main(['--repo', str(self.repo), '--entity=db/records/email', '--candidate']), 0)
+        detail = json.loads(output.getvalue())
+        self.assertEqual(len(detail['requests']), 1)
+        self.assertEqual(detail['requests'][0]['request']['entity_id'], 'db/records/email')
+        self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), (before, mtime))
+        self.resolve()
+        analysis_storage.save(path, self.document)
+        import investigation_status
+        self.assertEqual(investigation_status.progress(self.document, self.repo, path)['fields'], {'decided': 6, 'pending': 0, 'total': 6})
+        self.document['collection_mode'] = 'manifest'
+        analysis_storage.save(path, self.document)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(investigate.main(['--repo', str(self.repo), '--status', '--candidate']), 2)
+
+    def test_summary_size_does_not_grow_with_evidence_payload(self):
+        row = self.row('email')
+        row['evidence_ids'] += ['bulk:' + str(i) for i in range(300)]
+        for key in row['evidence_ids']:
+            self.document['classification_review']['evidence'].setdefault(key, {'path': 'schema.ts', 'start_line': 1, 'snippet': 'x' * 10000})
+        result = investigate.summary_batch(self.document, 2, 0, self.repo)
+        self.assertEqual(len(result['work']), 2)
+        self.assertLess(len(json.dumps(result)), 2000)
+        self.assertGreater(result['work'][0]['evidence_count'], 300)
+        self.assertNotIn('snippet', json.dumps(result))
+        self.assertEqual(result['pagination']['next_offset'], 2)
+
+    def test_non_personal_proposal_schema_matches_documentation(self):
+        schema = json.loads((ROOT / 'contract/privacy-datamap-analysis.schema.json').read_text())
+        properties = schema['$defs']['system_proposal']['properties']
+        self.assertIn('no', properties['personal_data']['enum'])
+        self.assertEqual(properties['non_personal_rationale']['type'], 'string')
+
+    def test_dependency_error_identifies_missing_reference_and_registry(self):
+        import dataset_inputs
+        errors = dataset_inputs.dependency_gaps({'system': [{'fides_key': 'queue',
+            'meta': {'noru': {'origin': 'provisioned', 'refs': ['schema.ts:1']}}}]})
+        self.assertIn('schema.ts:1', errors[0])
+        self.assertIn('structural_proposal.evidence_dependencies', errors[0])
+        self.assertIn('not a top-level analysis-cache registry', errors[0])
+
+    def test_descriptive_decision_labels_remain_backward_compatible(self):
+        decision = self.decision('enabled')
+        decision.update(identification_basis='source-evidenced operational state', security_sensitivity='credential_or_secret')
+        self.assertEqual(field_review.apply_decisions(self.document, [decision], self.repo), [])
 
     def test_skill_keeps_uncertainty_acceptance_available(self):
         text = (ROOT / 'plugins/privacy-datamap/skills/privacy-datamap/SKILL.md').read_text()

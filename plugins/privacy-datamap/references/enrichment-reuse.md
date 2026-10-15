@@ -45,6 +45,11 @@ The API expands the shared investigation into separate validated dispositions at
 not erase raw findings, infer current schema from migration history or treat identity as completeness.
 For accepted uncertainty, use the existing scoped acceptance records for each finding.
 
+Source-scoped diagnostics also bind the fields and runtime definitions evidenced by their source
+file or project scope. An unrelated dataset does not invalidate that decision; changes within the
+represented scope still do. Findings without explicit source, dataset or system scopes retain the
+conservative global fallback.
+
 ## Apply a candidate draft
 
 `reconcile.py --repo=<repo> --apply-candidate` projects current field decisions and system activities

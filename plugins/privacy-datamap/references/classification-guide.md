@@ -26,6 +26,23 @@ key** — if the one you want does not exist, the answer is a different key or a
 
 ## Field-level classification policy
 
+### Decision vocabulary and shared reasoning
+
+`identification_basis` and `security_sensitivity` are descriptive strings, not closed enums in
+the current gate. Do not mistake accepted spelling for evidence of a correct decision. Preferred
+identification-basis terms are `direct` (identifies a person), `relational` (association through
+an evidenced link), `content` (information about a person), `operational` (evidenced non-personal
+operation) and `unestablished` (still unknown). The `relational` value additionally checks known
+foreign-key target classifications. Security descriptions can use `credential_or_secret`,
+`potential_credential_or_protocol_value` and `not_established`; security sensitivity is separate
+from person association and does not establish a personal-data category.
+
+For repeated semantic analysis, submit an envelope with `reasoning_groups` and `decisions` to
+`investigate.py --decisions`. A group contains `semantic_review`; each decision selects it with
+`reasoning_group` and can override individual dimensions. See [enrichment reuse](enrichment-reuse.md)
+for the JSON shape. Meaning, person association, categories and evidence remain field-specific;
+sharing reasoning never classifies an entire collection automatically.
+
 Use this policy for contextual enrichment. Fides categories describe both identifiers and
 information about a person; do not present every `user.*` category as a direct identifier or
 collapse the distinction into an unexplained PII flag.

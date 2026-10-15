@@ -49,7 +49,7 @@ def dependency_gaps(doc):
         for ref in refs or []:
             path = ref.rsplit(":", 1)[0]
             if not any(spec.get("path") == path and (target in spec.get("targets", []) or alternate in spec.get("targets", [])) for spec in doc.get("evidence_dependencies", [])):
-                errors.append(f"{target}: register evidence_dependencies for every structural input citation before acceptance")
+                errors.append(f"{target}: register evidence_dependencies for every structural input citation before acceptance; missing {ref}. Candidate inputs read structural_proposal.evidence_dependencies plus manifest evidence_dependencies, not a top-level analysis-cache registry")
     for dataset in doc.get("dataset", []):
         if (dataset.get("meta") or {}).get("noru", {}).get("origin") == "supplemental":
             for collection in dataset.get("collections", []):

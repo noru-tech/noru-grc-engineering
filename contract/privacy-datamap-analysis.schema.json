@@ -556,6 +556,17 @@
               "type": "string"
             }
           }
+        },
+        "personal_data": {
+          "enum": [
+            "yes",
+            "no",
+            "mixed",
+            "unknown"
+          ]
+        },
+        "non_personal_rationale": {
+          "type": "string"
         }
       }
     },
