@@ -11,8 +11,8 @@ authors:
 repository-code: https://github.com/noru-tech/noru-grc-engineering
 url: https://github.com/noru-tech/noru-grc-engineering
 license: MIT
-version: "0.13.0"
-date-released: 2026-10-14
+version: "0.14.0"
+date-released: 2026-10-15
 keywords:
   - compliance
   - GRC

@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "findings-ingest",
   "displayName": "Noru Findings Ingest",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Ingest the SARIF and OSV-Scanner results that never reach a forge alert store, decide with the user what each one means here, and land them in Noru as security findings filed against risks the organization already carries — closing the ones no longer reported.",
   "author": {
     "name": "Noru",

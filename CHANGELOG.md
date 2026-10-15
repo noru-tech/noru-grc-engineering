@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.14.0 — 2026-10-15
+
 - Fix: `privacy-datamap` reconcile no longer stops with "evidence path must identify current
   repository source, never a migration" when a migration-coverage gap cites a migration the collector
   lists among its migration sources but no file-name pattern recognises, such as a data migration
