@@ -1,6 +1,6 @@
 ---
 name: findings-ingest
-version: 0.14.0
+version: 0.15.0
 description: Ingest the SARIF and OSV-Scanner results a repository's CI produces and does not upload to a forge alert store, decide with the user what each one means in their environment, and land them in Noru as security findings filed against risks the organization already carries — closing the ones no longer reported. Use when someone wants their scanner output in their compliance register, asks why a SAST or dependency result is not tracked anywhere, wants to know whether a result they accepted is still accepted, or wants a pipeline check that keeps the register true between audits.
 requires:
   bins: ["node", "python3", "git"]

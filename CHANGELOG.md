@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.15.0 — 2026-10-15
+
 - CI without a stored key. With `trust-id` (the `noru-ci` action and the GitLab `noru-ci.yml`
   component) or `NORU_TRUST_ID`, `scripts/ci_check.py` requests the job's OIDC ID token (GitHub
   Actions' runner endpoint, or GitLab's `NORU_ID_TOKEN` from `id_tokens`) and exchanges it once, at
