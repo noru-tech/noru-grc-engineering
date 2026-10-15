@@ -15,12 +15,11 @@ def progress(document, repo, path):
     contract = document.get('classification_review', {})
     rows = list(field_review.all_rows(contract.get('fields', [])))
     partition = field_review.gap_partition(document, field_review.derived_for(document, repo) or {}, repo)
-    gaps = contract.get('gaps', [])
     active = partition['active_blockers']
     path = pathlib.Path(path)
     return {'mode': mode(document), 'note': 'Field counts describe recorded decisions, not validation or approval.', 'fields': {'decided': sum(r.get('status') == 'proposed' for r in rows),
         'pending': sum(r.get('status') != 'proposed' for r in rows), 'total': len(rows)},
-        'gaps': {'decided': len(partition['resolved_diagnostics']), 'pending': len(active), 'observed': len(gaps)},
+        'gaps': {'decided': len(partition['resolved_diagnostics']), 'pending': len(active), 'observed': len(partition['observed_diagnostics'])},
         'last_cache_write': datetime.datetime.fromtimestamp(path.stat().st_mtime, datetime.timezone.utc).isoformat() if path.is_file() else None}
 
 

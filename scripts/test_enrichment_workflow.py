@@ -82,6 +82,14 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('snippet', json.dumps(result))
         self.assertEqual(result['pagination']['next_offset'], 2)
 
+    def test_status_includes_new_unregistered_collector_diagnostics(self):
+        import investigation_status
+        self.derived['coverage'] = {'unparsed_candidates': [{'format': 'synthetic', 'ref': 'schema.ts:1',
+            'reason': 'New source contract requires investigation'}]}
+        status = investigation_status.progress(self.document, self.repo, self.repo / 'absent.json')
+        self.assertEqual(status['gaps'], {'decided': 0, 'pending': 1, 'observed': 1})
+        self.assertIsNone(status['last_cache_write'])
+
     def test_non_personal_proposal_schema_matches_documentation(self):
         schema = json.loads((ROOT / 'contract/privacy-datamap-analysis.schema.json').read_text())
         properties = schema['$defs']['system_proposal']['properties']
