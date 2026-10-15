@@ -404,6 +404,24 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
         prior_row = old_rows.get(identity)
         if prior_row and prior_row.get("user_feedback"):
             row["user_feedback"] = copy.deepcopy(prior_row["user_feedback"])
+        content = (prior_row or {}).get('open_content_resolution') or {}
+        if (prior.get('version') == VERSION and prior_row and row.get('open_content')
+                and prior.get('binding', {}).get('source_inventory') == contract['binding']['source_inventory']
+                and prior_row.get('observation_digest') == row['observation_digest']
+                and prior_row.get('decision_binding') == decision_binding(prior_row, prior)
+                and content.get('outcome') in CONTENT_OUTCOMES - {'accepted_certificate'}
+                and content.get('rationale') and content.get('evidence_ids')
+                and (content.get('outcome') != 'reviewed_open_content' or isinstance(content.get('residual_uncertainty'), str) and content['residual_uncertainty'].strip())
+                and set(content['evidence_ids']) <= set(prior_row.get('evidence_ids', []))
+                and all(key in prior.get('evidence', {}) and not evidence_errors(prior['evidence'][key], repo, exclusions)
+                        for key in prior_row.get('evidence_ids', []))):
+            # Structure and its evidenced openness do not become unknown when taxonomy policy changes.
+            # This carries no categories, personal association, acceptance or proposed status.
+            row['open_content_resolution'] = copy.deepcopy(content)
+            row['evidence_ids'] = sorted(set(row['evidence_ids']) | set(content['evidence_ids']))
+            for key in content['evidence_ids']:
+                contract['evidence'][key] = copy.deepcopy(prior['evidence'][key])
+            row['evidence'] = sorted({contract['evidence'][key]['path'] + ':' + str(contract['evidence'][key]['start_line']) for key in row['evidence_ids']})
         if prior.get("version") == VERSION and prior.get("binding", {}).get("taxonomy_digest") == taxonomy_digest() and prior.get("binding", {}).get("source_inventory") == contract["binding"]["source_inventory"] and prior_row and prior_row.get("observation_digest") == row["observation_digest"]:
             used = prior_row.get("evidence_ids", [])
             if all(key in prior.get("evidence", {}) and not evidence_errors(prior["evidence"][key], repo) for key in used):

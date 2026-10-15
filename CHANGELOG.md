@@ -10,6 +10,8 @@ one version number; the release workflow fails if they disagree.
   candidate-mode assertions. Preserve source-scoped gap decisions across unrelated structural
   additions; clarify investigation checkpoints, dependency registries and open-content errors.
   Align non-personal system proposal schema with implementation and accept string cache paths.
+  Retain authenticated open-content assessments across policy refreshes when their structural
+  observations and source evidence remain unchanged, without retaining privacy classifications.
 
 - Give multi-use processing declarations unique per-use names and reject duplicate names during
   review and validation. Preserve single-use names and recognize unchanged legacy expansions as

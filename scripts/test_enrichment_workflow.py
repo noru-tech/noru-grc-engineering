@@ -11,6 +11,7 @@ import subprocess
 import unittest
 import contextlib
 import io
+from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'plugins/privacy-datamap/scripts'))
 import candidate_apply
@@ -108,6 +109,28 @@ class WorkflowTests(unittest.TestCase):
         decision = self.decision('enabled')
         decision.update(identification_basis='source-evidenced operational state', security_sensitivity='credential_or_secret')
         self.assertEqual(field_review.apply_decisions(self.document, [decision], self.repo), [])
+
+    def test_open_content_evidence_survives_policy_refresh_without_classification(self):
+        payload = next(f for f in self.compiler['tables'][0]['fields'] if f['name'] == 'payload')
+        payload['type']['open'] = True
+        field_review.build_contract(self.document, self.repo, self.compiler)
+        self.resolve()
+        decision = self.decision('payload', 'mixed', association='mixed')
+        content = {'outcome': 'reviewed_open_content', 'rationale': 'Inspected the open record contract.',
+                   'evidence_ids': self.row('payload')['evidence_ids'], 'residual_uncertainty': 'Additional submitted values remain unconstrained.'}
+        decision['open_content_resolution'] = content
+        self.assertEqual(field_review.apply_decisions(self.document, [decision], self.repo), [])
+        original = copy.deepcopy(self.document)
+        with mock.patch.object(field_review, 'taxonomy_digest', return_value='changed-policy'):
+            field_review.build_contract(self.document, self.repo, self.compiler)
+        self.assertEqual(self.row('payload')['open_content_resolution'], content)
+        self.assertEqual(self.row('payload')['status'], 'needs_investigation')
+        self.assertEqual(self.row('payload')['personal_data'], 'unknown')
+        self.document = original
+        self.row('payload')['open_content_resolution']['rationale'] = 'Unbound edit'
+        with mock.patch.object(field_review, 'taxonomy_digest', return_value='changed-policy'):
+            field_review.build_contract(self.document, self.repo, self.compiler)
+        self.assertNotIn('open_content_resolution', self.row('payload'))
 
     def test_skill_keeps_uncertainty_acceptance_available(self):
         text = (ROOT / 'plugins/privacy-datamap/skills/privacy-datamap/SKILL.md').read_text()
