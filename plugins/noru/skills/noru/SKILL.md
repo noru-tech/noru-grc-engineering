@@ -24,11 +24,13 @@ collect locally  →  validate against a bundled vocabulary  →  push once, ide
 | Piece | Collects | Lands in Noru as | Transport |
 |---|---|---|---|
 | `ai-inventory` | model/provider calls, agents, prompts, retrieval, evals, oversight points | assets + vendors + evidence | MCP |
+| `dev-agents` | the coding agents that authored changes (from an acc manifest) and the MCP servers and plugins committed agent configuration declares | vendors + the window's inventory as evidence | MCP |
 | `evidence-push` | local artifacts against Noru's own unmet evidence expectations | file evidence with control mappings | REST (upload is not available over MCP) |
 | `governance-records` | minutes, ISMS scope, statement of applicability, audit plans and reports, findings, corrective action plans | attributed, dated records as evidence | MCP |
 | `review-signoff` | a periodic review of machine output, and the human decision about it | a named, dated, expiring sign-off as evidence | MCP |
 | `audit-pack` | the local artifacts, the sampling and the workpapers for one framework over one audit window | the tested conclusion for each control, as evidence | MCP |
 | `iac-scan` | compliance-relevant misconfiguration in Terraform, CloudFormation, Kubernetes and pipeline configuration | security findings, keyed and closed by the same call | MCP |
+| `threat-model` | threats in a committed Open Threat Model, and components it leaves out | risks linked to the organization's controls | MCP |
 | `findings-ingest` | SARIF and OSV-Scanner results that never reach a forge alert store | security findings filed against existing risks, keyed and closed by the same call | MCP |
 | `privacy-datamap` | repository schemas, migrations and API contracts, and the personal data they define | a Fides privacy data map | MCP |
 | `change-control` | forge history and settings: who authored, approved, merged and deployed each change | security findings plus the reviewed window as evidence | MCP |

@@ -1,0 +1,14 @@
+{
+  "enabledPlugins": {
+    "release-notes@example-tools": true,
+    "experimental@example-tools": false
+  },
+  "extraKnownMarketplaces": {
+    "example-tools": {
+      "source": {
+        "source": "github",
+        "repo": "example-org/agent-plugins"
+      }
+    }
+  }
+}

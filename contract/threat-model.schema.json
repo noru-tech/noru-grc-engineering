@@ -1,0 +1,485 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/noru-tech/noru-grc-engineering/contract/threat-model.schema.json",
+  "title": "Noru threat model manifest (.noru/threat-model.yml)",
+  "description": "The threats an Open Threat Model file in the repository names, one risk per threat on each component or dataflow, each judged by a person and landed in Noru's risk register linked to the organization's own controls; and the components other pieces found that the model does not name, each decided. Enforced by plugins/threat-model/scripts/validate_manifest.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "piece",
+    "source",
+    "models",
+    "queue_snapshot",
+    "risks"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "piece": {
+      "const": "threat-model"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "models": {
+      "description": "The Open Threat Model files read.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/model"
+      }
+    },
+    "queue_snapshot": {
+      "description": "What Noru already held at :scan: the risks this piece filed before and the controls a risk may be linked to. Written from MCP output by the client; never invented by this plugin. Requirement 9.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fetched_at",
+        "via",
+        "open_risks",
+        "controls"
+      ],
+      "properties": {
+        "fetched_at": {
+          "type": "string",
+          "minLength": 10
+        },
+        "via": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "getOrganizationRisks",
+              "getOrganizationControls",
+              "getRiskControlMappings"
+            ]
+          }
+        },
+        "open_risks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/queueRisk"
+          }
+        },
+        "controls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/queueControl"
+          }
+        }
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/risk"
+      }
+    },
+    "undeclared": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/undeclared"
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "commit_sha",
+        "branch",
+        "generated_by"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit_sha": {
+          "type": "string",
+          "minLength": 7
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generated_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "derived_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[^#:\\s][^#\\s]*(?:#/[^\\s]*|:[0-9]+)?$"
+    },
+    "interpretation": {
+      "description": "Contract requirement 8. Who decided, when, until when (measured from observed_on), and why. Not a due date.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "decided_at",
+        "expires_at",
+        "rationale"
+      ],
+      "properties": {
+        "owner": {
+          "type": "string",
+          "minLength": 3
+        },
+        "decided_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "expires_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 10
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "otm_version",
+        "project",
+        "digest"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "otm_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "project": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "queueRisk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "external_id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "external_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      }
+    },
+    "queueControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "display_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "model",
+        "target",
+        "threat",
+        "title",
+        "category",
+        "likelihood",
+        "impact",
+        "status",
+        "observed_on",
+        "refs",
+        "interpretation"
+      ],
+      "properties": {
+        "key": {
+          "description": "Stable identity: the threat, and a digest of the project, the element and the threat. With the repository slug it becomes the risk's externalId.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id",
+            "name"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "component",
+                "dataflow"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        "threat": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        "otm": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "likelihood": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "impact": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            }
+          }
+        },
+        "mitigations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "state": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "enum": [
+            "operational",
+            "financial",
+            "strategic",
+            "compliance",
+            "technical",
+            "security",
+            "reputational",
+            "legal",
+            "environmental",
+            "privacy"
+          ]
+        },
+        "likelihood": {
+          "enum": [
+            "rare",
+            "unlikely",
+            "possible",
+            "likely",
+            "certain"
+          ]
+        },
+        "impact": {
+          "enum": [
+            "negligible",
+            "minor",
+            "moderate",
+            "major",
+            "catastrophic"
+          ]
+        },
+        "status": {
+          "enum": [
+            "identified",
+            "assessing",
+            "mitigating",
+            "monitoring",
+            "resolved",
+            "accepted"
+          ]
+        },
+        "controls": {
+          "description": "Control ids from queue_snapshot.controls.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "observed_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        },
+        "needs_review": {
+          "type": "boolean"
+        }
+      }
+    },
+    "undeclared": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "key",
+        "source",
+        "decision",
+        "interpretation"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "provider",
+            "vector_store",
+            "dataset",
+            "system",
+            "resource"
+          ]
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "decision": {
+          "enum": [
+            "out_of_scope"
+          ]
+        },
+        "interpretation": {
+          "$ref": "#/$defs/interpretation"
+        },
+        "needs_review": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

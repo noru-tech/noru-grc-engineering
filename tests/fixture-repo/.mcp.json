@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "tickets": {
+      "command": "npx",
+      "args": ["-y", "@example/tickets-mcp"],
+      "env": {
+        "TICKETS_TOKEN": "${TICKETS_TOKEN}"
+      }
+    },
+    "docs": {
+      "type": "http",
+      "url": "https://mcp.docs.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DOCS_TOKEN}"
+      }
+    }
+  }
+}

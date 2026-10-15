@@ -6,12 +6,14 @@
 codex plugin marketplace add noru-tech/noru-grc-engineering
 codex plugin add noru@noru-grc-engineering
 codex plugin add ai-inventory@noru-grc-engineering
+codex plugin add dev-agents@noru-grc-engineering
 codex plugin add evidence-push@noru-grc-engineering
 codex plugin add governance-records@noru-grc-engineering
 codex plugin add review-signoff@noru-grc-engineering
 codex plugin add audit-pack@noru-grc-engineering
 codex plugin add iac-scan@noru-grc-engineering
 codex plugin add findings-ingest@noru-grc-engineering
+codex plugin add threat-model@noru-grc-engineering
 codex plugin add privacy-datamap@noru-grc-engineering
 codex plugin add change-control@noru-grc-engineering
 codex plugin add compliance-assistant@noru-grc-engineering
@@ -51,6 +53,9 @@ inlines the value, and do not paste the key into a chat.
 | Reading, `:scan`, `:diff` | `read:organization`, `read:frameworks`, `read:controls`, `read:evidence` |
 | `ai-inventory:diff` also | `read:assets`, `read:vendors` |
 | `ai-inventory:push` | adds `write:assets`, `write:vendors`, `write:evidence` |
+| `dev-agents:scan` | `read:controls` |
+| `dev-agents:diff` | adds `read:organization` to bind the plan, `read:vendors`, `read:evidence` |
+| `dev-agents:push` | adds `write:vendors`, `write:evidence` |
 | `evidence-push:push` | adds `write:evidence` |
 | `governance-records:push` | adds `write:evidence` |
 | `review-signoff:push` | adds `write:evidence` |
@@ -61,6 +66,9 @@ inlines the value, and do not paste the key into a chat.
 | `findings-ingest:scan` | `read:risks`, `read:assets` |
 | `findings-ingest:diff` | adds `read:organization` to bind the plan |
 | `findings-ingest:push` | adds `write:risks` |
+| `threat-model:scan` | `read:risks`, `read:controls` |
+| `threat-model:diff` | adds `read:organization` to bind the plan |
+| `threat-model:push` | adds `write:risks` |
 | `privacy-datamap:scan` | `read:datamaps` |
 | `privacy-datamap:diff` | adds `read:organization` to bind the plan |
 | `privacy-datamap:push` | adds `write:datamaps` |

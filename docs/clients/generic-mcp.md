@@ -25,6 +25,18 @@ exists because it would be convenient.
 | `:diff` (read) | `getOrganizationAssets`, `getOrganizationVendors`, `getOrganizationEvidence`, `getOrganizationFrameworks`, `getOrganizationControls` | `read:assets`, `read:vendors`, `read:evidence`, `read:frameworks`, `read:controls` |
 | `:push` (write) | `createAsset`, `createVendor`, `createEvidence`, `linkEvidenceToControl` | `write:assets`, `write:vendors`, `write:evidence` |
 
+### dev-agents
+
+| Phase | Tools | Scopes |
+|---|---|---|
+| `:scan` (read) | `getOrganizationControls`, `getControlContext` | `read:controls` |
+| `:diff` (read) | `getOrganizationVendors`, `getOrganizationEvidence` with `search: "noru-grc-engineering:dev-agents"`, plus `findOrganization` for the plan binding | `read:vendors`, `read:evidence`, adds `read:organization` |
+| `:push` (write) | `createVendor`, `createEvidence`, `linkEvidenceToControl` | `write:vendors`, `write:evidence` |
+
+`createVendor` returns an existing vendor of the same name, as its published description says. A
+link to evidence the same push creates carries `depends_on`, naming the `createEvidence` call and
+the `evidenceId` field to substitute. Nothing in any call is per person.
+
 ### evidence-push
 
 | Phase | Tools | Scopes |
@@ -99,6 +111,19 @@ for a human on a failure you do not understand even here.
 
 The same documented upsert as `iac-scan`. No call carries a due date: a finding's deadline is the
 treatment of the risk it is filed against, and stays in Noru.
+
+### threat-model
+
+| Phase | Tools | Scopes |
+|---|---|---|
+| `:scan` (read) | `getOrganizationRisks` with `search: "noru-grc-engineering:threat-model:"`, `getOrganizationControls` | `read:risks`, `read:controls` |
+| `:diff` (read) | the same risk read, `getRiskControlMappings` per risk, and `findOrganization` for the plan binding | `read:risks`, adds `read:organization` |
+| `:push` (write) | `createRisk`, `updateRisk`, `linkRiskToControl` | `write:risks` |
+
+No upsert on a risk's externalId is documented, so the plan reads first; an externalId is unique
+within the organization, so a missed probe fails rather than duplicating. `linkRiskToControl`
+refuses a link that already exists: do not retry it blindly. A link for a new risk carries
+`depends_on` and takes the id the `createRisk` call returns.
 
 ### privacy-datamap
 

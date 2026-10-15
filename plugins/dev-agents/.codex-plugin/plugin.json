@@ -1,0 +1,42 @@
+{
+  "name": "dev-agents",
+  "version": "0.13.0",
+  "description": "Inventory the coding agents, MCP servers and plugins a repository's development process depends on, decide with the user which organization stands behind each one, and land them in Noru as vendors plus one evidence record for the window — never anything per person.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech",
+    "url": "https://noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "coding-agents",
+    "mcp-servers",
+    "plugins",
+    "suppliers",
+    "vendors",
+    "agent-change-control"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Noru Dev Agents",
+    "shortDescription": "Record the coding agents, MCP servers and plugins your development depends on as reviewed suppliers.",
+    "longDescription": "Reads an agent-change-control manifest for the coding agents that authored changes in a window and their vendors, and the repository's committed Claude Code, Cursor, VS Code and Gemini CLI configuration for the MCP servers and plugins it declares, recording a server by its command name or host only. A person decides which organization stands behind each one; the result lands in Noru as vendors and one evidence record for the window, linked to controls from Noru's own queue. Per-person agent usage is never aggregated unless asked, and then only into a local cache file.",
+    "developerName": "Noru",
+    "category": "Productivity",
+    "capabilities": [
+      "Local read: agent-change-control manifest and committed agent configuration files",
+      "Local write: .noru/dev-agents.yml and machine-only cache files",
+      "Noru read: organization, vendors, controls and existing evidence",
+      "Noru write: vendors and one evidence record, only after diff and confirmation",
+      "MCP servers recorded by command name or host only, never env, headers, args or URLs",
+      "Never records who ran an agent"
+    ],
+    "websiteURL": "https://noru.tech",
+    "defaultPrompt": "Show me which coding agents, MCP servers and plugins this repository depends on. Do not push or write to Noru."
+  }
+}

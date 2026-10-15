@@ -6,12 +6,14 @@
 /plugin marketplace add noru-tech/noru-grc-engineering
 /plugin install noru@noru-grc-engineering
 /plugin install ai-inventory@noru-grc-engineering
+/plugin install dev-agents@noru-grc-engineering
 /plugin install evidence-push@noru-grc-engineering
 /plugin install governance-records@noru-grc-engineering
 /plugin install review-signoff@noru-grc-engineering
 /plugin install audit-pack@noru-grc-engineering
 /plugin install iac-scan@noru-grc-engineering
 /plugin install findings-ingest@noru-grc-engineering
+/plugin install threat-model@noru-grc-engineering
 /plugin install privacy-datamap@noru-grc-engineering
 /plugin install change-control@noru-grc-engineering
 /plugin install compliance-assistant@noru-grc-engineering
@@ -71,6 +73,9 @@ Claude Code, or Codex, or Cursor.
 | Reading, `:scan`, `:diff` | `read:organization`, `read:frameworks`, `read:controls`, `read:evidence` |
 | `ai-inventory:diff` also | `read:assets`, `read:vendors` |
 | `ai-inventory:push` | adds `write:assets`, `write:vendors`, `write:evidence` |
+| `dev-agents:scan` | `read:controls` |
+| `dev-agents:diff` | adds `read:organization` to bind the plan, `read:vendors`, `read:evidence` |
+| `dev-agents:push` | adds `write:vendors`, `write:evidence` |
 | `evidence-push:push` | adds `write:evidence` |
 | `governance-records:push` | adds `write:evidence` |
 | `review-signoff:push` | adds `write:evidence` |
@@ -81,6 +86,9 @@ Claude Code, or Codex, or Cursor.
 | `findings-ingest:scan` | `read:risks`, `read:assets` |
 | `findings-ingest:diff` | adds `read:organization` to bind the plan |
 | `findings-ingest:push` | adds `write:risks` |
+| `threat-model:scan` | `read:risks`, `read:controls` |
+| `threat-model:diff` | adds `read:organization` to bind the plan |
+| `threat-model:push` | adds `write:risks` |
 | `privacy-datamap:scan` | `read:datamaps` |
 | `privacy-datamap:diff` | adds `read:organization` to bind the plan |
 | `privacy-datamap:push` | adds `write:datamaps` |

@@ -18,6 +18,7 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
 - [`piece.schema.json`](./piece.schema.json) — the declaration every piece ships at
   `plugins/<piece>/piece.json`
 - [`ai-inventory.schema.json`](./ai-inventory.schema.json) — the `.noru/ai-inventory.yml` artifact
+- [`dev-agents.schema.json`](./dev-agents.schema.json) — the `.noru/dev-agents.yml` artifact
 - [`evidence-push.schema.json`](./evidence-push.schema.json) — the `.noru/evidence-push.yml` artifact
 - [`governance-records.schema.json`](./governance-records.schema.json) — the
   `.noru/governance-records.yml` artifact
@@ -27,6 +28,7 @@ tenth piece take a day instead of a fortnight, and what lets a customer or partn
 - [`iac-scan.schema.json`](./iac-scan.schema.json) — the `.noru/iac-scan.yml` artifact
 - [`findings-ingest.schema.json`](./findings-ingest.schema.json) — the `.noru/findings-ingest.yml`
   artifact
+- [`threat-model.schema.json`](./threat-model.schema.json) — the `.noru/threat-model.yml` artifact
 - [`change-control.schema.json`](./change-control.schema.json) — the `.noru/change-control.yml`
   artifact
 - [`privacy-datamap.schema.json`](./privacy-datamap.schema.json) — the accepted

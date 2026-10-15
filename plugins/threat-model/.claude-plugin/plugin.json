@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "threat-model",
+  "displayName": "Noru Threat Model",
+  "version": "0.12.2",
+  "description": "Read the threat models a repository keeps in the Open Threat Model format, decide with the user what each threat means here, and land them in Noru's risk register linked to the organization's own controls — flagging the components other pieces found that the model leaves out.",
+  "author": {
+    "name": "Noru",
+    "email": "support@noru.tech"
+  },
+  "homepage": "https://github.com/noru-tech/noru-grc-engineering",
+  "repository": "https://github.com/noru-tech/noru-grc-engineering",
+  "license": "MIT",
+  "keywords": [
+    "noru",
+    "compliance",
+    "threat-model",
+    "otm",
+    "risk-register",
+    "security",
+    "mcp"
+  ]
+}

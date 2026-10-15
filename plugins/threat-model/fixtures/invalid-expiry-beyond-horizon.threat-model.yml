@@ -1,0 +1,141 @@
+# Invalid fixture for the threat-model validator: A judgement stands for two years.
+# Otherwise identical to valid.threat-model.yml. Synthetic throughout.
+version: 0.12.2
+piece: threat-model
+source:
+  slug: example-org/example-app
+  commit_sha: 0f3c9a1e7b2d4c6e8a0b1c2d3e4f5a6b7c8d9e0f
+  branch: main
+  generated_by: threat-model@0.12.2
+  derived_digest: da21190666db58a59275587dc445e8632a621e8ea3eab562ed696445aef0c48c
+models:
+  - file: security/app.otm.json
+    otm_version: 0.2.0
+    project:
+      id: example-app
+      name: Example application
+    digest: "sha256:3a0fe224451ae4ae30f999f325ea0b92cd833ba02dc31a083092b83c620a5324"
+queue_snapshot:
+  fetched_at: "2026-08-27T09:14:00Z"
+  via:
+    - getOrganizationRisks
+    - getOrganizationControls
+  open_risks:
+    - id: EXAMPLE-RISK-OLD
+      external_id: "threat-model:example-org/example-app:clickjacking.0123456789ab"
+      title: "Clickjacking (Web frontend)"
+      status: identified
+  controls:
+    - id: zz-01
+      display_id: ZZ-01
+      name: Example secure development control
+    - id: zz-02
+      display_id: ZZ-02
+      name: Example data protection control
+risks:
+  - key: public-object-storage.eff54444d0b2
+    model: security/app.otm.json
+    target:
+      kind: component
+      id: assets-bucket
+      name: Public assets bucket
+    threat:
+      id: public-object-storage
+      name: Object storage readable by anyone
+    otm:
+      state: mitigated
+      likelihood: 40
+      impact: 60
+    mitigations:
+      - id: bucket-policy
+        name: Bucket policy denies anonymous writes
+        state: implemented
+    title: "Object storage readable by anyone (Public assets bucket)"
+    category: security
+    likelihood: unlikely
+    impact: moderate
+    status: monitoring
+    controls: []
+    observed_on: 2026-08-27
+    refs:
+      - "security/app.otm.json#/components/3/threats/0"
+      - "security/app.otm.json#/threats/1"
+    interpretation:
+      owner: dana.okafor@example.com
+      decided_at: 2026-08-28
+      expires_at: 2028-08-27
+      rationale: "The bucket only holds public assets and the bucket policy denies anonymous writes; monitored for policy drift."
+  - key: session-fixation.559cbae8f1b6
+    model: security/app.otm.json
+    target:
+      kind: dataflow
+      id: web-to-api
+      name: Browser calls the API
+    threat:
+      id: session-fixation
+      name: Session fixation
+    otm:
+      state: exposed
+      likelihood: 30
+      impact: 50
+    mitigations: []
+    title: "Session fixation (Browser calls the API)"
+    category: security
+    likelihood: unlikely
+    impact: moderate
+    status: identified
+    controls: []
+    observed_on: 2026-08-27
+    refs:
+      - "security/app.otm.json#/dataflows/0/threats/0"
+      - "security/app.otm.json#/threats/2"
+    interpretation:
+      owner: dana.okafor@example.com
+      decided_at: 2026-08-28
+      expires_at: 2026-11-25
+      rationale: "Session identifiers are rotated at login in the current framework; still identified until the rotation is tested."
+  - key: sql-injection.0c5968b28e0b
+    model: security/app.otm.json
+    target:
+      kind: component
+      id: api
+      name: Contact API
+    threat:
+      id: sql-injection
+      name: SQL injection
+    otm:
+      state: exposed
+      likelihood: 60
+      impact: 80
+    mitigations:
+      - id: parameterised-queries
+        name: Parameterised queries
+        state: implemented
+    title: "SQL injection (Contact API)"
+    category: security
+    likelihood: possible
+    impact: major
+    status: mitigating
+    controls:
+      - zz-01
+    observed_on: 2026-08-27
+    refs:
+      - "security/app.otm.json#/components/1/threats/0"
+      - "security/app.otm.json#/threats/0"
+    interpretation:
+      owner: dana.okafor@example.com
+      decided_at: 2026-08-28
+      expires_at: 2026-11-25
+      rationale: "The contact API builds two queries from request parameters; parameterised queries are being rolled out this sprint."
+undeclared:
+  - kind: provider
+    key: example-provider
+    source: ai-inventory
+    refs:
+      - "src/inference.ts:1"
+    decision: out_of_scope
+    interpretation:
+      owner: dana.okafor@example.com
+      decided_at: 2026-08-28
+      expires_at: 2027-02-24
+      rationale: "The provider is only called from an offline evaluation job that never handles customer data, so it sits outside this model."
