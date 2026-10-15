@@ -1,9 +1,8 @@
 name: ci
 
-# Everything this repository checks, in one workflow. There is deliberately no dependency install
-# step anywhere below: collectors are Node built-ins only and validators are Python standard library
-# only, so if CI ever needs `npm install` or `pip install`, something has broken the atomicity
-# promise in CONTRIBUTING.md and this file should fail rather than paper over it.
+# Analysis uses Node built-ins and Python standard libraries, with no target dependency installs.
+# The privacy-runtime job separately verifies pinned interpreter provisioning on clean runtime paths.
+# No job needs npm install or pip install for the plugin runtime.
 
 on:
   push:
