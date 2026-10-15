@@ -17,6 +17,12 @@ updates:
       interval: weekly
     commit-message:
       prefix: ci
+    # The CodeQL sub-actions ship together and must move together: analyze refuses a config that
+    # init wrote at a different version, so a bump of one without the others fails CI.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action/*"
   - package-ecosystem: pip
     directory: /tests/fixture-repo/store
     schedule:
