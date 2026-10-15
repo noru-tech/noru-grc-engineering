@@ -6,7 +6,7 @@ description: Show exactly what the data map would change in Noru. Reads only; wr
 # /privacy-datamap:diff
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_manifest.py" <repo>/.noru/privacy-datamap.yml \
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" "${CLAUDE_PLUGIN_ROOT}/scripts/validate_manifest.py" <repo>/.noru/privacy-datamap.yml \
   --emit-parsed=<repo>/.noru/.cache/privacy-datamap.parsed.json
 ```
 

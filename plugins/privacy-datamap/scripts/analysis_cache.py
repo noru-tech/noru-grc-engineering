@@ -6,6 +6,7 @@ import analysis_storage
 import pathlib
 import re
 import subprocess
+from runtime_context import NODE
 
 import dependencies
 from processing_declarations import expanded_names, mechanical_renames
@@ -25,7 +26,7 @@ def discover(repo):
     sources = {}
     paths = dependencies.files(repo)
     excluded = set(json.loads(subprocess.check_output(
-        ["node", str(pathlib.Path(__file__).with_name("migration_paths.mjs")), str(repo)],
+        [NODE, str(pathlib.Path(__file__).with_name("migration_paths.mjs")), str(repo)],
         input=json.dumps(paths), text=True,
     )))
     for path in paths:

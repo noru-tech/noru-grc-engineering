@@ -21,6 +21,7 @@ import sys
 import subprocess
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from runtime_context import NODE
 import dependencies
 import relationships
 import analysis_cache
@@ -978,7 +979,7 @@ def main(argv):
     lock_path = repo / ".noru" / "privacy-datamap.lock.json"
     try:
         if opts["seal"]:
-            fresh = subprocess.run(["node", str(HERE / "collect.mjs"), f"--repo={repo}", "--check", "--output=json", "--quiet"], capture_output=True, text=True)
+            fresh = subprocess.run([NODE, str(HERE / "collect.mjs"), f"--repo={repo}", "--check", "--output=json", "--quiet"], capture_output=True, text=True)
             if fresh.returncode not in (0, 1):
                 raise ValueError("cannot seal: fresh collection failed: " + fresh.stderr.strip())
         derived, scan = load_observations(repo, opts["candidate"])
@@ -1054,7 +1055,7 @@ def main(argv):
             "ok": True,
             "status": "accepted",
             "mode": "sealed",
-            "lock": str(lock_path.relative_to(repo)),
+            "lock": lock_path.relative_to(repo).as_posix(),
             "entities": len(lock_document["entities"]),
             "collections": len(lock_document["collections"]),
         }
@@ -1146,7 +1147,7 @@ def main(argv):
         result.update(
             {
                 "ok": True,
-                "analysis": str(proposals_path.relative_to(repo)),
+                "analysis": proposals_path.relative_to(repo).as_posix(),
             }
         )
 

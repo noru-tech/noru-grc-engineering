@@ -465,9 +465,9 @@ not, that is a bug — `scripts/test_idempotency.py` asserts it.
 
 ```bash
 node    plugins/privacy-datamap/scripts/collect.mjs --repo=. --output=json
-python3 plugins/privacy-datamap/scripts/reconcile.py --repo=. --output=json
-python3 plugins/privacy-datamap/scripts/validate_manifest.py .noru/privacy-datamap.yml
-python3 plugins/privacy-datamap/scripts/reconcile.py --repo=. --seal
+node "<plugin>/scripts/python-runtime.mjs" plugins/privacy-datamap/scripts/reconcile.py --repo=. --output=json
+node "<plugin>/scripts/python-runtime.mjs" plugins/privacy-datamap/scripts/validate_manifest.py .noru/privacy-datamap.yml
+node "<plugin>/scripts/python-runtime.mjs" plugins/privacy-datamap/scripts/reconcile.py --repo=. --seal
 node    plugins/privacy-datamap/scripts/diff.mjs --repo=.
 node    plugins/privacy-datamap/scripts/push.mjs --repo=. --confirm
 ```
@@ -546,9 +546,9 @@ decision or reasoning group. Group shared reasoning before writing, keeping fiel
 Generate views only when needed:
 
 ```bash
-python3 <plugin>/scripts/reconcile.py --repo=. --render-candidate
-python3 <plugin>/scripts/review.py --repo=. --output=json
-python3 <plugin>/scripts/review.py --repo=. --output=evidence
+node "<plugin>/scripts/python-runtime.mjs" reconcile.py --repo=. --render-candidate
+node "<plugin>/scripts/python-runtime.mjs" review.py --repo=. --output=json
+node "<plugin>/scripts/python-runtime.mjs" review.py --repo=. --output=evidence
 node <plugin>/scripts/collect.mjs --repo=. --export
 ```
 
@@ -593,8 +593,8 @@ proves deployed behavior. Missing deployed evidence must remain visible.
 After collection and reconciliation, run:
 
 ```bash
-python3 scripts/field_review.py --repo=<repo>
-python3 scripts/investigate.py --repo=<repo> --limit=24
+node "<plugin>/scripts/python-runtime.mjs" field_review.py --repo=<repo>
+node "<plugin>/scripts/python-runtime.mjs" investigate.py --repo=<repo> --limit=24
 ```
 
 The first command builds `classification_review` inside
@@ -659,3 +659,25 @@ are honored by review, validation, sealing, export and publication preflight; un
 conflicting or stale findings still block. Raw diagnostics and prior rationale remain auditable.
 See [the investigation workflow](references/extraction-resolutions.md) for commands, migration
 coverage adapters, supplemental definitions and cache compatibility.
+
+
+## Runtime prerequisites
+
+Node 18+, Git and Python 3.9+ must already be available. None is bundled, downloaded or
+installed by the plugin. Codex and Claude use the same launcher on Windows, macOS and Linux:
+
+```text
+node "<plugin>/scripts/python-runtime.mjs" --check
+node "<plugin>/scripts/python-runtime.mjs" reconcile.py "--repo=C:\Work Projects\Example"
+node "<plugin>/scripts/python-runtime.mjs" investigate.py "--repo=C:\Work Projects\Example" --summary
+node "<plugin>/scripts/python-runtime.mjs" review.py "--repo=C:\Work Projects\Example" --output=json
+```
+
+The launcher checks existing `python` and `python3` executables on PATH (with `.exe` on
+Windows), verifies their version and standard-library modules, and passes the resolved Python
+and Node paths to nested processes. For an interpreter outside PATH, set `NORU_PYTHON` to its
+absolute executable path without shell quotes or arguments. It does not use client-specific
+runtime locations or invoke Python installation managers.
+
+A missing or incompatible interpreter produces an actionable nonzero error. Correct the
+prerequisite and retry; a failed command never counts as a completed scan.

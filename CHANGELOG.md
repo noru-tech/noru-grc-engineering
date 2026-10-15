@@ -6,6 +6,11 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Add client-independent privacy Python runtime discovery for existing installations on
+  Windows, macOS and Linux. Route nested processes through the resolved runtimes and preserve
+  nonzero errors when prerequisite checks or analysis fail. Node, Git and Python remain prerequisites;
+  the plugin never bundles, downloads or installs these tools.
+
 ## 0.16.0 — 2026-10-15
 
 - Add read-only investigation status, small summary pages, entity detail lookup and explicit

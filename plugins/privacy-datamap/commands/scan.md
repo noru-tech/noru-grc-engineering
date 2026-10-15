@@ -6,9 +6,12 @@ description: Read this repository's persistent structures into a privacy data ma
 # /privacy-datamap:scan
 
 ```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" --check
 node "${CLAUDE_PLUGIN_ROOT}/scripts/collect.mjs" --repo=<repo> --output=json
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --output=json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --output=json
 ```
+
+**Runtime preflight:** Node 18+, Git and Python 3.9+ are prerequisites. Use the shared `python-runtime.mjs` launcher for every Python command. It verifies an existing interpreter; it never downloads or installs one. If Python is unavailable, report the prerequisite failure and stop. Use `NORU_PYTHON` for an existing interpreter outside PATH. Quote plugin paths and repository arguments containing spaces; in PowerShell use the resolved absolute plugin path. An execution failure is never scan completion.
 
 **A scan combines deterministic collection with mandatory agent enrichment.** The commands above
 finish structure collection only. Continue the analysis below before reporting scan completion.
@@ -232,7 +235,7 @@ helpers and configuration too: a function fingerprint does not recursively follo
 Generate a proposed fingerprint without executing repository code:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/dependencies.py" --repo=<repo> \
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" "${CLAUDE_PLUGIN_ROOT}/scripts/dependencies.py" --repo=<repo> \
   --id=account-payload --path=src/payload.py --method=python_ast \
   --selector=serialize --target=system:repository
 ```
@@ -361,7 +364,7 @@ A provider call alone cannot establish payload fields.
 After enrichment, run the deterministic completeness and taxonomy gate:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/review.py" --repo=<repo> --output=json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" "${CLAUDE_PLUGIN_ROOT}/scripts/review.py" --repo=<repo> --output=json
 ```
 
 It validates queue coverage, taxonomy keys, required analysis and source citation locations. The
@@ -475,7 +478,7 @@ section. Article 9 and Article 10 data is the highest-risk part of the map and m
 the user has to scroll past.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_manifest.py" \
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" "${CLAUDE_PLUGIN_ROOT}/scripts/validate_manifest.py" \
   <repo>/.noru/privacy-datamap.yml \
   --emit-parsed=<repo>/.noru/.cache/privacy-datamap.parsed.json
 ```
@@ -488,7 +491,7 @@ Once the user has accepted the candidate's decisions, apply it to
 requires, validate again, and seal the accepted observation:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --seal --output=json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --seal --output=json
 node "${CLAUDE_PLUGIN_ROOT}/scripts/collect.mjs" --repo=<repo> --export --output=json
 ```
 
@@ -510,9 +513,9 @@ Before asking for acceptance, collect the proposed mapping and complete its enri
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/collect.mjs" --repo=<repo> --candidate --output=json
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --candidate --output=json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --candidate --output=json
 # Complete every queued item in .noru/.cache/privacy-datamap.analysis.json.
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/review.py" --repo=<repo> --candidate --output=json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" "${CLAUDE_PLUGIN_ROOT}/scripts/review.py" --repo=<repo> --candidate --output=json
 ```
 
 The collector reads `relationship_proposal` from the analysis cache, validates its graph and
@@ -652,8 +655,8 @@ These paths preserve the agent's responsibility for ambiguity and existing uncer
 After collection and reconciliation, build the shared evidence contract:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/field_review.py" --repo=<repo>
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/investigate.py" --repo=<repo> --format=compact --limit=24
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" "${CLAUDE_PLUGIN_ROOT}/scripts/field_review.py" --repo=<repo>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" "${CLAUDE_PLUGIN_ROOT}/scripts/investigate.py" --repo=<repo> --format=compact --limit=24
 ```
 
 The contract lives in `classification_review` inside the existing `privacy-datamap.analysis.json`.
@@ -675,7 +678,7 @@ of personal-data status. Keep nested members nested; an unclassified parent cann
 Submit investigated decisions as a JSON list:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/investigate.py" --repo=<repo> --format=compact --decisions=<file>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" "${CLAUDE_PLUGIN_ROOT}/scripts/investigate.py" --repo=<repo> --format=compact --decisions=<file>
 ```
 
 A decision records meaning, evidence, person association, category fit, investigation and

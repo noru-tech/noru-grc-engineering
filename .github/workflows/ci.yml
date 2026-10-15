@@ -1,9 +1,8 @@
 name: ci
 
-# Everything this repository checks, in one workflow. There is deliberately no dependency install
-# step anywhere below: collectors are Node built-ins only and validators are Python standard library
-# only, so if CI ever needs `npm install` or `pip install`, something has broken the atomicity
-# promise in CONTRIBUTING.md and this file should fail rather than paper over it.
+# Analysis uses Node built-ins and Python standard libraries, with no target dependency installs.
+# The privacy-runtime job verifies existing interpreters on Windows, macOS and Linux.
+# No job needs npm install or pip install for the plugin runtime.
 
 on:
   push:
@@ -19,6 +18,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  privacy-runtime:
+    name: privacy runtime (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "20"
+      - name: verify existing Python and paths containing spaces
+        run: node scripts/test_privacy_runtime.mjs
   syntax:
     name: syntax
     runs-on: ubuntu-latest
