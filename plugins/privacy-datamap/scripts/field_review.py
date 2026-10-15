@@ -1050,8 +1050,9 @@ def project_candidate(document, candidate, derived=None, repo=None):
         elif proposal.get('processing_activities'):
             declarations = []
             for activity in proposal['processing_activities']:
-                for use in activity.get('proposed_data_uses') or ['']:
-                    declaration = {'name': activity.get('purpose', ''), 'data_use': use,
+                from processing_declarations import expanded_names
+                for name, use in expanded_names(activity):
+                    declaration = {'name': name, 'data_use': use,
                         'data_subjects': activity.get('proposed_data_subjects', []),
                         'data_categories': activity.get('proposed_categories', []), 'refs': activity.get('refs', []),
                         'needs_review': not bool(activity.get('interpretation'))}

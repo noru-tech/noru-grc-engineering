@@ -6,6 +6,10 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Give multi-use processing declarations unique per-use names and reject duplicate names during
+  review and validation. Preserve single-use names and recognize unchanged legacy expansions as
+  mechanical renames rather than processing-scope removals.
+
 - Preserve structural provenance for newly projected supplemental members and calculate applied
   candidate source digests from an offline observation of the resulting manifest inputs.
   Decode quoted-string escapes in the install-free YAML reader so rendered structural shapes

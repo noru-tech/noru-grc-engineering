@@ -256,6 +256,10 @@ reasoning. Explicit decision IDs group related fields despite differences in rea
 summaries replace detailed rationale in review. Technical fields remain in evidence. Evidence-backed
 activities need no questions; a question must identify the privacy decision its answer changes. Each processing activity and actionable uncertainty has its own description. Structural
 errors block review readiness until corrected. The reconciler emits machine-readable work items; the review renderer presents privacy decisions.
+Prefer one data use per activity. Multi-use activities expand into one declaration per use named
+`<purpose> (<data_use>)`; a single use retains the plain purpose. Names must be unique within each
+system. Reconciliation recognizes the old-to-new naming expansion as a mechanical rename only
+when the recorded purposes, subjects, categories and recipients remain unchanged.
 These are working files and must
 not be committed. The candidate never overwrites the accepted manifest. In bootstrap mode an
 invalid manifest contributes no descriptions, systems, declarations or references to the

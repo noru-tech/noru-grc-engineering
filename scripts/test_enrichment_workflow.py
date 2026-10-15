@@ -90,6 +90,63 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(system['meta']['non_personal_processing']['needs_review'])
         self.assertEqual(review.requested_systems(candidate), [system])
 
+    def processing_candidate(self, uses):
+        activity = {'purpose': 'Provide access', 'proposed_data_uses': uses,
+                    'proposed_data_subjects': ['customer'], 'proposed_categories': ['user.unique_id'],
+                    'refs': ['schema.ts:1'], 'recipient_systems': []}
+        self.document['system_proposals'] = [{'entity_id': 'service', 'processing_activities': [activity]}]
+        candidate = {'dataset': [], 'system': [{'fides_key': 'service', 'name': 'Service', 'privacy_declarations': []}]}
+        field_review.project_candidate(self.document, candidate, self.derived)
+        return candidate
+
+    def test_multi_use_projection_export_and_snapshot_share_names(self):
+        candidate = self.processing_candidate(['essential.service.authentication', 'essential.service'])
+        names = [d['name'] for d in candidate['system'][0]['privacy_declarations']]
+        self.assertEqual(names, ['Provide access (essential.service.authentication)', 'Provide access (essential.service)'])
+        cache = reconcile.analysis_cache
+        self.assertEqual(cache.semantic_snapshot(candidate)['activities'], cache.semantic_snapshot(candidate, self.document)['activities'])
+        for declaration in candidate['system'][0]['privacy_declarations']:
+            declaration['needs_review'] = False
+            declaration['interpretation'] = {'owner': 'Synthetic Reviewer', 'decided_at': '2026-10-15', 'rationale': 'Synthetic export regression.'}
+        script = "import {toFideslang} from './plugins/privacy-datamap/scripts/lib/fides.mjs'; import {readFileSync} from 'node:fs'; console.log(JSON.stringify(toFideslang(JSON.parse(readFileSync(0,'utf8')))));"
+        exported = subprocess.run(['node', '--input-type=module', '-e', script], cwd=ROOT,
+                                  input=json.dumps(candidate), text=True, capture_output=True, check=True)
+        declarations = json.loads(exported.stdout)['system'][0]['privacy_declarations']
+        self.assertEqual([d['name'] for d in declarations], names)
+        self.assertEqual(len({d['name'] for d in declarations}), len(declarations))
+
+    def test_single_use_name_and_semantics_remain_unchanged(self):
+        candidate = self.processing_candidate(['essential.service'])
+        self.assertEqual(candidate['system'][0]['privacy_declarations'][0]['name'], 'Provide access')
+        cache = reconcile.analysis_cache
+        self.assertEqual(cache.semantic_changes(cache.semantic_snapshot(candidate), cache.semantic_snapshot(candidate, self.document)), [])
+
+    def test_legacy_multi_use_names_migrate_without_hiding_narrowing(self):
+        candidate = self.processing_candidate(['essential.service.authentication', 'essential.service'])
+        cache = reconcile.analysis_cache
+        current = cache.semantic_snapshot(candidate)
+        for uses in [['essential.service'], ['essential.service', 'essential.service.authentication']]:
+            old = copy.deepcopy(next(iter(current['activities'].values())))
+            old['purposes'] = uses
+            lock = {'semantic_snapshot': {'activities': {'service/Provide access': old}}}
+            result = {'removal_required': []}
+            reconcile.add_semantic_review(result, lock, candidate)
+            self.assertEqual(result['removal_required'], [])
+            self.assertEqual(result['mechanical_declaration_renames'][0]['previous'], 'service/Provide access')
+            narrowed = copy.deepcopy(current)
+            narrowed['activities']['service/Provide access (essential.service)']['subjects'] = []
+            self.assertTrue(cache.semantic_changes(lock['semantic_snapshot'], narrowed))
+
+    def test_duplicate_declarations_rejected_before_export(self):
+        candidate = self.processing_candidate(['essential.service', 'essential.service'])
+        report = reconcile.VALIDATOR.Report()
+        reconcile.VALIDATOR.check_systems(report, candidate, reconcile.VALIDATOR.load_vocabulary(), set(), collections.Counter(), datetime.date.today())
+        self.assertTrue(any('Names must be unique' in message for _, message in report.errors))
+        # Exercise the review entry point too, even though this incomplete fixture has other review errors.
+        result = {'removal_required': [], 'investigation_required': [], 'observation_digest': self.document['observation_digest']}
+        errors = review.validate(self.document, result, candidate, self.repo)
+        self.assertTrue(any('privacy declaration names must be unique' in message for message in errors))
+
     def test_non_personal_acceptance_reopens_on_source_and_flow_changes(self):
         import system_review
         validator = reconcile.VALIDATOR

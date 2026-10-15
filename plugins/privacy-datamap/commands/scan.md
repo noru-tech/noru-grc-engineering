@@ -13,6 +13,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --output=json
 **A scan combines deterministic collection with mandatory agent enrichment.** The commands above
 finish structure collection only. Continue the analysis below before reporting scan completion.
 
+Prefer one data use per processing activity. Multi-use activities expand into one declaration per
+use, named `<purpose> (<data_use>)`; single-use activities retain the plain purpose. Declaration
+names must be unique within each system. Split colliding activities into distinct single-purpose
+activities rather than silently dropping a use.
+
 ### Accepting remaining uncertainty
 
 After investigation, present the exact residual uncertainty and map impact for human review.

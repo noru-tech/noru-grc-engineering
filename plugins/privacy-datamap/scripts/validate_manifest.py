@@ -959,12 +959,18 @@ def check_systems(rep, doc, vocab, dataset_keys, counts, as_of, repo=None):
         if not isinstance(declarations, list):
             rep.err(f"{path}.privacy_declarations", "must be a list")
             continue
+        declaration_names = set()
         for j, decl in enumerate(declarations):
             dpath = f"{path}.privacy_declarations[{j}]"
             if not isinstance(decl, dict):
                 rep.err(dpath, "privacy declaration must be a mapping")
                 continue
             check_unknown_keys(rep, dpath, decl, DECLARATION_KEYS)
+            name = decl.get('name')
+            if isinstance(name, str):
+                if name in declaration_names:
+                    rep.err(f'{path}.privacy_declarations', 'Names must be unique within their parent; split processing into single-purpose activities with distinct names.')
+                declaration_names.add(name)
             if not decl.get("name"):
                 rep.err(f"{dpath}.name", "missing required `name` — say what this processing is for")
             for direction in ("ingress", "egress"):

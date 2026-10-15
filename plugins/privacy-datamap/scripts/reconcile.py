@@ -866,7 +866,10 @@ semantic_changes = analysis_cache.semantic_changes
 
 
 def add_semantic_review(result, lock, candidate, proposals=None):
-    changes = semantic_changes((lock or {}).get("semantic_snapshot"), semantic_snapshot(candidate, proposals))
+    previous = (lock or {}).get("semantic_snapshot")
+    current = semantic_snapshot(candidate, proposals)
+    changes = semantic_changes(previous, current)
+    result['mechanical_declaration_renames'] = analysis_cache.mechanical_renames(previous, current)
     result["semantic_changes"] = changes
     result["removal_required"] = [row for row in result.get("removal_required", []) if not row["entity_id"].startswith("semantic:")]
     grouped = {}

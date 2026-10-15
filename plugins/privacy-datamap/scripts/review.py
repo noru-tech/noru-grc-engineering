@@ -132,7 +132,13 @@ def validate(document, result, candidate, repo):
             continue
         require(isinstance(activities, list) and bool(activities), f"{identity}: separate processing activities")
         activity_ids = set()
+        declaration_names = set()
         for activity in activities if isinstance(activities, list) else []:
+            from processing_declarations import expanded_names
+            for name, _use in expanded_names(activity):
+                require(name not in declaration_names,
+                    f'{identity}: privacy declaration names must be unique; split processing into single-purpose activities with distinct names')
+                declaration_names.add(name)
             label = f"{identity}/{activity.get('activity_id')}"
             require(text(activity.get("activity_id")) and activity.get("activity_id") not in activity_ids,
                     f"{identity}: activities need unique identifiers")
