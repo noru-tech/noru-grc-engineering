@@ -20,7 +20,7 @@ import { toFideslang } from "./lib/fides.mjs";
 import { extractRepository } from "./typescript_evidence.mjs";
 
 export const PIECE = "privacy-datamap";
-export const VERSION = "0.14.0";
+export const VERSION = "0.15.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
