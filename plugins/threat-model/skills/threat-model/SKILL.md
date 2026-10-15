@@ -1,6 +1,6 @@
 ---
 name: threat-model
-version: 0.15.0
+version: 0.16.0
 description: Read a repository's committed threat model (Open Threat Model JSON), decide with the user what each threat means in their environment, and land the threats in Noru's risk register linked to the organization's own controls — reporting the components other pieces found that the model leaves out. Use when someone wants their threat model in their risk register, asks whether their threat model is current, wants design-time risk assessment with an owner and an expiry, or wants a pipeline check that keeps the register true to the model.
 requires:
   bins: ["node", "python3", "git"]

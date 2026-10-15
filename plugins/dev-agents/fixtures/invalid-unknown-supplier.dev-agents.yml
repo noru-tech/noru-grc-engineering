@@ -1,12 +1,12 @@
 # Invalid fixture: a server pointing at a supplier key that does not exist.
 # Otherwise identical to valid.dev-agents.yml.
-version: 0.15.0
+version: 0.16.0
 piece: dev-agents
 source:
   slug: example-org/example-app
   commit_sha: 3f9a1c2e7b4d5a6f8e9d0c1b2a3f4e5d6c7b8a9f
   branch: main
-  generated_by: dev-agents@0.15.0
+  generated_by: dev-agents@0.16.0
   input: agent-change-control
   acp_version: "0.4"
   acc_manifest_sha256: af31486b702690bd61620580cbbfdad2895687c9e57be56d22f781ddb843ea1d

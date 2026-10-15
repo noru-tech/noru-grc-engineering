@@ -36,7 +36,7 @@ import { basename, dirname, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const PIECE = "dev-agents";
-export const VERSION = "0.15.0";
+export const VERSION = "0.16.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 const ACC_REL = ".noru/.cache/acc-manifest.json";
