@@ -661,36 +661,23 @@ See [the investigation workflow](references/extraction-resolutions.md) for comma
 coverage adapters, supplemental definitions and cache compatibility.
 
 
-## Portable Python runtime
+## Runtime prerequisites
 
-Codex and Claude use the same Node launcher. Node 18+ and Git remain prerequisites;
-Python does not need to be installed or placed on PATH. Before the first analysis command,
-run `node "<plugin>/scripts/python-runtime.mjs" --setup`. The collector also performs this
-runtime preflight automatically. Run Python tools through this launcher, for example:
+Node 18+, Git and Python 3.9+ must already be available. None is bundled, downloaded or
+installed by the plugin. Codex and Claude use the same launcher on Windows, macOS and Linux:
 
 ```text
+node "<plugin>/scripts/python-runtime.mjs" --check
 node "<plugin>/scripts/python-runtime.mjs" reconcile.py "--repo=C:\Work Projects\Example"
 node "<plugin>/scripts/python-runtime.mjs" investigate.py "--repo=C:\Work Projects\Example" --summary
 node "<plugin>/scripts/python-runtime.mjs" review.py "--repo=C:\Work Projects\Example" --output=json
 ```
 
-The launcher verifies Python 3.9+ and its required standard-library modules. It tries existing
-interpreters, including `python.exe` and the Windows Python launcher, then automatically downloads
-a pinned CPython distribution from Astral's python-build-standalone releases. SHA-256 values and
-URLs are committed in `references/python-runtime.json`. It retains upstream license files,
-installs into the user's Noru runtime cache without administrator access, and passes the resolved
-Python and Node executable paths to nested subprocesses. No Codex or Claude runtime paths are used.
+The launcher checks existing `python` and `python3` executables on PATH (with `.exe` on
+Windows), verifies their version and standard-library modules, and passes the resolved Python
+and Node paths to nested processes. For an interpreter outside PATH, set `NORU_PYTHON` to its
+absolute executable path without shell quotes or arguments. It does not use client-specific
+runtime locations or invoke Python installation managers.
 
-Managed builds cover Windows and macOS on x64/ARM64, and glibc Linux on x64/ARM64. The host must
-support the upstream build; older operating systems or musl Linux may need an existing compatible
-interpreter. Extraction uses the OS's built-in `tar` (Windows 10/11, macOS, Linux).
-Only runtime setup downloads files; collection and semantic investigation do not fetch target
-packages, run target applications or install Python packages. First setup needs HTTPS access to
-GitHub release assets. A failed setup exits nonzero and does not count as a completed scan.
-
-Optional environment controls: `NORU_PYTHON` is an absolute executable path (without shell quotes);
-`NORU_RUNTIME_CACHE` changes the user cache; `NORU_PYTHON_MODE=managed` bypasses installed-interpreter
-discovery; `NORU_RUNTIME_OFFLINE=1` forbids provisioning and fails if no usable runtime exists.
-These are support/testing controls, not required setup. An unusable explicit override fails clearly
-rather than silently choosing a different interpreter. Retry `--setup` after correcting the reported
-network, permissions or runtime-cache problem. A warm cache supports offline work.
+A missing or incompatible interpreter produces an actionable nonzero error. Correct the
+prerequisite and retry; a failed command never counts as a completed scan.

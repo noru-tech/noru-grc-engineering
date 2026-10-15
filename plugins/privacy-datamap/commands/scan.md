@@ -6,12 +6,12 @@ description: Read this repository's persistent structures into a privacy data ma
 # /privacy-datamap:scan
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" --setup
+node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" --check
 node "${CLAUDE_PLUGIN_ROOT}/scripts/collect.mjs" --repo=<repo> --output=json
 node "${CLAUDE_PLUGIN_ROOT}/scripts/python-runtime.mjs" "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" --repo=<repo> --output=json
 ```
 
-**Runtime preflight:** use the shared `python-runtime.mjs` launcher for every `.py` command, including examples below that abbreviate script names. Never guess a client-specific Python path or ask the user to install Python. Setup verifies an existing interpreter or provisions a pinned runtime before offline analysis. Quote both the plugin path and repository argument when they contain spaces. In PowerShell use the resolved absolute plugin path, not Bash variable syntax. A setup or execution failure is an error, never scan completion.
+**Runtime preflight:** Node 18+, Git and Python 3.9+ are prerequisites. Use the shared `python-runtime.mjs` launcher for every Python command. It verifies an existing interpreter; it never downloads or installs one. If Python is unavailable, report the prerequisite failure and stop. Use `NORU_PYTHON` for an existing interpreter outside PATH. Quote plugin paths and repository arguments containing spaces; in PowerShell use the resolved absolute plugin path. An execution failure is never scan completion.
 
 **A scan combines deterministic collection with mandatory agent enrichment.** The commands above
 finish structure collection only. Continue the analysis below before reporting scan completion.

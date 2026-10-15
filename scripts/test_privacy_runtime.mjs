@@ -1,20 +1,16 @@
-// Run with --provision in OS CI: installed Python is deliberately not considered.
+// Exercise existing prerequisites without downloading or installing a runtime.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
-import { verifyArchive } from '../plugins/privacy-datamap/scripts/provision-python.mjs';
-import { installation, manifest } from '../plugins/privacy-datamap/scripts/python-runtime.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'noru runtime spaces ')));
 const scripts = join(temporary, 'plugin with spaces', 'scripts');
-const env = { ...process.env, NORU_RUNTIME_CACHE: join(temporary, 'runtime cache') };
+const env = { ...process.env };
 delete env.NORU_PYTHON;
-if (process.argv.includes('--provision')) env.NORU_PYTHON_MODE = 'managed';
 
 function run(args, environment = env, expected = 0) {
   const result = spawnSync(process.execPath, args, { env: environment, encoding: 'utf8', timeout: 300000 });
@@ -26,41 +22,26 @@ function python(script, args = [], environment = env, expected = 0) {
 }
 try {
   cpSync(join(root, 'plugins/privacy-datamap'), dirname(scripts), { recursive: true });
-  if (env.NORU_PYTHON_MODE === 'managed') {
-    // Poison executable names so accidental hardcoded subprocesses cannot use runner Python.
-    const hidden = join(temporary, 'no installed python'); mkdirSync(hidden);
-    for (const name of ['python3', 'python', 'py']) {
-      const path = join(hidden, name + (process.platform === 'win32' ? '.exe' : ''));
-      if (process.platform === 'win32') copyFileSync(process.execPath, path);
-      else { writeFileSync(path, '#!/bin/sh\nexit 91\n'); chmodSync(path, 0o755); }
-    }
-    // Windows environment keys are case-insensitive; supply just one PATH key.
-    const original = env.PATH || env.Path || '';
-    delete env.Path;
-    env.PATH = hidden + delimiter + original;
-  }
-  const bytes = Buffer.from('runtime archive');
-  verifyArchive(bytes, createHash('sha256').update(bytes).digest('hex'));
-  assert.throws(() => verifyArchive(bytes, '0'.repeat(64)), /SHA-256 mismatch/);
-  for (const platform of ['win32', 'darwin', 'linux']) for (const arch of ['x64', 'arm64']) {
-    const target = installation(temporary, platform, arch);
-    assert.match(target.spec.sha256, /^[a-f0-9]{64}$/);
-    assert.ok(target.spec.url.startsWith('https://github.com/astral-sh/python-build-standalone/releases/download/'));
-  }
-  const setup = JSON.parse(python('--setup').stdout);
-  if (env.NORU_PYTHON_MODE === 'managed') assert.ok(setup.executable.startsWith(temporary));
-  // A warm managed runtime must work with networking explicitly forbidden.
-  const offline = { ...env, NORU_PYTHON: setup.executable, NORU_RUNTIME_OFFLINE: '1' };
-  assert.equal(JSON.parse(python('--setup', [], offline).stdout).executable, setup.executable);
+  const setup = JSON.parse(python('--check').stdout);
+  const offline = { ...env, NORU_PYTHON: setup.executable };
+  assert.equal(JSON.parse(python('--check', [], offline).stdout).executable, setup.executable);
+  const missingEnv = { ...env, PATH: temporary, NORU_PYTHON: '' };
+  delete missingEnv.Path;
+  const missing = python('--check', [], missingEnv, 2);
+  assert.match(missing.stderr, /Python 3.9\+.*required/);
+  assert.match(missing.stderr, /does not install or download/);
+  // Nested calls must use the selected interpreter even with no Python on PATH.
+  const selectedEnv = { ...missingEnv, NORU_PYTHON: setup.executable };
+  assert.match(python('--check', [], selectedEnv, 2).stderr, /Git is required/);
   const probe = join(temporary, 'probe with spaces.py');
   writeFileSync(probe, 'import json,sys,subprocess,os\nprint(json.dumps({"args":sys.argv[1:],"python":sys.executable,"node":os.environ["NORU_NODE"]}))\n');
-  const result = JSON.parse(python(probe, ['two words', 'literal&value', 'Malmö 日本語'], offline).stdout);
+  const result = JSON.parse(python(probe, ['two words', 'literal&value', 'Malmö 日本語'], selectedEnv).stdout);
   assert.deepEqual(result.args, ['two words', 'literal&value', 'Malmö 日本語']);
   assert.equal(result.node, process.execPath);
   writeFileSync(probe, 'raise SystemExit(7)\n');
   python(probe, [], offline, 7);
-  python('--setup', [], { ...offline, NORU_PYTHON: join(temporary, 'missing python') }, 2);
-  python('--setup', [], { ...env, NORU_PYTHON: '', NORU_PYTHON_MODE: 'managed', NORU_RUNTIME_CACHE: join(temporary, 'empty'), NORU_RUNTIME_OFFLINE: '1' }, 2);
+  python('--check', [], { ...offline, NORU_PYTHON: join(temporary, 'missing python') }, 2);
+
 
   function workflow(environment, name) {
     const repo = join(temporary, name); mkdirSync(repo);
@@ -79,13 +60,16 @@ try {
   }
   workflow(offline, 'repository with spaces');
   python(join(root, 'scripts/test_enrichment_workflow.py'), [], offline);
-  if (env.NORU_PYTHON_MODE === 'managed') {
-    // Reuse an existing installation under a name other than python3, including on Windows.
-    const renamed = join(dirname(setup.executable), process.platform === 'win32' ? 'existing interpreter.exe' : 'existing interpreter');
-    copyFileSync(setup.executable, renamed);
-    const existing = { ...offline, NORU_PYTHON: renamed, NORU_PYTHON_MODE: '' };
-    assert.equal(JSON.parse(python('--setup', [], existing).stdout).executable, renamed);
-    workflow(existing, 'existing runtime repository');
-  }
-  console.log(`Privacy runtime workflow passed on ${process.platform}/${process.arch}; provisioned=${env.NORU_PYTHON_MODE === 'managed'}.`);
+  // A venv is created offline from the existing interpreter, without pip or downloads.
+  const venv = join(temporary, 'existing Python installation');
+  const created = spawnSync(setup.executable, ['-m', 'venv', '--without-pip', venv], { encoding: 'utf8' });
+  assert.equal(created.status, 0, created.stderr);
+  const bin = join(venv, process.platform === 'win32' ? 'Scripts' : 'bin');
+  const original = join(bin, process.platform === 'win32' ? 'python.exe' : 'python');
+  const renamed = join(bin, process.platform === 'win32' ? 'existing interpreter.exe' : 'existing interpreter');
+  copyFileSync(original, renamed);
+  const existing = { ...env, NORU_PYTHON: renamed };
+  assert.equal(JSON.parse(python('--check', [], existing).stdout).executable, renamed);
+  workflow(existing, 'existing runtime repository');
+  console.log(`Privacy runtime workflow passed on ${process.platform}/${process.arch}; existing prerequisites only.`);
 } finally { rmSync(temporary, { recursive: true, force: true }); }

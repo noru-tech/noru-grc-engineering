@@ -18,7 +18,7 @@ evidence establishes intended structure and processing; it does not prove deploy
 
 ## Runtime setup
 
-Use `node "<plugin>/scripts/python-runtime.mjs" --setup` before analysis and route every Python script through that launcher. It verifies or provisions Python on Windows, macOS and Linux independently of the agent client. Use the resolved absolute plugin path in Codex or PowerShell; quote paths and repository arguments containing spaces. Runtime setup may download the pinned interpreter once; analysis remains offline. Do not report setup failures or unfinished enrichment as successful scans.
+Node 18+, Git and Python 3.9+ are required existing prerequisites. Run `node "<plugin>/scripts/python-runtime.mjs" --check` before analysis and route every Python script through that launcher. Python is checked by the launcher because its executable name varies across platforms. No prerequisite is bundled, downloaded or installed. Use the resolved absolute plugin path and quote paths containing spaces. Report missing prerequisites or unfinished enrichment as incomplete work, never successful scans.
 
 ## The three commands
 

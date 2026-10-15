@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Deterministic, offline collector for the privacy-datamap piece (contract requirement 2).
 //
-// Node built-ins only. Runtime setup precedes offline analysis. Same repository state in, byte-identical derived output —
+// Node built-ins only. Analysis is offline and uses existing runtime prerequisites. Same repository state in, byte-identical derived output —
 // scripts/contract_test.py runs this twice and diffs the result, so a timestamp or an unsorted
 // directory listing anywhere in here will fail the build.
 //
