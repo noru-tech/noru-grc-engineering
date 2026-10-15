@@ -57,6 +57,11 @@ def excluded_source(name, exclusions=None):
     return name in exclusions.get("paths", []) or any(name == root or name.startswith(root.rstrip("/") + "/") for root in exclusions.get("roots", []) if root)
 
 
+def not_evidence(name, exclusions=None):
+    """A migration, or a source the collector excluded as one: never evidence for anything."""
+    return migration(name, exclusions) or excluded_source(name, exclusions)
+
+
 def compact_type(value):
     result = {key: copy.deepcopy(value[key]) for key in ("kind", "name", "open", "optional", "additional_types", "key_type", "value_type") if key in value}
     if value.get("members"):
@@ -74,7 +79,7 @@ def source_inventory(repo, exclusions=None):
     rows = {}
     for name in sorted(set(candidates)):
         relative = pathlib.PurePosixPath(name)
-        if not name or set(relative.parts) & EXCLUDED or relative.suffix.lower() not in SOURCE_SUFFIXES or migration(name, exclusions) or excluded_source(name, exclusions):
+        if not name or set(relative.parts) & EXCLUDED or relative.suffix.lower() not in SOURCE_SUFFIXES or not_evidence(name, exclusions):
             continue
         path = (repo / name).resolve()
         if not path.is_relative_to(repo) or not path.is_file():
@@ -149,7 +154,7 @@ def evidence_errors(span, repo, exclusions=None):
 
 def span_from_ref(repo, ref, exclusions=None):
     match = re.fullmatch(r"(.+):(\d+)", ref or "")
-    if not match or migration(match[1], exclusions):
+    if not match or not_evidence(match[1], exclusions):
         return None
     path = (pathlib.Path(repo) / match[1]).resolve()
     if not path.is_relative_to(pathlib.Path(repo).resolve()) or not path.is_file():
@@ -462,7 +467,7 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
                     existing["collector_observation_digest"] = gap["collector_observation_digest"]
             continue
         spans = gap.get("evidence") or ([span] if (span := span_from_ref(repo, gap.get("ref"), exclusions)) else [])
-        gap["evidence_ids"] = register_evidence(contract, [span for span in spans if not migration(span.get("path", ""))], repo)
+        gap["evidence_ids"] = register_evidence(contract, [span for span in spans if not not_evidence(span.get("path", ""), exclusions)], repo)
         contract["gaps"].append(gap)
     contract["resolution_contract_version"] = gap_resolution.VERSION
     contract["diagnostic_history"] = copy.deepcopy(prior.get("diagnostic_history", []))
