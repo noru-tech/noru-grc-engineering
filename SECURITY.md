@@ -68,6 +68,12 @@ piece stops refusing, CI fails.
   plan, a log line, or stdout, and every error string that leaves the process passes through a
   redactor.
 - `noru:doctor` reports only whether the variable is *set* — never its value, prefix, or length.
+- In CI, `scripts/ci_check.py` can use a CI trust record instead of a key: it requests the job's
+  OIDC ID token and exchanges it, once, with Noru for a token that lasts 15 minutes and carries
+  only the piece's scopes (`scripts/ci_credential.py`). It sends the ID token only to
+  `NORU_API_URL`'s `/v1/oidc/token` over https, never follows a redirect with it, removes every
+  means of obtaining an ID token from its child processes, and scrubs both tokens from anything it
+  reports.
 
 Never paste a key into an assistant conversation. If one appears there, rotate it.
 

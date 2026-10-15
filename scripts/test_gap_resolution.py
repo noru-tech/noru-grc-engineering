@@ -327,6 +327,23 @@ class ResolutionTests(unittest.TestCase):
         answer=self.answer(gap,'modeled');answer['field_ids']=['other/supplement/value'];answer['coverage_binding'].update(datastore='other',field_ids=answer['field_ids'])
         self.assertTrue(field_review.apply_gap_decisions(self.document,[answer],self.repo))
 
+    def test_gap_citing_an_excluded_migration_source_has_no_evidence(self):
+        # A migration the collector lists in migration_sources but whose name no pattern recognises
+        # (a drizzle data migration written in TypeScript) is still never evidence. Its coverage gap
+        # is reported without any, rather than failing the whole reconcile.
+        (self.repo/'drizzle').mkdir(exist_ok=True)
+        (self.repo/'drizzle/0045-encrypt-credentials.ts').write_text('export async function up() {}\n')
+        self.assertFalse(field_review.migration('drizzle/0045-encrypt-credentials.ts'))
+        self.compiler['coverage'] = {'migration_sources': ['drizzle/0045-encrypt-credentials.ts']}
+        self.derived['coverage'] = {
+            'migration_gaps': [{'format': 'excluded_migrations', 'code': 'MIGRATION_CURRENT_COVERAGE',
+                                'diagnostic_id': 'migration:excluded-source', 'ref': 'drizzle/0045-encrypt-credentials.ts:1',
+                                'scope': {'datastore': 'db'}, 'reason': 'The migration is not matched to a current schema.'}]}
+        field_review.build_contract(self.document, self.repo, self.compiler)
+        gap = self.document['classification_review']['gaps'][-1]
+        self.assertEqual(gap['code'], 'MIGRATION_CURRENT_COVERAGE')
+        self.assertEqual(gap['evidence_ids'], [])
+
     def test_removed_diagnostic_remains_in_history(self):
         gap=self.gap();self.assertEqual(field_review.apply_gap_decisions(self.document,[self.answer(gap)],self.repo),[])
         self.derived['coverage']={};field_review.build_contract(self.document,self.repo,self.compiler)

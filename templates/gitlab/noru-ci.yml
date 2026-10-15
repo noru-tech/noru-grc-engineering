@@ -11,7 +11,9 @@
 # node, python3 and git. The default steps need no credential and no network beyond that clone.
 # NORU_API_KEY is never an input. When a step that needs it is requested, it comes from a masked
 # CI/CD variable in the job environment, and scripts/ci_check.py passes it only to the step that
-# sends it. NORU_GITLAB_NOTE_TOKEN, also a masked variable, is read only by the merge request note.
+# sends it. With `trust-id` set the job needs no key: it exchanges the ID token GitLab issues it
+# (NORU_ID_TOKEN, issued for `api-origin`) for a 15-minute Noru token under that CI trust record.
+# NORU_GITLAB_NOTE_TOKEN, also a masked variable, is read only by the merge request note.
 spec:
   inputs:
     piece:
@@ -27,8 +29,8 @@ spec:
     steps:
       description: >-
         Comma-separated: scan, validate, expiry, policy, state, diff, push, or 'all'. The default
-        needs no credential. state, diff and push need NORU_API_KEY as a masked CI/CD variable and
-        report skipped without it.
+        needs no credential. state, diff and push need `trust-id`, or NORU_API_KEY as a masked
+        CI/CD variable, and report skipped without either.
       default: scan,validate,expiry,policy
       regex: ^(all|[a-z,]+)$
     fail-on:
@@ -75,6 +77,17 @@ spec:
       description: "Post or update one note with the result on the merge request (needs NORU_GITLAB_NOTE_TOKEN)."
       type: boolean
       default: true
+    trust-id:
+      description: >-
+        The id of a CI trust record in Noru (Settings, Developer, CI trust) that accepts this
+        project, its ref and, if the record names one, its environment. The job then exchanges its
+        ID token for a 15-minute token carrying only the piece's scopes, and needs no NORU_API_KEY.
+      default: ""
+      regex: ^[A-Za-z0-9_-]*$
+    api-origin:
+      description: "The Noru API origin the job's ID token is issued for, with trust-id. It must equal NORU_API_URL when that is set."
+      default: https://api.noru.tech
+      regex: ^https://[^/?#]+$
     report-dir:
       description: "Where the reports are written, relative to the project directory. Saved as artifacts."
       default: .noru/.cache/ci
@@ -96,7 +109,7 @@ spec:
       default: https://github.com/noru-tech/noru-grc-engineering.git
     toolkit-version:
       description: "The toolkit release tag to run. The same tag this file was included from."
-      default: v0.13.0
+      default: v0.15.0
       regex: ^v[0-9]+\.[0-9]+\.[0-9]+$
     toolkit-sha:
       description: "Optional: the full commit the tag must resolve to. The job stops when it does not."
@@ -130,6 +143,12 @@ noru-ci-$[[ inputs.piece ]]$[[ inputs.job-suffix ]]:
     NORU_CI_TOOLKIT_URL: $[[ inputs.toolkit-url ]]
     NORU_CI_TOOLKIT_VERSION: $[[ inputs.toolkit-version ]]
     NORU_CI_TOOLKIT_SHA: $[[ inputs.toolkit-sha ]]
+    NORU_TRUST_ID: $[[ inputs.trust-id ]]
+  # Issued for every run and used only when trust-id is set. scripts/ci_check.py removes it from
+  # every child process.
+  id_tokens:
+    NORU_ID_TOKEN:
+      aud: $[[ inputs.api-origin ]]
   script: |
     set -u
     missing=""
@@ -180,7 +199,7 @@ noru-ci-$[[ inputs.piece ]]$[[ inputs.job-suffix ]]:
 
     # The note is never the gate: whatever it does, the job ends with the check's exit code.
     if [ "$NORU_CI_NOTE" = "true" ]; then
-      env -u NORU_API_KEY python3 "$toolkit/scripts/gitlab_mr_note.py" \
+      env -u NORU_API_KEY -u NORU_ID_TOKEN python3 "$toolkit/scripts/gitlab_mr_note.py" \
         "--report=$report" "--key=$NORU_CI_NAME" \
         || echo "the merge request note was not written; the check result above stands"
     fi

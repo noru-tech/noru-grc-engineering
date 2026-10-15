@@ -116,6 +116,7 @@ recipe, and the publication half that stays separate from the gate, are in
 | `repo` | `.` | Path to the repository to check |
 | `mode` | `gate` | `gate` fails on a finding; `warn` reports the same findings and exits `0` |
 | `steps` | `scan,validate,expiry,policy` | Add `diff` and `push`, or use `all`. The default needs no credential |
+| `trust-id` | *(empty)* | A Noru CI trust record id. The job exchanges its OIDC ID token for a 15-minute token with only the piece's scopes, instead of using `NORU_API_KEY`. Needs `permissions: id-token: write` |
 | `fail-on` | *(tool default)* | Which finding kinds gate the build, or `none` |
 | `baseline` | `.noru/privacy-baseline.yml` | The agreed privacy taxonomy for the policy step. Absent file: step skipped. Explicit path that does not exist: tooling failure |
 | `base-ref` | *(none)* | Compare against the merge base with this ref, so a finding says whether this pull request introduced it. Needs `fetch-depth: 0` |
@@ -179,6 +180,12 @@ Never pass a key as a `with:` input. The default steps need none. For the opt-in
 publication, put `NORU_API_KEY` in the job or step `env:` from a secret, only in a job that has
 secrets and never on `pull_request` from a fork. The action never reads the value; it checks only
 whether the variable is present, and the piece's own push entrypoint reads it at the point of use.
+
+Or store no key at all: create a CI trust record in Noru (Settings, Developer, CI trust) for the
+repository and the refs that may write, give the job `permissions: id-token: write`, and pass the
+record's id as `trust-id`. The job then exchanges its OIDC ID token, once, for a token that lasts 15
+minutes and carries only the piece's scopes; when both are present the trust record wins. Never give
+`id-token: write` to a `pull_request_target` job. See [CI mode](../../../docs/ci-mode.md#without-a-stored-key-a-ci-trust-record).
 MCP-backed pieces cannot push from this headless runner at all; the action reports their plan and
 never claims an emitted call list as an executed write.
 

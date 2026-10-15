@@ -28,9 +28,19 @@ inputs:
     description: >
       Comma-separated: scan, validate, expiry, policy, state, diff, push — or 'all'. The default,
       scan,validate,expiry,policy, is the part that needs no credential. state, diff and push need
-      NORU_API_KEY in the job environment (never as an input) and report skipped without it.
+      `trust-id`, or NORU_API_KEY in the job environment (never as an input), and report skipped
+      without either.
     required: false
     default: "scan,validate,expiry,policy"
+  trust-id:
+    description: >
+      The id of a CI trust record in Noru (Settings, Developer, CI trust) that accepts this
+      repository, its ref and, if the record names one, its environment. The job then exchanges its
+      OIDC ID token for a 15-minute token carrying only the piece's scopes, and needs no
+      NORU_API_KEY; when both are present the trust record wins. The job needs
+      `permissions: id-token: write`. Empty uses NORU_TRUST_ID from the job environment, if any.
+    required: false
+    default: ""
   fail-on:
     description: >
       Which finding kinds gate the build: drift, invalid, dangling_ref, expired, cadence, expiring,
@@ -240,6 +250,7 @@ runs:
         NORU_CI_ON_MISSING: ${{ inputs.on-missing-prerequisite }}
         NORU_CI_PLUGINS: ${{ inputs.plugins }}
         NORU_CI_REPORT_PATH: ${{ inputs.report-path }}
+        NORU_TRUST_ID: ${{ inputs.trust-id || env.NORU_TRUST_ID }}
       run: |
         set -uo pipefail
         # The toolkit ships with this action, so find its root by walking up from the action path.
@@ -295,7 +306,8 @@ runs:
 
         # NORU_API_KEY is deliberately not named here. If the caller put it in the job environment
         # it is inherited by this process and read, at the point of use, only by the piece's own
-        # push entrypoint. Nothing in this action reads, echoes or logs its value.
+        # push entrypoint. Nothing in this action reads, echoes or logs its value. With a trust
+        # record, ci_check.py requests the job's ID token and exchanges it once, for the same use.
         python3 "$root/scripts/ci_check.py" "${args[@]}"
         code=$?
 
