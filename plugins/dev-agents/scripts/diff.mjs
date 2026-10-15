@@ -227,7 +227,7 @@ export function buildOperations(manifest, state) {
         : "no evidence carries this marker yet",
     idempotency: { kind: "client_probe", key: ["description contains marker"], marker },
     arguments: {
-      title: `Development agents and tooling, ${period.replace("..", " to ")} — ${src.slug}`,
+      title: `Development agents and tooling, ${period.replaceAll("..", " to ")} — ${src.slug}`,
       description:
         `${marker} ${agents.length} coding agent(s), ${(manifest.mcp_servers ?? []).length} MCP ` +
         `server(s) and ${(manifest.plugins ?? []).length} plugin(s) the development of ${src.slug} ` +
