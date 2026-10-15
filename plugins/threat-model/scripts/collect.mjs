@@ -36,7 +36,7 @@ import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const PIECE = "threat-model";
-export const VERSION = "0.16.0";
+export const VERSION = "0.16.1";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
