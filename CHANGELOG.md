@@ -6,6 +6,25 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- `change-control` takes agent-change-control's `ACC012`. Each branch update acc holds against (a
+  direct push, a force push or a deletion of a protected branch that no merged change accounts for)
+  becomes a record of its own, kind `direct_push`, keyed `update-<branch>-<id>`, with the bypass set;
+  acc decided it whole, so `bypass_used` is its only separation, in the collector and the validator
+  alike. A branch whose updates acc could not read in full gets one record for a person to settle.
+  New bypass kinds: `direct_push`, `branch_deletion`.
+- `export/acc.mjs --statement` stages acc's in-toto Statement in `.noru/artifacts/` as
+  `acc-<opens>_<closes>.intoto.json` and records its SHA-256, for `evidence-push` to draft and a
+  person to sign. It never edits `.noru/evidence-push.yml`, and it refuses a per-change JSONL stream
+  or a Statement that is not acc's.
+- GitLab: `export/acc.mjs` is tested on a GitLab manifest written by acc, and the README gives the
+  GitLab recipe (acc's GitLab collector with this piece's GitLab exporter for deployments and
+  settings).
+- This repository's own `compliance.yml` runs `change-control` on agent-change-control 0.7.0,
+  installed from its release with the archive's SHA-256 pinned in the workflow and its build
+  attestation verified against acc's release workflow at that tag, keeping the GitHub exporter's
+  records for deployments and settings.
+- The `noru-ci` action README no longer says MCP-backed pieces cannot push from a headless runner.
+
 ## 0.16.1 — 2026-10-15
 
 - Add client-independent privacy Python runtime discovery for existing installations on

@@ -743,6 +743,7 @@ ACC_RULES = [
     ("ACC003", "merged_without_independent_approval"),
     ("ACC001", "agent_change_without_independent_human"),
     ("ACC005", "bypass_used"),
+    ("ACC012", "bypass_used"),
 ]
 ACC_STATUSES = {"pass", "fail", "unknown", "not_applicable"}
 RULE_ORDER = [
@@ -766,6 +767,10 @@ def violations_of(change):
         return _own_violations_of(change)
     verdicts = acc.get("verdicts") if isinstance(acc.get("verdicts"), dict) else {}
     decided = {rule for code, rule in ACC_RULES if code in verdicts}
+    # A branch update acc held against (ACC012) is not a change: acc decided it whole, and none
+    # of the change separations apply to it.
+    if change.get("kind") == "direct_push":
+        decided = set(RULE_ORDER)
     out = []
     for code, rule in ACC_RULES:
         status = verdicts.get(code)

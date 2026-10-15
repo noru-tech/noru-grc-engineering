@@ -446,7 +446,9 @@
             "branch_protection_disabled",
             "required_checks_skipped",
             "environment_approval_skipped",
-            "ruleset_bypass"
+            "ruleset_bypass",
+            "direct_push",
+            "branch_deletion"
           ]
         },
         "by": {
