@@ -1,12 +1,12 @@
 # Invalid fixture for the findings-ingest validator: Two findings share one key.
 # Otherwise identical to valid.findings-ingest.yml. Synthetic throughout.
-version: 0.13.0
+version: 0.14.0
 piece: findings-ingest
 source:
   slug: example-org/example-app
   commit_sha: 0f3c9a1e7b2d4c6e8a0b1c2d3e4f5a6b7c8d9e0f
   branch: main
-  generated_by: findings-ingest@0.13.0
+  generated_by: findings-ingest@0.14.0
   derived_digest: df99ce71c2f0acddc4cf8b56c215a7053828f34bf244e941313376b74f41f739
 inputs:
   - id: example-sast
