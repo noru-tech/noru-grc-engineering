@@ -1232,16 +1232,16 @@ function assertUniqueKeys(kind, rows) {
   }
 }
 
-export function collectFacts(repo, { candidate = false } = {}) {
+export function collectFacts(repo, { candidate = false, inputDefinitions, relationshipDefinitions } = {}) {
   const listing = listFiles(repo);
-  const inputs = JSON.parse(execFileSync("python3", [join(HERE, "dataset_inputs.py"), `--repo=${repo}`, ...(candidate ? ["--candidate"] : [])], {encoding: "utf8"}));
+  const inputs = inputDefinitions ?? JSON.parse(execFileSync("python3", [join(HERE, "dataset_inputs.py"), `--repo=${repo}`, ...(candidate ? ["--candidate"] : [])], {encoding: "utf8"}));
   const supplementalDatasets = inputs.datasets;
   const manifestPath = join(repo, ".noru", "privacy-datamap.yml");
-  const relationships = candidate
+  const relationships = relationshipDefinitions ?? (candidate
     ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), "--candidate", repo], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }))
     : existsSync(manifestPath)
     ? JSON.parse(execFileSync("python3", [join(HERE, "relationships.py"), manifestPath], { encoding: "utf8" }))
-    : { bindings: {}, flows: {}, questions: [], errors: [] };
+    : { bindings: {}, flows: {}, questions: [], errors: [] });
   const drizzleTopology = discoverDrizzleTopology(repo, listing.files);
   const productionFiles = listing.files.filter((path) => !isNonRuntimePath(path)
     || relationships.bindings[path] || drizzleTopology.byPath.get(path)?.role === "canonical");

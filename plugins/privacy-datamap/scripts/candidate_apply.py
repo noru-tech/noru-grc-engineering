@@ -1,11 +1,35 @@
 """Recoverable local candidate application; applying never seals or approves a map."""
 import copy
-import hashlib
 import json
 import os
 import pathlib
 import tempfile
+import subprocess
 import analysis_storage
+
+
+def refresh_digest(repo, candidate):
+    """Observe the exact proposed inputs without installing or accepting them first."""
+    import dataset_inputs
+    import relationships
+    inputs = dataset_inputs.extract(repo, document=candidate)
+    graph = candidate.get('relationship_graph')
+    mapping = {'bindings': {}, 'flows': {}, 'questions': [], 'errors': []}
+    if graph is not None:
+        errors = relationships.validate(graph, candidate.get('evidence_dependencies', []))
+        if errors:
+            raise ValueError('Cannot apply invalid relationships: ' + '; '.join(errors))
+        mapping = {**relationships.project(graph), 'graph': graph, 'errors': []}
+    script = """import {readFileSync} from 'node:fs';
+const {collectFacts, digestOf} = await import(process.argv[1]);
+const input = JSON.parse(readFileSync(0, 'utf8'));
+console.log(digestOf(collectFacts(process.argv[2], input)));"""
+    result = subprocess.run(['node', '--input-type=module', '-e', script,
+        pathlib.Path(__file__).with_name('collect.mjs').as_uri(), str(repo)],
+        input=json.dumps({'inputDefinitions': inputs, 'relationshipDefinitions': mapping}), capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError('Cannot collect proposed manifest: ' + result.stderr.strip())
+    candidate.setdefault('source', {})['derived_digest'] = result.stdout.strip()
 
 
 def atomic_text(path, text):
@@ -36,6 +60,8 @@ def finish(repo, journal):
 
 def apply(repo, candidate, document, render):
     repo = pathlib.Path(repo)
+    candidate = copy.deepcopy(candidate)
+    refresh_digest(repo, candidate)
     journal_path = repo / '.noru/.cache/privacy-datamap.apply.json'
     updated = copy.deepcopy(document)
     updated['applied_proposals'] = {key: updated.pop(key) for key in ('structural_proposal', 'relationship_proposal') if key in updated}

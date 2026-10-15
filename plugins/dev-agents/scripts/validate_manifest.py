@@ -31,6 +31,7 @@ import sys
 # otherwise falls back to a built-in parser, so the validator runs anywhere python3 exists with no
 # install step and no network.
 import difflib
+import json
 import re
 
 _BLOCK_SCALAR_RE = re.compile(r"^[>|](?:[+-]\d*|\d*[+-]?)$")  # >, |, >-, |+, >2, |2-, |-2, …
@@ -105,6 +106,13 @@ def _scalar(raw):
     if s in _FALSE_WORDS:
         return False
     if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        if s[0] == '"':
+            try:
+                return json.loads(s)
+            except ValueError:
+                pass  # Retain the existing subset behavior for non-JSON YAML escapes.
+        if s[0] == "'":
+            return s[1:-1].replace("''", "'")
         return s[1:-1]
     if s.startswith("[") and s.endswith("]"):
         inner = s[1:-1].strip()

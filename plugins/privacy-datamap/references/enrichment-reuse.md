@@ -50,6 +50,10 @@ For accepted uncertainty, use the existing scoped acceptance records for each fi
 `reconcile.py --repo=<repo> --apply-candidate` projects current field decisions and system activities
 into the local YAML, updates nested collection signatures and archives applied structural and
 relationship proposals. It does not seal, create an interpretation or clear outstanding approval.
+Newly projected supplemental members carry their evidenced shape and typed-contract provenance;
+existing member metadata is retained. Before writing, application performs a read-only collection
+with the proposed manifest inputs and stamps its source digest. Later changes to fields or system
+dataset links still require recollection and reconciliation; a digest is not an approval.
 Recollect and reconcile afterward before review or sealing. The application writes through a local
 recovery journal: retrying after interruption completes the same application, while intervening
 file edits stop recovery rather than being overwritten. The lock is untouched.

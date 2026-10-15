@@ -958,7 +958,7 @@ def pending_requests(contract):
     return sorted(requests, key=lambda row: (row["priority"], row["entity_id"]))
 
 
-def projected_fields(rows, existing=None):
+def projected_fields(rows, existing=None, supplemental=False):
     result = []
     old = {field["name"]: field for field in existing or []}
     for row in rows:
@@ -969,6 +969,10 @@ def projected_fields(rows, existing=None):
             field["description"] += " Open content: " + content["residual_uncertainty"]
         entry = uncertainty.field_entry(row)
         meta = field.setdefault("meta", {})
+        if supplemental and not meta.get('noru'):
+            # Newly investigated members have no prior manifest node to copy provenance from.
+            shape = row.get('shape') or row.get('type', {}).get('name') or row.get('type', {}).get('kind')
+            meta['noru'] = {'shape': shape, 'evidence_kind': 'typed_contract'}
         meta.pop("accepted_uncertainties", None)
         if entry:
             meta["accepted_uncertainties"] = [entry]
@@ -979,7 +983,7 @@ def projected_fields(rows, existing=None):
         if row["status"] != "proposed":
             field["needs_review"] = True
         if row.get("nested_members"):
-            field["fields"] = projected_fields(row["nested_members"], field.get("fields", []))
+            field["fields"] = projected_fields(row["nested_members"], field.get("fields", []), supplemental)
         result.append(field)
     return result
 
@@ -1063,7 +1067,8 @@ def project_candidate(document, candidate, derived=None, repo=None):
                 prior_compact = set(collection.get("non_personal_fields", []))
                 compact = {row["name"] for row in rows if row["name"] in prior_compact and row["personal_data"] == "no" and row["status"] == "proposed" and not row.get("nested_members") and not row.get("open_content") and not row.get("accepted_uncertainty")}
                 represented = [row for row in rows if row["name"] not in compact]
-                collection["fields"] = projected_fields(represented, collection.get("fields", []))
+                collection["fields"] = projected_fields(represented, collection.get("fields", []),
+                    supplemental=(dataset.get('meta') or {}).get('noru', {}).get('origin') == 'supplemental')
                 if (dataset.get("meta") or {}).get("noru", {}).get("origin") == "supplemental":
                     dependency_rows.extend((row, prefix[:-1]) for row in all_rows(represented))
                 if compact:

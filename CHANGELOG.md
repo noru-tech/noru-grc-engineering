@@ -6,6 +6,11 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Preserve structural provenance for newly projected supplemental members and calculate applied
+  candidate source digests from an offline observation of the resulting manifest inputs.
+  Decode quoted-string escapes in the install-free YAML reader so rendered structural shapes
+  retain their values when reloaded.
+
 - Resolve literal, unconditional C# Compile links while preserving investigation for conditional
   and multiply-owned sources.
 

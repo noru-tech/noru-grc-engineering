@@ -30,6 +30,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('scoped uncertainty acceptance can account', text)
         self.assertNotIn('cannot supply missing facts or close an extraction gap', text)
 
+    def test_structural_shape_quotes_roundtrip_offline(self):
+        for shape in ['text("email")', 'path\\member', 'quoted "value"', "owner's contract"]:
+            self.assertEqual(reconcile.VALIDATOR._scalar(json.dumps(shape)), shape)
+        self.assertEqual(reconcile.VALIDATOR._scalar("'owner''s contract'"), "owner's contract")
+
     def test_shared_reasoning_keeps_field_outcomes_and_overrides(self):
         self.resolve()
         original = [field_review.decision_template(row) for row in field_review.all_rows(self.document['classification_review']['fields']) if not row.get('nested_members')]
@@ -50,6 +55,30 @@ class WorkflowTests(unittest.TestCase):
         collection = candidate['dataset'][0]['collections'][0]
         self.assertEqual(collection['structure_digest'], reconcile.VALIDATOR.structure_digest(collection['fields']))
         self.assertTrue(next(f for f in collection['fields'] if f['name'] == 'payload')['fields'])
+
+    def test_new_supplemental_members_receive_structural_provenance(self):
+        candidate = {'dataset': [{'fides_key': 'db', 'meta': {'noru': {'origin': 'supplemental'}},
+            'collections': [{'name': 'records', 'fields': [{'name': 'payload',
+                'meta': {'noru': {'shape': 'object', 'evidence_kind': 'serializer'}}}]}]}]}
+        field_review.project_candidate(self.document, candidate, self.derived)
+        payload = next(f for f in candidate['dataset'][0]['collections'][0]['fields'] if f['name'] == 'payload')
+        self.assertEqual(payload['meta']['noru']['evidence_kind'], 'serializer')
+        for child in payload['fields']:
+            self.assertEqual(child['meta']['noru'], {'shape': 'string', 'evidence_kind': 'typed_contract'})
+            self.assertTrue(child['needs_review'])
+
+    def test_investigated_nested_contract_remains_collectable(self):
+        import dataset_inputs
+        fixture = fixtures.ClassificationGateTests()
+        fixture.setUp()
+        try:
+            manifest = fixture.supplemental_projection_fixture()
+            field_review.project_candidate(fixture.document, manifest, repo=fixture.repo)
+            observed = dataset_inputs.extract(fixture.repo, document=manifest)
+            nested = next(f for f in observed['datasets'][0]['collections'][0]['fields'] if f['name'] == 'payload.details')
+            self.assertEqual(nested['shape'], 'object')
+        finally:
+            fixture.doCleanups()
 
     def test_non_personal_projection_does_not_create_taxonomy_or_acceptance(self):
         self.document['system_proposals'] = [{'entity_id': 'host', 'personal_data': 'no', 'non_personal_rationale': 'Provisioning only.',
@@ -124,6 +153,54 @@ class WorkflowTests(unittest.TestCase):
         manifest.write_text('new manifest')
         self.assertTrue(candidate_apply.recover(self.repo))
         self.assertFalse(path.exists())
+
+    def test_nested_supplemental_apply_roundtrip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = pathlib.Path(directory)
+            (repo / 'storage.ts').write_text('export const payload = {member: "value"};\n')
+            manifest = repo / '.noru/privacy-datamap.yml'
+            manifest.parent.mkdir()
+            field = {'name': 'payload', 'refs': ['storage.ts:1'], 'data_categories': [],
+                     'meta': {'noru': {'shape': 'JSON object', 'evidence_kind': 'serializer'}},
+                     'fields': [{'name': 'member', 'refs': ['storage.ts:1'], 'data_categories': [],
+                                 'meta': {'noru': {'shape': 'string', 'evidence_kind': 'serializer'}}}]}
+            doc = {'version': '0.13.0', 'piece': 'privacy-datamap',
+                   'source': {'slug': 'fixture/contracts', 'commit_sha': 'a'*40, 'branch': 'main', 'generated_by': 'privacy-datamap', 'derived_digest': '0'*64},
+                   'dataset': [{'fides_key': 'objects', 'name': 'Objects', 'meta': {'noru': {'origin': 'supplemental', 'refs': ['storage.ts:1']}},
+                                'collections': [{'name': 'records', 'refs': ['storage.ts:1'], 'fields': [field]}]}], 'system': []}
+            manifest.write_text(reconcile.to_yaml(doc))
+            scripts = ROOT / 'plugins/privacy-datamap/scripts'
+            def run(name, *args):
+                result = subprocess.run(['node' if name.endswith('.mjs') else sys.executable, str(scripts / name), '--repo=' + directory, *args], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result
+            run('collect.mjs')
+            run('reconcile.py')
+            run('reconcile.py', '--apply-candidate')
+            applied = reconcile.load_manifest(manifest)
+            collection = applied['dataset'][0]['collections'][0]
+            self.assertEqual(collection['fields'][0]['fields'][0]['meta'], field['fields'][0]['meta'])
+            self.assertEqual(collection['structure_digest'], reconcile.VALIDATOR.structure_digest(collection['fields']))
+            run('collect.mjs')
+            _, scan = reconcile.load_observations(repo)
+            self.assertEqual(applied['source']['derived_digest'], scan['derived_digest'])
+            # Applying newly modeled structure must bind the resulting ordinary scan, not its predecessor.
+            prior_digest = applied['source']['derived_digest']
+            member = copy.deepcopy(field['fields'][0]); member['name'] = 'additional'
+            collection['fields'][0]['fields'].append(member)
+            collection['structure_digest'] = reconcile.structure_digest(collection['fields'])
+            candidate_apply.apply(repo, applied, {}, reconcile.to_yaml)
+            run('collect.mjs')
+            _, scan = reconcile.load_observations(repo)
+            applied = reconcile.load_manifest(manifest)
+            self.assertNotEqual(applied['source']['derived_digest'], prior_digest)
+            self.assertEqual(applied['source']['derived_digest'], scan['derived_digest'])
+            before = manifest.read_bytes()
+            del applied['dataset'][0]['collections'][0]['fields'][0]['fields'][0]['meta']
+            with self.assertRaisesRegex(ValueError, 'Supplemental fields require'):
+                candidate_apply.apply(repo, applied, {}, reconcile.to_yaml)
+            self.assertEqual(manifest.read_bytes(), before)
+            self.assertFalse((repo / '.noru/.cache/privacy-datamap.apply.json').exists())
 
     def test_migration_group_submission_covers_every_individual_finding(self):
         import gap_resolution

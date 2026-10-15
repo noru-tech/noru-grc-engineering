@@ -69,8 +69,8 @@ def dependency_gaps(doc):
     return errors
 
 
-def extract(repo, candidate=False):
-    document = read(repo, candidate)
+def extract(repo, candidate=False, document=None):
+    document = read(repo, candidate) if document is None else document
     if candidate:
         for spec in document.get("evidence_dependencies", []):
             if dependencies.observe(repo, spec)["fingerprint"] != spec.get("fingerprint"):
