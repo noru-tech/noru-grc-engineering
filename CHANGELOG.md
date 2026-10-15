@@ -6,6 +6,12 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Fix: `privacy-datamap` reconcile no longer stops with "evidence path must identify current
+  repository source, never a migration" when a migration-coverage gap cites a migration the collector
+  lists among its migration sources but no file-name pattern recognises, such as a data migration
+  written in TypeScript. Such a source is never evidence: the gap is reported with none, as for any
+  other migration. Regression since 0.13.0.
+
 - GitLab CI/CD components. `templates/gitlab/noru-ci.yml` and `templates/gitlab/noru-review.yml` are
   the GitLab counterparts of the `noru-ci` and `noru-review` actions, with `spec: inputs:`, included
   with `include: remote` from a release tag of this repository. The job clones the toolkit at the same
