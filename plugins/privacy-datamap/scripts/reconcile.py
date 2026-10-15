@@ -1055,7 +1055,7 @@ def main(argv):
             "ok": True,
             "status": "accepted",
             "mode": "sealed",
-            "lock": str(lock_path.relative_to(repo)),
+            "lock": lock_path.relative_to(repo).as_posix(),
             "entities": len(lock_document["entities"]),
             "collections": len(lock_document["collections"]),
         }
@@ -1147,7 +1147,7 @@ def main(argv):
         result.update(
             {
                 "ok": True,
-                "analysis": str(proposals_path.relative_to(repo)),
+                "analysis": proposals_path.relative_to(repo).as_posix(),
             }
         )
 

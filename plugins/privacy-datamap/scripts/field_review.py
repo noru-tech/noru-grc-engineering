@@ -76,7 +76,7 @@ def source_inventory(repo, exclusions=None):
     """Include untracked nonignored source too; cached decisions cannot hide new code."""
     repo = pathlib.Path(repo).resolve()
     result = subprocess.run(["git", "-C", str(repo), "ls-files", "--cached", "--others", "--exclude-standard", "-z"], capture_output=True)
-    candidates = result.stdout.decode().split("\0") if result.returncode == 0 else [str(p.relative_to(repo)) for p in repo.rglob("*")]
+    candidates = result.stdout.decode().split("\0") if result.returncode == 0 else [p.relative_to(repo).as_posix() for p in repo.rglob("*")]
     rows = {}
     for name in sorted(set(candidates)):
         relative = pathlib.PurePosixPath(name)
@@ -113,7 +113,7 @@ def structure_digest(derived):
 
 def taxonomy_digest():
     paths = [path for path in (HERE / "field_review.py", HERE / "dotnet.py", HERE / "dotnet_syntax.py", HERE / "dotnet_model.py", HERE / "dotnet_diagnostics.py", HERE / "gap_resolution.py", HERE / "uncertainty.py", HERE / "migration_coverage.py", HERE / "dotnet_adapters.py", HERE / "dotnet_boundaries.py", HERE / "dotnet_contract_candidates.py", HERE / "system_review.py", ROOT / "references/dotnet-boundary-contracts.json", ROOT / "references/dotnet-framework-contracts.json", ROOT / "references/dotnet-diagnostics.json", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
-    return digest({"policy": POLICY, "categories": TAXONOMY, "implementation": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}})
+    return digest({"policy": POLICY, "categories": TAXONOMY, "implementation": {path.relative_to(ROOT).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}})
 
 
 def derived_for(document, repo=None):

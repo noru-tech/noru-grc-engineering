@@ -54,7 +54,7 @@ def files(repo):
     if result.returncode == 0 and result.stdout:
         candidates = result.stdout.decode().split("\0")
     else:
-        candidates = (str(path.relative_to(repo)) for path in repo.rglob("*"))
+        candidates = (path.relative_to(repo).as_posix() for path in repo.rglob("*"))
     return sorted({name for name in candidates if name and not (set(pathlib.PurePosixPath(name).parts) & EXCLUDED)})
 
 

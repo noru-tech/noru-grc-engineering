@@ -4,8 +4,11 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import subprocess
-from runtime_context import NODE
 import sys
+
+# This gate is also loaded by file path by the toolkit CI adapter.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from runtime_context import NODE
 
 
 ROOT = Path(__file__).resolve().parents[1]
