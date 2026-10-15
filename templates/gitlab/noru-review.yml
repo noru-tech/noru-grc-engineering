@@ -1,0 +1,144 @@
+# The GitLab CI/CD component for the merge request review: the counterpart of the noru-review
+# GitHub Action and templates/github/noru-grc-review.yml. It routes the merge request's changes to
+# the pieces they implicate and runs only their local scan, validation, expiry and privacy-policy
+# checks. It has no diff or push input, and scripts/ci_review.py removes NORU_API_KEY from every
+# piece it runs, so a key configured for some other job cannot widen it into a publisher.
+#
+#   include:
+#     - remote: https://raw.githubusercontent.com/noru-tech/noru-grc-engineering/vX.Y.Z/templates/gitlab/noru-review.yml
+#
+# It runs in merge request pipelines only, because the merge request's diff base is what it routes
+# on. It starts in warn mode; set the input `mode: gate` once the first reports are understood.
+spec:
+  inputs:
+    repo:
+      description: "Path to the repository to review, relative to the project directory."
+      default: "."
+    pieces:
+      description: "Optional comma-separated override. Empty selects pieces from the changes."
+      default: ""
+      regex: ^[a-z0-9,-]*$
+    mode:
+      description: "warn reports findings; gate fails the job on them. Start with warn."
+      default: warn
+      options: [warn, gate]
+    fail-on:
+      description: "Optional comma-separated finding kinds, or 'none'."
+      default: ""
+    baseline:
+      description: "Optional path to the committed privacy baseline."
+      default: ""
+    max-age-days:
+      description: "Optional review cadence in days. 0 does not invent one."
+      default: "0"
+      regex: ^[0-9]+$
+    warn-within-days:
+      description: "How far ahead to report an expiry."
+      default: "30"
+      regex: ^[0-9]+$
+    gate-on-new:
+      description: "Gate only on policy findings this merge request introduced."
+      type: boolean
+      default: true
+    merge-request-note:
+      description: "Post or update one note with the result on the merge request (needs NORU_GITLAB_NOTE_TOKEN)."
+      type: boolean
+      default: true
+    report-dir:
+      description: "Where the reports are written, relative to the project directory. Saved as artifacts."
+      default: .noru/.cache/ci
+    stage:
+      description: "The stage the job runs in."
+      default: test
+    image:
+      description: "An image that already has node (18 or later), python3 and git. Nothing is installed."
+      default: node:22-bookworm
+    expire-in:
+      description: "How long the job's artifacts are kept."
+      default: 30 days
+    toolkit-url:
+      description: "Where to clone the toolkit from. Change it only to use a mirror you control."
+      default: https://github.com/noru-tech/noru-grc-engineering.git
+    toolkit-version:
+      description: "The toolkit release tag to run. The same tag this file was included from."
+      default: v0.13.0
+      regex: ^v[0-9]+\.[0-9]+\.[0-9]+$
+    toolkit-sha:
+      description: "Optional: the full commit the tag must resolve to. The job stops when it does not."
+      default: ""
+      regex: ^([0-9a-f]{40})?$
+---
+noru-grc-review:
+  stage: $[[ inputs.stage ]]
+  image: $[[ inputs.image ]]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    # The diff base has to be in the clone, or nothing can be routed.
+    GIT_DEPTH: "0"
+    NORU_REVIEW_REPO: $[[ inputs.repo ]]
+    NORU_REVIEW_PIECES: $[[ inputs.pieces ]]
+    NORU_REVIEW_MODE: $[[ inputs.mode ]]
+    NORU_REVIEW_FAIL_ON: $[[ inputs.fail-on ]]
+    NORU_REVIEW_BASELINE: $[[ inputs.baseline ]]
+    NORU_REVIEW_MAX_AGE_DAYS: $[[ inputs.max-age-days ]]
+    NORU_REVIEW_WARN_WITHIN_DAYS: $[[ inputs.warn-within-days ]]
+    NORU_REVIEW_GATE_ON_NEW: "$[[ inputs.gate-on-new ]]"
+    NORU_REVIEW_NOTE: "$[[ inputs.merge-request-note ]]"
+    NORU_REVIEW_REPORT_DIR: $[[ inputs.report-dir ]]
+    NORU_REVIEW_TOOLKIT_URL: $[[ inputs.toolkit-url ]]
+    NORU_REVIEW_TOOLKIT_VERSION: $[[ inputs.toolkit-version ]]
+    NORU_REVIEW_TOOLKIT_SHA: $[[ inputs.toolkit-sha ]]
+  script: |
+    set -u
+    missing=""
+    for tool in node python3 git; do
+      command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+    done
+    if [ -n "$missing" ]; then
+      echo "this job needs$missing in the image. Choose an image that has node, python3 and git;"
+      echo "it installs nothing itself, on purpose."
+      exit 1
+    fi
+
+    toolkit="$(mktemp -d)/noru-grc-engineering"
+    git -c advice.detachedHead=false clone --quiet --depth 1 \
+      --branch "$NORU_REVIEW_TOOLKIT_VERSION" "$NORU_REVIEW_TOOLKIT_URL" "$toolkit" || exit 1
+    if [ -n "$NORU_REVIEW_TOOLKIT_SHA" ]; then
+      actual="$(git -C "$toolkit" rev-parse HEAD)"
+      if [ "$actual" != "$NORU_REVIEW_TOOLKIT_SHA" ]; then
+        echo "$NORU_REVIEW_TOOLKIT_VERSION resolves to $actual, not the pinned $NORU_REVIEW_TOOLKIT_SHA. Stopping."
+        exit 1
+      fi
+    fi
+
+    mkdir -p "$NORU_REVIEW_REPORT_DIR"
+    report="$NORU_REVIEW_REPORT_DIR/noru-grc-review.json"
+    base="${CI_MERGE_REQUEST_DIFF_BASE_SHA:?is not set: this job routes a merge request diff, so it runs in merge request pipelines only}"
+    set -- "--repo=$NORU_REVIEW_REPO" "--plugins=$toolkit/plugins" \
+      "--base-ref=$base" "--mode=$NORU_REVIEW_MODE" \
+      "--max-age-days=$NORU_REVIEW_MAX_AGE_DAYS" \
+      "--warn-within-days=$NORU_REVIEW_WARN_WITHIN_DAYS" "--report=$report" \
+      "--code-quality=$NORU_REVIEW_REPORT_DIR/noru-grc-review.codequality.json" "--output=text"
+    if [ -n "$NORU_REVIEW_PIECES" ]; then set -- "$@" "--pieces=$NORU_REVIEW_PIECES"; fi
+    if [ -n "$NORU_REVIEW_FAIL_ON" ]; then set -- "$@" "--fail-on=$NORU_REVIEW_FAIL_ON"; fi
+    if [ -n "$NORU_REVIEW_BASELINE" ]; then set -- "$@" "--baseline=$NORU_REVIEW_BASELINE"; fi
+    if [ "$NORU_REVIEW_GATE_ON_NEW" = "true" ]; then set -- "$@" "--gate-on-new"; fi
+
+    env -u NORU_API_KEY -u NORU_GITLAB_NOTE_TOKEN python3 "$toolkit/scripts/ci_review.py" "$@"
+    code=$?
+
+    # The note is never the gate: whatever it does, the job ends with the review's exit code.
+    if [ "$NORU_REVIEW_NOTE" = "true" ]; then
+      env -u NORU_API_KEY python3 "$toolkit/scripts/gitlab_mr_note.py" \
+        "--report=$report" "--key=noru-grc-review" \
+        || echo "the merge request note was not written; the review result above stands"
+    fi
+    exit "$code"
+  artifacts:
+    when: always
+    expire_in: $[[ inputs.expire-in ]]
+    paths:
+      - $[[ inputs.report-dir ]]/
+    reports:
+      codequality: $[[ inputs.report-dir ]]/noru-grc-review.codequality.json

@@ -104,8 +104,9 @@ so give each call its own.
   with: { piece: ai-inventory, repo: services/web, report-path: ${{ runner.temp }}/web.json }
 ```
 
-The GitLab CI and plain-shell recipes, and the publication half that stays separate from the gate,
-are in [`docs/ci-mode.md`](../../../docs/ci-mode.md).
+The GitLab CI/CD component that does the same job (`templates/gitlab/noru-ci.yml`), the plain-shell
+recipe, and the publication half that stays separate from the gate, are in
+[`docs/ci-mode.md`](../../../docs/ci-mode.md).
 
 ## Inputs
 

@@ -282,6 +282,18 @@ take changes only when you choose to. The Marketplace repositories (`noru-tech/n
 this repository and never edited by hand; the path inside this repository at the same tag is the
 same code.
 
+On GitLab, the same two jobs are CI/CD components in [`templates/gitlab/`](./templates/gitlab/README.md),
+included from a release tag (replace `vX.Y.Z`):
+
+```yaml
+include:
+  - remote: https://raw.githubusercontent.com/noru-tech/noru-grc-engineering/vX.Y.Z/templates/gitlab/noru-review.yml
+```
+
+Both write a GitLab Code Quality report, which merge requests show on every tier, and one merge
+request note they update in place; `noru-ci.yml` also writes a SAST security report for the security
+findings a manifest records.
+
 Three things fail a build, and **all of them are computed from the repository, a calendar and a
 committed file** — no network, no credential, so this works on a pull request from a fork:
 
@@ -302,7 +314,7 @@ personal data in it are the same file, and only one of them is good news.
 authenticated MCP host the agent executes the reviewed calls; in CI, with `NORU_API_KEY` in the job
 environment, the `state` step builds the snapshot and the `push` step executes exactly the confirmed
 call list, reporting it written only with a receipt that says every call succeeded. Exit codes,
-warn-only adoption, and the GitLab and plain-shell recipes:
+warn-only adoption, the GitLab CI/CD components, and the plain-shell recipe:
 [docs/ci-mode.md](./docs/ci-mode.md). What each finding means and how to clear it:
 [docs/findings/](./docs/findings/README.md).
 
@@ -413,6 +425,7 @@ noru-grc-engineering/
 ├── .github/actions/noru-review/        # branch routing + structurally read-only consolidated CI
 ├── actions/enforce/                    # whole-repository merge gate the repo-enforcement plugin installs
 ├── templates/github/                   # copyable, fork-safe pull-request workflow
+├── templates/gitlab/                   # the same two jobs as GitLab CI/CD components
 ├── scripts/                            # scaffolder, contract test, checks — stdlib/built-ins only
 ├── tests/fixture-repo/                 # the repository the collectors are tested against
 └── docs/

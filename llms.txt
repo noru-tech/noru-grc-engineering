@@ -55,7 +55,7 @@ CI exit codes: `0` pass, `1` more than one failure condition, `2` usage, `3` man
 
 ## CI and enforcement
 
-- [CI mode](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/ci-mode.md): drift, expiry and privacy-baseline gates, exit codes, warn-only adoption, GitLab and shell recipes
+- [CI mode](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/ci-mode.md): drift, expiry and privacy-baseline gates, exit codes, warn-only adoption, GitLab CI/CD components and a shell recipe
 - [Findings](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/findings/README.md): one page per finding kind, with the rule, examples, and how to fix it or record a disposition
 - [Repository enforcement](https://github.com/noru-tech/noru-grc-engineering/blob/main/docs/repository-enforcement.md): the merge gate, ratchet baseline, CODEOWNERS and GitHub ruleset
 - [noru-ci action](https://github.com/noru-tech/noru-grc-engineering/blob/main/.github/actions/noru-ci/README.md): inputs and outputs

@@ -25,3 +25,8 @@ headless MCP execution contract, add a separate post-merge workflow using a prot
 environment and least-privilege credentials. Until then, a workflow containing a nominal approval
 gate but no executable writer would be security theatre, and a direct REST call would bypass the
 organization- and repository-bound plan.
+
+## GitLab
+
+The same review, and the per-piece check, are GitLab CI/CD components in
+[`../gitlab/`](../gitlab/README.md).

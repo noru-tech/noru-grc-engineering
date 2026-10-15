@@ -91,6 +91,14 @@ From [docs/ci-mode.md, "Where this is weaker than it looks"](./docs/ci-mode.md#w
 - **A partial data map is reported, not gated, by default.** Gate on it with `--fail-on=coverage`.
 - **Expiry is only as good as the dates people write.** `--max-age-days` is the ceiling.
 - **Composite action outputs are empty when the action fails the job.** Read the JSON report.
+- **GitLab shows the security report in a merge request on Ultimate only, and ingests it only from a
+  job that succeeded**, so a failing gate withholds it; Code Quality reaches every tier.
+  `findings-ingest` never fills one, and an `iac-scan` finding arrives twice where an integration
+  imports GitLab's vulnerability report; `security-findings: omit` turns it off.
+- **Confirmation by a reviewed plan is GitHub-only.** It reads GitHub's pull request and artifact
+  APIs; the GitLab `noru-ci.yml` has no `fetch-reviewed-plan`.
+- **The CI/CD Catalog needs a GitLab-hosted component project.** Until one is published, the GitLab
+  components are included with `include: remote` from a release tag of this repository.
 - **An agent's renewal is judged against one parent on a push.** Without `--base-ref`, a push of
   several commits is compared with its last commit's parent only. Gate the pull request with
   `--base-ref`. A team alias as operator is caught by its usual shapes, not by knowing your teams;

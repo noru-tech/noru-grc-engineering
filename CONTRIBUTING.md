@@ -123,7 +123,11 @@ python3 scripts/test_mcp_exec.py       # headless state and MCP execution agains
 python3 scripts/test_reviewed_plan.py  # a merge publishes exactly the plan its pull request reviewed
 python3 scripts/test_agent_renewals.py # an agent may renew a person's unchanged claim, nothing else
 python3 scripts/test_repo_enforcement.py # enforcement ratchet, action and GitHub adapter safety
+python3 scripts/test_ci_review.py      # the consolidated review routes pieces and cannot publish
+python3 scripts/test_hub.py            # the hub reviews branch changes without writing
+python3 scripts/test_gitlab_ci.py      # GitLab templates and merge request note, loopback GitLab
 python3 scripts/publish_actions.py --check # each action runs from its Marketplace mirror layout
+python3 scripts/publish_gitlab_components.py --check # the GitLab component project, inert until configured
 git diff --check
 ```
 
@@ -172,7 +176,8 @@ any copy of it disagrees. A release is three steps, and the third one is automat
 1. **Bump.** Open a `chore: release X.Y.Z` pull request that moves the version everywhere at once:
    the three marketplace manifests (not the pinned `compliance-assistant` entry, which keeps its own
    version), the two `plugin.json` files of every piece, the `VERSION` constants,
-   `version` and `date-released` in `CITATION.cff`, and a `## X.Y.Z — YYYY-MM-DD` section in
+   `version` and `date-released` in `CITATION.cff`, the `toolkit-version` default in each
+   `templates/gitlab/*.yml` (as `vX.Y.Z`), and a `## X.Y.Z — YYYY-MM-DD` section in
    `CHANGELOG.md`. Copyable `uses:` examples are not part
    of a bump: they reference the floating major tag (`@v0`), which the publish step moves.
 2. **Tag.** After the merge, tag that commit and create the GitHub release for this repository:
@@ -248,6 +253,37 @@ published without touching anything.
 
 After step 4, every release the workflow creates in that mirror is listed automatically. Confirm at
 <https://github.com/marketplace?type=actions&query=noru>.
+
+### GitLab CI/CD Catalog
+
+The CI/CD Catalog lists components only from a project on the GitLab instance itself, with the
+components under `templates/`, a `README.md`, a project description, and versions created by a CI/CD
+job that uses the `release` keyword on a semantic-version tag
+(<https://docs.gitlab.com/ci/components/>). `scripts/publish_gitlab_components.py` builds that project
+from each release — `templates/noru-ci.yml`, `templates/noru-review.yml`, `README.md`, `LICENSE`,
+`NOTICE`, a `DISTRIBUTION.json` naming the source commit, and a `.gitlab-ci.yml` holding the release
+job — and pushes it with the tag `X.Y.Z` (no `v`). The project's own pipeline then runs that release
+job, which creates the Catalog version. Inspect the tree with
+`python3 scripts/publish_gitlab_components.py build --out=/tmp/components --project=<group>/<name>`.
+
+Until the project exists, the `publish-gitlab-components` job in the `release` workflow is skipped
+and says so. `include: remote` from a release tag of this repository works without it.
+
+**One-time bootstrap**, for whoever administers the GitLab group:
+
+1. Create the public project on GitLab.com, empty, and give it a description — the Catalog requires
+   one. Then, in **Settings → General → Visibility, project features, permissions**, turn on
+   **CI/CD Catalog project**.
+2. Create a token for that project alone that can push to its default branch and create tags: a
+   project access token with the `write_repository` scope and a role the project's branch and tag
+   protection allows to push (project access tokens on GitLab.com need Premium or Ultimate), or
+   otherwise a personal access token with only `write_repository`, of an account that is a member of
+   that one project and nothing else.
+3. In this repository, create the `gitlab-catalog` environment, with the secret
+   `GITLAB_COMPONENT_TOKEN` and the variable `GITLAB_COMPONENT_PROJECT` (the project's full path).
+   Add the release maintainers as required reviewers if you want a human gate in front of it.
+4. Re-run the `release` workflow with `workflow_dispatch` and the current version. The project now
+   has the tree and the tag, and its pipeline creates the release the Catalog lists.
 
 ## Style
 

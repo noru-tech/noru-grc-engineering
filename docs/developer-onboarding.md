@@ -104,5 +104,5 @@ approval—never `pull_request_target`—and make that workflow the only writer 
 workflows indicate more than one privacy data-map publisher or repeat its source slug, but the
 warning is a signal to review, not proof that both paths are active.
 
-See [CI mode](./ci-mode.md) for exit codes, GitLab and shell examples, policy baselines, and staged
+See [CI mode](./ci-mode.md) for exit codes, the GitLab CI/CD components, shell examples, policy baselines, and staged
 adoption.

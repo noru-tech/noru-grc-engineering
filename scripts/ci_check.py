@@ -32,7 +32,12 @@ whether the state and push steps can run; its value is passed through the proces
 the one child that sends it (the REST piece's own push entrypoint, or scripts/mcp_exec.mjs), which
 reads it at the point of use. The piece's MCP :push, which only writes a call list, never gets it. Every step that does not need it is run
 with it removed from the child environment, and everything captured from a child process is passed
-through redact() before it can reach stdout or the report.
+through redact() before it can reach stdout or the report. The CI system's own credentials — a GitLab
+job token, the merge request note token — are removed from every child: no step needs one.
+
+Nothing here reads which CI system it is running on. `--code-quality` and `--security-report` write
+the two report files a GitLab merge request reads (scripts/gitlab_reports.py); they are files, and a
+pipeline on any system may write them.
 
 Usage:
     python3 scripts/ci_check.py --piece=<name> [--repo=<path>] [--plugins=<dir>]
@@ -42,7 +47,8 @@ Usage:
         [--state=<path>] [--write-reviewed-plan=<path>]
         [--reviewed-plan=<path> --acc-manifest=<path> --publish-workflow=<path>]
         [--on-missing-prerequisite=skip|fail] [--report=<path.json>]
-        [--output=json|text] [--quiet]
+        [--code-quality=<path.json>] [--security-report=<path.json>]
+        [--security-findings=include|omit] [--output=json|text] [--quiet]
 
 Exit codes — see docs/ci-mode.md for the table and the reasoning:
     0  every requested check passed, or --mode=warn
@@ -82,6 +88,7 @@ from check_policy import (  # noqa: E402
 )
 from finding_docs import see as see_finding_docs  # noqa: E402
 import reviewed_plan  # noqa: E402
+import gitlab_reports  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MCP_EXEC = pathlib.Path(__file__).resolve().parent / "mcp_exec.mjs"
@@ -124,6 +131,10 @@ KIND_EXIT = {
 # three lines later. One interpreter is the only way this file can promise what it checked.
 PYTHON = sys.executable or "python3"
 
+# Credentials a CI system puts in a job's environment that no step of this script has any use for.
+# NORU_API_KEY is handled separately, because one step does need it.
+FOREIGN_CREDENTIALS = ("CI_JOB_TOKEN", "NORU_GITLAB_NOTE_TOKEN")
+
 MAX_EXPLAINED_ITEMS = 40
 MAX_REF_FILE_BYTES = 4_000_000
 REF_RE = re.compile(r"^([^:\s][^:]*):([0-9]+)$")
@@ -139,6 +150,8 @@ USAGE = (
     "                   [--reviewed-plan=<path> --acc-manifest=<path> --publish-workflow=<path>]\n"
     "                   [--on-missing-prerequisite=skip|fail]\n"
     "                   [--report=<path.json>]\n"
+    "                   [--code-quality=<path.json>] [--security-report=<path.json>]\n"
+    "                   [--security-findings=include|omit]\n"
     "                   [--output=json|text] [--quiet]\n"
 )
 
@@ -204,6 +217,8 @@ def run(cmd, cwd=None, with_api_key=False):
     env = dict(os.environ)
     if not with_api_key:
         env.pop("NORU_API_KEY", None)
+    for name in FOREIGN_CREDENTIALS:
+        env.pop(name, None)
     try:
         completed = subprocess.run(
             cmd, capture_output=True, text=True, timeout=600, check=False, cwd=cwd, env=env
@@ -1204,6 +1219,50 @@ def render_text(payload, quiet):
     return "\n".join(line for line in lines if line is not None).rstrip()
 
 
+def piece_version(piece_dir):
+    try:
+        manifest = json.loads((piece_dir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "unknown"
+    return str(manifest.get("version") or "unknown")
+
+
+def write_gitlab_reports(report, opts, decl, piece_dir, repo, parsed_path, started):
+    """The Code Quality and security report files, when asked for, recorded in the JSON report.
+
+    Neither changes the exit code: they are another view of findings this run already decided on.
+    The security report reads the manifest this run validated, and only when it did validate — the
+    parsed copy in the cache could be left over from an earlier run.
+    """
+    written = {}
+    if opts["code_quality"]:
+        entries = gitlab_reports.code_quality(report.payload, repo, decl["artifact"])
+        gitlab_reports.write_json(opts["code_quality"], entries)
+        written["code_quality"] = {"path": opts["code_quality"], "entries": len(entries)}
+    if opts["security_report"]:
+        validated = any(s["step"] == "validate" and s["status"] == "pass" for s in report.steps)
+        document = None
+        if validated:
+            try:
+                document = json.loads(parsed_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                document = None
+        sast, reason = gitlab_reports.security_report(
+            decl, document, repo, piece_version(piece_dir), started,
+            datetime.datetime.now(datetime.timezone.utc),
+            include=opts["security_findings"] == "include",
+        )
+        gitlab_reports.write_json(opts["security_report"], sast)
+        written["security_report"] = {
+            "path": opts["security_report"],
+            "schema": gitlab_reports.SAST_SCHEMA_VERSION,
+            "vulnerabilities": len(sast["vulnerabilities"]),
+            "note": reason,
+        }
+    if written:
+        report.payload["gitlab"] = written
+
+
 def parse_args(argv):
     opts = {
         "piece": None,
@@ -1225,6 +1284,9 @@ def parse_args(argv):
         "publish_workflow": None,
         "on_missing_prerequisite": "skip",
         "report": None,
+        "code_quality": None,
+        "security_report": None,
+        "security_findings": "include",
         "json": False,
         "quiet": False,
         "help": False,
@@ -1293,6 +1355,15 @@ def parse_args(argv):
             opts["publish_workflow"] = arg.split("=", 1)[1]
         elif arg.startswith("--report="):
             opts["report"] = arg.split("=", 1)[1]
+        elif arg.startswith("--code-quality="):
+            opts["code_quality"] = arg.split("=", 1)[1]
+        elif arg.startswith("--security-report="):
+            opts["security_report"] = arg.split("=", 1)[1]
+        elif arg.startswith("--security-findings="):
+            value = arg.split("=", 1)[1]
+            if value not in ("include", "omit"):
+                return None, f"--security-findings must be 'include' or 'omit', got '{value}'"
+            opts["security_findings"] = value
         elif arg.startswith("--on-missing-prerequisite="):
             value = arg.split("=", 1)[1]
             if value not in ("skip", "fail"):
@@ -1332,6 +1403,7 @@ def main(argv):
         sys.stderr.write(f"error: --repo={repo} is not a directory\n")
         return EXIT_USAGE
     repo = repo.resolve()
+    started = datetime.datetime.now(datetime.timezone.utc)
 
     piece_dir = opts["plugins"] / opts["piece"]
     declaration = piece_dir / "piece.json"
@@ -1419,6 +1491,12 @@ def main(argv):
     }
     code = decide_exit(report, opts["mode"], opts["fail_on"], tooling, opts["gate_on_new"])
     report.payload["exit_code"] = code
+
+    try:
+        write_gitlab_reports(report, opts, decl, piece_dir, repo, parsed_path, started)
+    except OSError as exc:
+        sys.stderr.write(f"error: could not write a GitLab report ({exc})\n")
+        return EXIT_TOOLING
 
     if opts["report"]:
         # The machine-readable report is written whatever --output says, so a caller can print a

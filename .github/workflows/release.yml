@@ -11,6 +11,10 @@ name: release
 # repositories so the GitHub Marketplace can list them — it lists one action per repository, at the
 # root, and nothing in this repository can satisfy that directly. scripts/publish_actions.py owns the
 # mirroring and is idempotent, so a re-run (workflow_dispatch with the version) republishes safely.
+#
+# The GitLab CI/CD components are mirrored the same way, into a component project on GitLab, by
+# scripts/publish_gitlab_components.py — but only once that project exists: the job is skipped, and
+# says so, until GITLAB_COMPONENT_PROJECT and GITLAB_COMPONENT_TOKEN are both configured.
 
 on:
   push:
@@ -50,9 +54,11 @@ jobs:
           python3 scripts/test_privacy_ci.py
           python3 scripts/test_ci_mode.py
           python3 scripts/test_ci_review.py
+          python3 scripts/test_gitlab_ci.py
           python3 scripts/test_hub.py
           python3 scripts/test_repo_enforcement.py
           python3 scripts/publish_actions.py --check
+          python3 scripts/publish_gitlab_components.py --check
 
       - name: tag, marketplace entries and plugin manifests agree on one version
         env:
@@ -148,3 +154,35 @@ jobs:
             echo "**once each mirror repository has been listed once by hand** (a one-time click on"
             echo "the mirror's release page). CONTRIBUTING.md, 'Releasing', has the checklist."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-gitlab-components:
+    name: publish the GitLab CI/CD components to their catalog project
+    needs: verify
+    runs-on: ubuntu-latest
+    # Like the Marketplace mirrors, the writes go to another repository, so this job keeps
+    # `contents: read` here. GITLAB_COMPONENT_TOKEN is a token for the one GitLab component project
+    # and nothing else; GITLAB_COMPONENT_PROJECT is that project's path. Both live in the
+    # `gitlab-catalog` environment, so release maintainers can be required reviewers in front of it.
+    environment: gitlab-catalog
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
+
+      - name: mirror and tag the component project, when one is configured
+        # The token is in this one step's environment and nowhere else. The script hands it to git
+        # through a credential helper that reads it when git asks, so it is never an argument, a URL
+        # or a file, and it is offered to an https remote only.
+        env:
+          GITLAB_COMPONENT_TOKEN: ${{ secrets.GITLAB_COMPONENT_TOKEN }}
+          GITLAB_COMPONENT_PROJECT: ${{ vars.GITLAB_COMPONENT_PROJECT }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION:-${GITHUB_REF_NAME#v}}"
+          if [ -z "${GITLAB_COMPONENT_TOKEN:-}" ] || [ -z "${GITLAB_COMPONENT_PROJECT:-}" ]; then
+            echo "GitLab component publishing is not configured (GITLAB_COMPONENT_PROJECT and"
+            echo "GITLAB_COMPONENT_TOKEN in the 'gitlab-catalog' environment). Skipping; nothing was published."
+            exit 0
+          fi
+          python3 scripts/publish_gitlab_components.py publish --version="$version"
