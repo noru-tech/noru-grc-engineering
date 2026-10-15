@@ -1,6 +1,6 @@
 {
   "name": "dev-agents",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "Inventory the coding agents, MCP servers and plugins a repository's development process depends on, decide with the user which organization stands behind each one, and land them in Noru as vendors plus one evidence record for the window — never anything per person.",
   "author": {
     "name": "Noru",

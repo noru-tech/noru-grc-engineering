@@ -1,6 +1,6 @@
 ---
 name: dev-agents
-version: 0.16.0
+version: 0.16.1
 description: Inventory the coding agents, MCP servers and plugins a repository's development process depends on — agents from an agent-change-control manifest, servers and plugins from committed Claude Code, Cursor, VS Code and Gemini CLI configuration — decide with the user which organization stands behind each, and land them in Noru as vendors plus one evidence record for the window. Use when someone asks which AI coding tools or MCP servers their engineering uses, wants coding-agent vendors in their supplier register, or asks what third parties their development tooling depends on. Not for AI the product itself calls; that is ai-inventory.
 requires:
   bins: ["node", "python3", "git"]
