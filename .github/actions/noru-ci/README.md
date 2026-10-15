@@ -186,8 +186,10 @@ repository and the refs that may write, give the job `permissions: id-token: wri
 record's id as `trust-id`. The job then exchanges its OIDC ID token, once, for a token that lasts 15
 minutes and carries only the piece's scopes; when both are present the trust record wins. Never give
 `id-token: write` to a `pull_request_target` job. See [CI mode](../../../docs/ci-mode.md#without-a-stored-key-a-ci-trust-record).
-MCP-backed pieces cannot push from this headless runner at all; the action reports their plan and
-never claims an emitted call list as an executed write.
+
+MCP-backed pieces push from this runner too: `scripts/mcp_exec.mjs` executes exactly the call list
+the piece's confirmed `:push` emitted, in order, and the step reports a write only when its receipt
+says every call succeeded. An emitted call list is never reported as a write.
 
 ## Versioning
 

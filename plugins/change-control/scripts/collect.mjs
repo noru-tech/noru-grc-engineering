@@ -109,6 +109,7 @@ export const ACC_RULES = [
   ["ACC003", "merged_without_independent_approval"],
   ["ACC001", "agent_change_without_independent_human"],
   ["ACC005", "bypass_used"],
+  ["ACC012", "bypass_used"],
 ];
 
 /**
@@ -134,6 +135,9 @@ function accViolations(change) {
 }
 
 export function violationsOf(change) {
+  // A branch update acc held against (ACC012) is not a change: acc decided it whole, and none of
+  // the change separations apply to it.
+  if (change.acc && change.kind === "direct_push") return accViolations(change);
   if (change.acc) {
     const decided = new Set(
       ACC_RULES.filter(([code]) => change.acc.verdicts?.[code] !== undefined).map(([, r]) => r),

@@ -4578,6 +4578,173 @@ def test_change_control_reads_acc(results, tmp):
     results.check("[change-control] acc export without --manifest is a usage error", done.returncode == 2, done.stderr[:200])
 
 
+def test_change_control_acc_branches_gitlab_statement(results, tmp):
+    """ACC012 branch updates, a GitLab acc manifest, and the Statement staged for evidence-push.
+
+    Every input below was written by acc itself (0.7.0): its own branch-update fixture, evaluated,
+    with the in-toto Statement of the same evaluation, and a GitLab merge request evaluated from a
+    GitLab events file.
+    """
+    piece = PLUGINS / "change-control"
+    export = piece / "scripts" / "export" / "acc.mjs"
+    fixtures = ROOT / "tests" / "fixtures" / "change-control-acc"
+    branch_manifest = fixtures / "branch-updates.acc-manifest.json"
+    statement = fixtures / "branch-updates.intoto.json"
+
+    def facts(repo):
+        script = (
+            f"import {{ collectFacts }} from {json.dumps(str(piece / 'scripts' / 'collect.mjs'))};\n"
+            f"console.log(JSON.stringify(collectFacts({json.dumps(str(repo))})));\n"
+        )
+        done = subprocess.run(
+            ["node", "--input-type=module", "-e", script], capture_output=True, text=True, check=False
+        )
+        return json.loads(done.stdout) if done.returncode == 0 else None
+
+    def fresh(name):
+        repo = pathlib.Path(tmp) / name
+        shutil.copytree(ROOT / "tests" / "fixture-repo", repo)
+        (repo / ".noru" / ".cache" / "change-events.json").unlink()
+        return repo
+
+    def export_acc(repo, manifest, *extra):
+        out = repo / ".noru" / ".cache" / "change-events.json"
+        return subprocess.run(
+            ["node", str(export), f"--manifest={manifest}", f"--out={out}", "--output=json", "--quiet", *extra],
+            capture_output=True, text=True, check=False, cwd=repo,
+        )
+
+    # --- ACC012: one direct_push record per branch update acc held against ---
+    repo = fresh("acc-branches")
+    done = export_acc(repo, branch_manifest)
+    if results.check("[change-control] acc export with branch updates runs", done.returncode == 0, done.stderr[:300]):
+        got = facts(repo)
+        by_key = {c["key"]: c for c in got["changes"]}
+        results.check(
+            "[change-control] each ACC012 update is a direct_push record of its own",
+            sorted(k for k, c in by_key.items() if c["kind"] == "direct_push") == ["update-main-899", "update-main-900"],
+            sorted(by_key),
+        )
+        results.check(
+            "[change-control] the bypass kind follows the update: a push, then a force push",
+            (by_key["update-main-899"].get("bypass") or {}).get("kind") == "direct_push"
+            and (by_key["update-main-900"].get("bypass") or {}).get("kind") == "force_push",
+            {k: by_key[k].get("bypass") for k in ("update-main-899", "update-main-900")},
+        )
+        results.check(
+            "[change-control] a branch update's only separation is the bypass, which acc decided",
+            [v["rule"] for v in by_key["update-main-899"]["violations"]] == ["bypass_used"]
+            and [v["rule"] for v in by_key["update-main-900"]["violations"]] == ["bypass_used"],
+            {k: by_key[k]["violations"] for k in ("update-main-899", "update-main-900")},
+        )
+        results.check(
+            "[change-control] the merged change beside them is still decided by acc",
+            by_key["pr-421"]["violations"] == [],
+            by_key["pr-421"]["violations"],
+        )
+        # The validator recomputes the same violations from the record alone.
+        spec = importlib.util.spec_from_file_location("cc_validate", piece / "scripts" / "validate_manifest.py")
+        validate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validate)
+        python = {k: [rule for rule, _ in validate.violations_of(c)] for k, c in by_key.items()}
+        results.check(
+            "[change-control] collector and validator agree on branch updates",
+            python == {k: [v["rule"] for v in c["violations"]] for k, c in by_key.items()},
+            python,
+        )
+        # The skeleton the collector writes for them is one the validator can read: what it still
+        # refuses is the unsigned interpretation, never the shape of a branch-update record.
+        scan = subprocess.run(
+            ["node", str(piece / "scripts" / "collect.mjs"), f"--repo={repo}", "--output=json", "--quiet"],
+            capture_output=True, text=True, check=False,
+        )
+        checked = subprocess.run(
+            [sys.executable, str(piece / "scripts" / "validate_manifest.py"),
+             str(repo / ".noru" / "change-control.yml"), "--output=json"],
+            capture_output=True, text=True, check=False,
+        )
+        try:
+            errors = json.loads(checked.stdout).get("errors", [])
+        except json.JSONDecodeError:
+            errors = [{"message": checked.stdout[:300] + checked.stderr[:300]}]
+        shape = [e for e in errors if re.search(r"bypass\.kind|\.kind\b|acc\.verdicts", str(e.get("path", "")) + str(e.get("message", "")))]
+        results.check(
+            "[change-control] the validator accepts a branch-update record's shape",
+            scan.returncode == 0 and shape == [],
+            shape or scan.stderr[:300],
+        )
+
+    # --- GitLab: an acc manifest from a GitLab merge request ---
+    repo = fresh("acc-gitlab")
+    done = export_acc(repo, fixtures / "gitlab.acc-manifest.json")
+    if results.check("[change-control] acc export from a GitLab manifest runs", done.returncode == 0, done.stderr[:300]):
+        got = facts(repo)
+        (change,) = got["changes"]
+        results.check(
+            "[change-control] a GitLab merge request keeps the GitLab exporter's key and accounts",
+            got["forge"] == "gitlab" and change["key"] == "mr-7"
+            and change["authored_by"] == "alice@users.noreply.gitlab.com",
+            {"forge": got["forge"], "key": change["key"], "authored_by": change["authored_by"]},
+        )
+        results.check(
+            "[change-control] acc decides a GitLab merge request as it does a pull request",
+            [v["rule"] for v in change["violations"]]
+            == ["approver_is_author", "merged_without_independent_approval", "agent_change_without_independent_human"],
+            change["violations"],
+        )
+
+    # --- The Statement, staged for evidence-push and never written into a signed manifest ---
+    repo = fresh("acc-statement")
+    done = export_acc(repo, branch_manifest, f"--statement={statement}")
+    staged = repo / ".noru" / "artifacts" / "acc-2026-08-01_2026-08-31.intoto.json"
+    if results.check("[change-control] --statement runs", done.returncode == 0, done.stderr[:300]):
+        source = json.loads((repo / ".noru" / ".cache" / "change-events.json").read_text())["source"]
+        results.check(
+            "[change-control] the Statement is staged byte for byte under one name per window",
+            staged.is_file() and staged.read_bytes() == statement.read_bytes()
+            and source["statement"]["sha256"] == hashlib.sha256(statement.read_bytes()).hexdigest()
+            and source["statement"]["predicate_type"] == "https://noru.tech/spec/ai-change-provenance/v0.4",
+            source.get("statement"),
+        )
+        results.check(
+            "[change-control] staging never touches .noru/evidence-push.yml",
+            not (repo / ".noru" / "evidence-push.yml").exists()
+            or (repo / ".noru" / "evidence-push.yml").read_bytes()
+            == (ROOT / "tests" / "fixture-repo" / ".noru" / "evidence-push.yml").read_bytes(),
+            "evidence-push.yml changed",
+        )
+        pushed = subprocess.run(
+            ["node", str(PLUGINS / "evidence-push" / "scripts" / "collect.mjs"), f"--repo={repo}",
+             "--output=json", "--quiet"],
+            capture_output=True, text=True, check=False,
+        )
+        listed = []
+        derived = repo / ".noru" / ".cache" / "evidence-push.derived.json"
+        if pushed.returncode == 0 and derived.is_file():
+            listed = [
+                a for a in json.loads(derived.read_text()).get("artifacts", [])
+                if str(a.get("file", "")).endswith(staged.name)
+            ]
+        results.check(
+            "[change-control] evidence-push's collector picks the staged Statement up as JSON",
+            len(listed) == 1 and listed[0].get("sha256") == hashlib.sha256(statement.read_bytes()).hexdigest()
+            and listed[0].get("mime_type") == "application/json",
+            listed or pushed.stdout[:300] + pushed.stderr[:300],
+        )
+    stream = pathlib.Path(tmp) / "per-change.intoto.jsonl"
+    stream.write_text(statement.read_text().strip() + "\n" + statement.read_text().strip() + "\n", encoding="utf-8")
+    foreign = pathlib.Path(tmp) / "foreign.json"
+    foreign.write_text(json.dumps({"_type": "https://in-toto.io/Statement/v1", "predicateType": "https://slsa.dev/provenance/v1"}), encoding="utf-8")
+    for bad, label in ((stream, "a per-change JSONL stream"), (foreign, "a Statement that is not acc's")):
+        repo = fresh(f"acc-statement-bad-{bad.stem}")
+        done = export_acc(repo, branch_manifest, f"--statement={bad}")
+        results.check(
+            f"[change-control] --statement refuses {label}, and stages nothing",
+            done.returncode == 1 and not (repo / ".noru" / "artifacts" / "acc-2026-08-01_2026-08-31.intoto.json").exists(),
+            done.stderr[:200],
+        )
+
+
 def test_change_control_rules_agree_across_languages(results, tmp):
     """The segregation rules are implemented twice, and two implementations of one rule drift.
 
@@ -5835,6 +6002,7 @@ def main(argv):
             test_scaffold_template_scans_what_ci_checks_out(results, tmp)
             test_change_control_rules_agree_across_languages(results, tmp)
             test_change_control_reads_acc(results, tmp)
+            test_change_control_acc_branches_gitlab_statement(results, tmp)
             test_change_control_export_survives_a_forbidden_setting(results, tmp)
             test_dev_agents_reads_acc_and_config(results, tmp)
             test_dev_agents_never_records_a_credential(results, tmp)

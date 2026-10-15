@@ -105,8 +105,23 @@ working them out a second time:
 acc scan github example-org/example-app --since 2026-07-01 --until 2026-09-30 \
   --format json -o acc-manifest.json
 node plugins/change-control/scripts/export/acc.mjs --manifest=acc-manifest.json \
-  [--forge-export=.noru/.cache/change-events.json]
+  [--forge-export=forge-events.json] [--statement=acc.intoto.json]
 ```
+
+On GitLab.com the same, with acc's GitLab collector and, for deployments and settings, this piece's
+GitLab exporter:
+
+```bash
+acc scan gitlab example-group/example-app --since 2026-07-01 --until 2026-09-30 \
+  --format json -o acc-manifest.json
+node plugins/change-control/scripts/export/gitlab.mjs --project=example-group/example-app \
+  --since=2026-07-01 --until=2026-09-30 --out=forge-events.json
+node plugins/change-control/scripts/export/acc.mjs --manifest=acc-manifest.json \
+  --forge-export=forge-events.json
+```
+
+Merge requests keep the GitLab exporter's keys (`mr-7`) and accounts, exactly as pull requests keep
+the GitHub exporter's.
 
 `export/acc.mjs` reads files only: no network, no credential. It writes the same
 `.noru/.cache/change-events.json` the collector reads, with acc's verdict on each change:
@@ -117,10 +132,20 @@ node plugins/change-control/scripts/export/acc.mjs --manifest=acc-manifest.json 
 | `merged_without_independent_approval` | acc `ACC003` |
 | `agent_change_without_independent_human` | acc `ACC001` |
 | `bypass_used` | acc `ACC005`, when the acc policy enables it; otherwise the recorded bypass |
+| `bypass_used` on a branch update | acc `ACC012`, when the acc policy enables it (`unaccounted_branch_update`; `acc scan` then collects the branches) |
 | `deployer_is_author` | this piece, always: acc records no deployments |
 
 A `fail` is a violation and so is an `unknown`: acc could not establish that the separation held,
 and a person has to say whether it did. A rule acc did not assess is decided here, as before.
+
+**Branch updates.** A protected branch that was pushed to directly, force-pushed or deleted, with no
+merged change to account for it, is not a change, so acc's `ACC012` holds it against the branch. This
+piece gives each such update a record of its own: kind `direct_push`, keyed `update-<branch>-<id>`,
+dated when it happened, with the bypass set (`direct_push`, `force_push` or `branch_deletion`) and a
+reason to replace before signing. acc decided the update whole, so its only separation is
+`bypass_used`; none of the change separations apply. When acc could not read a branch's updates in
+full (`ACC012` `unknown`), the branch gets one record, `update-<branch>-unread`, for a person to say
+whether its updates held.
 
 acc records nothing about deployments or branch protection. Pass the forge export too
 (`--forge-export`) and its change records, deployments and settings are kept, with acc's verdicts
@@ -137,9 +162,14 @@ approval as well as an agent change without an independent human; this piece's o
 only the last. On the fixture repository that is the one difference (`pr-1044`), and
 `scripts/test_collectors.py` pins it.
 
-To keep acc's signed verdict with the record, attach the acc in-toto Statement as file evidence
-through [`evidence-push`](../evidence-push/): list it under `uploads` in `.noru/evidence-push.yml`
-with its `sha256`, mapped to the same change-management control.
+**Keeping acc's Statement with the record.** Write it with `acc ... --format in-toto` and pass it as
+`--statement`. `export/acc.mjs` checks that it is one AI Change Provenance in-toto Statement, copies
+it into `.noru/artifacts/` as `acc-<opens>_<closes>.intoto.json`, one name per window, and records its
+SHA-256 in the export. [`evidence-push`](../evidence-push/)'s own collector then drafts its upload
+entry, or reports that the file changed, and a person signs it, mapped to the same
+change-management control. `export/acc.mjs` never edits `.noru/evidence-push.yml`: an upload entry
+is a person's signature over one file's SHA-256, and a new Statement needs a new one. The per-change
+`--format in-toto-jsonl` stream is refused, because it is not one file to upload.
 
 ## Commands
 

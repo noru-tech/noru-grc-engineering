@@ -6,8 +6,9 @@ name: compliance
 # What this repository can honestly dogfood, and what it cannot, is worth stating here rather than
 # leaving someone to wonder why a manifest is missing:
 #
-#   * `change-control` — YES. This is a real repository with real reviews. The job below exports
-#     from GitHub with the Actions token and gates on what comes back.
+#   * `change-control` — YES. This is a real repository with real reviews. The job below runs
+#     agent-change-control over the window, keeps the GitHub exporter's records for what acc does
+#     not record (deployments, settings), and gates on what comes back.
 #   * `privacy-datamap` — the gate runs, and finds only the schemas under tests/fixture-repo/, which
 #     exist to be scanned. There is deliberately NO committed .noru/privacy-datamap.yml: this is a
 #     plugin toolkit with no database, and a data map here would describe test fixtures as though
@@ -87,6 +88,26 @@ jobs:
           echo "since=$(date -u -d '90 days ago' +%F)" >> "$GITHUB_OUTPUT"
           echo "until=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
+      - name: install agent-change-control
+        env:
+          # The archive's digest is written here, not read from the file published beside it, and
+          # the build attestation must name acc's own release workflow at this tag.
+          ACC_VERSION: "0.7.0"
+          ACC_SHA256: a6637de897235bec9419e7676b6454d03d1703e14f0c3625657a5632009a2ee6
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive=agent-change-control-x86_64-unknown-linux-musl.tar.xz
+          cd "$RUNNER_TEMP"
+          curl --proto '=https' --tlsv1.2 -sSfL --retry 3 -o "$archive" \
+            "https://github.com/noru-tech/agent-change-control/releases/download/v${ACC_VERSION}/${archive}"
+          echo "${ACC_SHA256}  ${archive}" | sha256sum -c -
+          gh attestation verify "$archive" --repo noru-tech/agent-change-control \
+            --signer-workflow noru-tech/agent-change-control/.github/workflows/release.yml \
+            --source-ref "refs/tags/v${ACC_VERSION}" > /dev/null
+          tar -xJf "$archive"
+          echo "$RUNNER_TEMP/agent-change-control-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
+
       - name: export the change history
         env:
           # The Actions token can read pull requests and reviews. It CANNOT read branch protection,
@@ -95,10 +116,23 @@ jobs:
           # want the configuration recorded too.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          # acc decides the separations it assesses; the exporter's records keep what acc does not
+          # record, the deployments deployer_is_author is judged on and the branch settings.
           node plugins/change-control/scripts/export/github.mjs \
             --repo="${{ github.repository }}" \
             --since="${{ steps.window.outputs.since }}" \
-            --until="${{ steps.window.outputs.until }}"
+            --until="${{ steps.window.outputs.until }}" \
+            --out="$RUNNER_TEMP/forge-events.json"
+          # Exit 4 means acc could not read every change's history in full; the manifest is still
+          # written, records the window as incomplete, and the gate below says so.
+          acc scan github "${{ github.repository }}" \
+            --since="${{ steps.window.outputs.since }}" \
+            --until="${{ steps.window.outputs.until }}" \
+            --format json --output "$RUNNER_TEMP/acc-manifest.json" --quiet || [ "$?" -eq 4 ]
+          node plugins/change-control/scripts/export/acc.mjs \
+            --manifest="$RUNNER_TEMP/acc-manifest.json" \
+            --forge-export="$RUNNER_TEMP/forge-events.json"
 
       - name: gate on what came back
         uses: ./.github/actions/noru-ci
@@ -111,12 +145,11 @@ jobs:
         if: always()
         # It is a list of who reviewed what and when: personal data about colleagues, and not
         # something to leave lying in an artifact for ninety days.
-        run: rm -f .noru/.cache/change-events.json
+        run: rm -f .noru/.cache/change-events.json "$RUNNER_TEMP/forge-events.json" "$RUNNER_TEMP/acc-manifest.json"
 
   # The write half. Deliberately absent, and this comment is the documentation of why.
   #
   # This repository has no Noru organization to publish to — it is the toolkit, not a customer.
   # A customer's publication path is separate, off the pull-request event and behind a protected
-  # environment. REST-backed evidence-push can publish from that job with NORU_API_KEY; MCP-backed
-  # pieces must execute their reviewed calls in an authenticated MCP host and are reported skipped
-  # by headless CI. Never use pull_request_target. The exact recipe is in docs/ci-mode.md.
+  # environment, with a CI trust record (`trust-id`) or NORU_API_KEY: ci_check.py executes the
+  # reviewed calls itself. Never use pull_request_target. The exact recipe is in docs/ci-mode.md.
