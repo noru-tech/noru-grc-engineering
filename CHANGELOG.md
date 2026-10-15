@@ -6,6 +6,16 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+- Preserve evidence-bound gap resolutions across unrelated dataset edits; support shared semantic
+  reasoning and grouped migration submissions without removing per-finding accounting. Project system
+  activities and explicit non-personal reviews, refresh composite signatures and add recoverable
+  candidate application. Reuse modeled .NET runtime links and supply typed serialization/device
+  contract suggestions for agent investigation without adding publication gates.
+
+- Add compact privacy investigation output with a shared field/gap page limit, deduplicated
+  evidence and facts, shared instructions and page-scoped uncertainty templates. Keep full output
+  available for compatibility; scan instructions use compact output during enrichment.
+
 - GitLab CI/CD components. `templates/gitlab/noru-ci.yml` and `templates/gitlab/noru-review.yml` are
   the GitLab counterparts of the `noru-ci` and `noru-review` actions, with `spec: inputs:`, included
   with `include: remote` from a release tag of this repository. The job clones the toolkit at the same

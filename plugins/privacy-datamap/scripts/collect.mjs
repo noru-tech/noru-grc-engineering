@@ -1440,6 +1440,14 @@ export function collectFacts(repo, { candidate = false } = {}) {
   assertUniqueKeys("dataset", datasets);
 
   const services = discoverServices(repo, files, dotnet.runtime_entrypoints ?? []);
+  for (const binding of dotnet.runtime_bindings ?? []) {
+    if (binding.status !== "modeled" || binding.conditions?.length || !binding.datastore) continue;
+    const root = binding.runtime_project?.split("/").slice(0, -1).join("/") ?? "";
+    const dataset = datasets.find(item => item.fides_key === binding.datastore);
+    if (dataset && services.some(service => service.root === root)) {
+      dataset.system_references = [...new Set([...(dataset.system_references ?? []), fidesKeyFor(root || "repository")])];
+    }
+  }
   for (const boundary of [...(dotnet.authentication_tickets ?? []), ...(dotnet.message_envelopes ?? [])]) {
     const dataset = datasets.find(d => d.fides_key === boundary.dataset);
     for (const project of boundary.runtime_projects?.length ? boundary.runtime_projects : [boundary.project]) {

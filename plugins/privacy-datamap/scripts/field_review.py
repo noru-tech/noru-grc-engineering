@@ -106,7 +106,7 @@ def structure_digest(derived):
 
 
 def taxonomy_digest():
-    paths = [path for path in (HERE / "field_review.py", HERE / "dotnet.py", HERE / "dotnet_syntax.py", HERE / "dotnet_model.py", HERE / "dotnet_diagnostics.py", HERE / "gap_resolution.py", HERE / "uncertainty.py", HERE / "migration_coverage.py", HERE / "dotnet_adapters.py", HERE / "dotnet_boundaries.py", ROOT / "references/dotnet-boundary-contracts.json", ROOT / "references/dotnet-framework-contracts.json", ROOT / "references/dotnet-diagnostics.json", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
+    paths = [path for path in (HERE / "field_review.py", HERE / "dotnet.py", HERE / "dotnet_syntax.py", HERE / "dotnet_model.py", HERE / "dotnet_diagnostics.py", HERE / "gap_resolution.py", HERE / "uncertainty.py", HERE / "migration_coverage.py", HERE / "dotnet_adapters.py", HERE / "dotnet_boundaries.py", HERE / "dotnet_contract_candidates.py", HERE / "system_review.py", ROOT / "references/dotnet-boundary-contracts.json", ROOT / "references/dotnet-framework-contracts.json", ROOT / "references/dotnet-diagnostics.json", HERE / "shape_investigation.py", HERE / "typescript_evidence.mjs", ROOT / "references/classification-guide.md", ROOT / "references/classification.json") if path.is_file()]
     return digest({"policy": POLICY, "categories": TAXONOMY, "implementation": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}})
 
 
@@ -480,6 +480,11 @@ def build_contract(document, repo, compiler_report=None, fresh=False, derived=No
             for key in gap.get("resolution", {}).get("evidence_ids", []):
                 if key in prior.get("evidence", {}) and not evidence_errors(prior["evidence"][key], repo, exclusions):
                     contract["evidence"][key] = copy.deepcopy(prior["evidence"][key])
+            # Upgrade old global bindings only when both the old signature and affected scope
+            # are unchanged. Normal resolution validation still checks all cited evidence.
+            if (previous.get("resolution_binding") == gap_resolution.binding(previous, prior, legacy=True)
+                    and gap_resolution.binding(previous, prior) == gap_resolution.binding(gap, contract)):
+                gap["resolution_binding"] = gap_resolution.binding(gap, contract)
             if gap.get("status") == "resolved" and gap_resolution.resolution_errors(gap, contract, repo):
                 gap.setdefault("resolution_history", []).append(copy.deepcopy(previous["resolution"]))
                 gap["status"] = "unresolved"
@@ -1021,6 +1026,34 @@ def project_candidate(document, candidate, derived=None, repo=None):
     if contract.get("version") != VERSION or contract.get("binding", {}).get("observation_digest") != document.get("observation_digest") or (derived is not None and contract.get("binding", {}).get("structural_digest") != structure_digest(derived)):
         return candidate
     index = {row["entity_id"]: row for row in contract["fields"]}
+    system_proposals = {row['entity_id']: row for row in document.get('system_proposals', [])}
+    for system in candidate.get('system', []):
+        proposal = system_proposals.get(system['fides_key'])
+        if not proposal:
+            continue
+        if proposal.get('system_type'):
+            system['system_type'] = proposal['system_type']
+        if proposal.get('personal_data') == 'no':
+            system['privacy_declarations'] = []
+            record = {'rationale': proposal.get('non_personal_rationale', ''), 'refs': proposal.get('refs', []),
+                      'investigation': copy.deepcopy(proposal.get('investigation', {})),
+                      'needs_review': not bool(proposal.get('interpretation'))}
+            if proposal.get('interpretation'): record['interpretation'] = copy.deepcopy(proposal['interpretation'])
+            if repo is not None:
+                import system_review
+                record['evidence_binding'] = system_review.binding(system, record['refs'], repo)
+            system.setdefault('meta', {})['non_personal_processing'] = record
+        elif proposal.get('processing_activities'):
+            declarations = []
+            for activity in proposal['processing_activities']:
+                for use in activity.get('proposed_data_uses') or ['']:
+                    declaration = {'name': activity.get('purpose', ''), 'data_use': use,
+                        'data_subjects': activity.get('proposed_data_subjects', []),
+                        'data_categories': activity.get('proposed_categories', []), 'refs': activity.get('refs', []),
+                        'needs_review': not bool(activity.get('interpretation'))}
+                    if activity.get('interpretation'): declaration['interpretation'] = copy.deepcopy(activity['interpretation'])
+                    declarations.append(declaration)
+            system['privacy_declarations'] = declarations
     dependency_rows = []
     for dataset in candidate.get("dataset", []):
         for collection in dataset.get("collections", []):
@@ -1037,6 +1070,14 @@ def project_candidate(document, candidate, derived=None, repo=None):
                     collection["non_personal_fields"] = sorted(compact)
                 else:
                     collection.pop("non_personal_fields", None)
+                # Projection can introduce nested members after the initial candidate was built.
+                def names(fields, prefix=''):
+                    for field in fields:
+                        name = prefix + field['name']
+                        yield name
+                        yield from names(field.get('fields', []), name + '.')
+                signature = set(names(collection['fields'])) | set(collection.get('non_personal_fields', []))
+                collection['structure_digest'] = hashlib.sha256('\n'.join(sorted(signature)).encode()).hexdigest()
     export_nodes = {"dataset:" + node["fides_key"]: node for node in candidate.get("dataset", [])}
     export_nodes.update({"system:" + node["fides_key"]: node for node in candidate.get("system", [])})
     for node in export_nodes.values():

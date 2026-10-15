@@ -111,7 +111,10 @@ class Reader(ModelDiscovery):
                 positions = list(re.finditer(r'<(?:[\w]+:)?'+re.escape(tag)+r'(?=[\s>])',text))
                 offset = tag_offsets.get(tag,0); tag_offsets[tag] = offset+1
                 node_line = text.count('\n',0,positions[offset].start())+1 if offset<len(positions) else 1
-                if 'Condition' in node.attrib or tag in {'Import', 'Choose', 'Target'} or '$(' in ''.join(node.attrib.values()):
+                build_only = {'PublishAot', 'PublishTrimmed', 'Optimize', 'DebugSymbols', 'DebugType'}
+                leaves = [child for child in node.iter() if not list(child)]
+                property_only = (tag in build_only or tag == 'PropertyGroup') and bool(leaves) and all(child.tag.split('}')[-1] in build_only for child in leaves)
+                if not property_only and ('Condition' in node.attrib or tag in {'Import', 'Choose', 'Target'} or '$(' in ''.join(node.attrib.values())):
                     self.gap(path, node_line, 'Conditional/imported MSBuild settings are not evaluated; confirm source membership and package configuration')
                 if tag == 'Compile':
                     self.gap(path, node_line, 'Explicit Compile items require source-membership investigation')
@@ -150,9 +153,9 @@ class Reader(ModelDiscovery):
         tokens = lex(text)
         self.sources[path] = {'tokens': tokens, 'text': text, 'project': self.project(path)}
         if self.sources[path]['project'] is None: return
-        if any(t.value == 'using' and i+2 < len(tokens) and tokens[i+2].value == '=' for i,t in enumerate(tokens)):
+        for alias in (t for i,t in enumerate(tokens) if t.value == 'using' and i+2 < len(tokens) and tokens[i+2].value == '='):
             # Aliases are not compiler-resolved by this reader.
-            self.gap(path, 1, 'Using aliases may affect type or attribute identity; investigate bindings')
+            self.gap(path, alias.line, 'Using aliases may affect type or attribute identity; investigate bindings', column=alias.column)
         def declarations(start, end, namespace=''):
             i, pending, modifiers = start, [], []
             while i < end:
@@ -492,10 +495,13 @@ class Reader(ModelDiscovery):
             origin = prop['owner']
             self._active_position = {'path':origin['path'],'line':prop['line'],'column':prop.get('column',1)}
             attributes=prop['attributes']
-            ignored={'sql':'NotMapped','mongo':'BsonIgnore','dynamo':'DynamoDBIgnore','query':'__none__'}[dialect]
+            ignored={'sql':'NotMapped','mongo':'BsonIgnore','dynamo':'DynamoDBIgnore','query':'__none__','json':'JsonIgnore'}[dialect]
+            if dialect == 'json' and attr(attributes, ignored):
+                self.gap(model['path'],prop['line'],'Conditional JSON exclusion requires serializer investigation',code='DOTNET_SERIALIZER_OPTIONS')
+                continue
             if attr(attributes,ignored) is not None: continue
             name=prop['name']
-            rename={'sql':'Column','mongo':'BsonElement','dynamo':'DynamoDBProperty','query':'__none__'}[dialect]
+            rename={'sql':'Column','mongo':'BsonElement','dynamo':'DynamoDBProperty','query':'__none__','json':'JsonPropertyName'}[dialect]
             if dialect=='mongo' and (name in {'Id','id','_id'} or attr(attributes,'BsonId') is not None): name='_id'
             keys=[rename] + (['DynamoDBHashKey','DynamoDBRangeKey'] if dialect=='dynamo' else [])
             for key in keys:
@@ -932,6 +938,8 @@ class Reader(ModelDiscovery):
                 self.gap(path,1,'Multiple reviewed bindings for one C# model need per-relationship investigation.',code='DOTNET_REVIEWED_BINDING')
         from dotnet_boundaries import discover as discover_boundaries
         boundaries = discover_boundaries(self)
+        from dotnet_contract_candidates import discover as discover_contracts
+        boundaries['supplemental_candidates'] = discover_contracts(self)
         runtime_entrypoints = self.runtime_entrypoints()
         self.gaps = finalize_diagnostics(self)
         return {**boundaries, 'runtime_entrypoints':runtime_entrypoints, 'type_symbols':[{'name':m['name'],'qualified':m['qualified'],'project':m['project'],'path':m['path']} for m in self.models], 'diagnostic_summary':diagnostic_summary(self.gaps),'runtime_bindings':self.runtime_bindings,'entity_relationships':self.entity_relationships,'solutions':self.solutions,'projects':list(self.projects.values()),'technologies':sorted(self.technologies,key=lambda r:(r['ref'],r['technology'])),

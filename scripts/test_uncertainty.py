@@ -170,6 +170,18 @@ class UncertaintyTests(unittest.TestCase):
         self.assertEqual(candidate['acceptance']['accepted_by'], '')
         self.assertTrue(field_review.validate_contract(self.document, self.derived, self.repo))
 
+    def test_gap_uncertainty_acceptance_survives_unrelated_dataset(self):
+        gap = self.gap()
+        answer = self.answer(gap, 'accepted_uncertainty')
+        answer.update(export_targets=['dataset:db'], accepted_uncertainty=self.acceptance(gap['gap_id'], gap['evidence_ids']))
+        self.assertEqual(field_review.apply_gap_decisions(self.document, [answer], self.repo), [])
+        self.derived['datasets'].append({'fides_key': 'other', 'collections': [
+            {'name': 'metrics', 'fields': [{'name': 'count', 'shape': 'int', 'refs': ['schema.ts:1']}]}]})
+        field_review.build_contract(self.document, self.repo, self.compiler)
+        partition = field_review.gap_partition(self.document, self.derived, self.repo)
+        self.assertFalse(partition['active_blockers'])
+        self.assertEqual(partition['resolved_diagnostics'][0]['resolution']['accepted_uncertainty'], answer['accepted_uncertainty'])
+
     def test_removing_an_uncertainty_disclosure_requires_review(self):
         import analysis_cache
         decision = self.unknown()

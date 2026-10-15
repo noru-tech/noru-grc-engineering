@@ -925,6 +925,8 @@ def parse_args(argv):
             opts["repo"] = pathlib.Path(arg.split("=", 1)[1]).resolve()
         elif arg == "--render-candidate":
             opts["render_candidate"] = True
+        elif arg == '--apply-candidate':
+            opts['apply_candidate'] = True
         elif arg == "--seal":
             opts["seal"] = True
         elif arg == "--candidate":
@@ -943,11 +945,13 @@ def parse_args(argv):
             raise ValueError(f"unknown option '{arg}'")
     if opts["candidate"] and opts["seal"]:
         raise ValueError("--candidate cannot seal decisions")
+    if opts.get('apply_candidate') and (opts['seal'] or opts.get('render_candidate')):
+        raise ValueError('--apply-candidate cannot be combined with sealing or rendering')
     return opts
 
 
 def main(argv):
-    usage = "usage: reconcile.py --repo=<path> [--seal | --candidate | --render-candidate] [--output=json|text] [--quiet]\n"
+    usage = "usage: reconcile.py --repo=<path> [--seal | --candidate | --render-candidate | --apply-candidate] [--output=json|text] [--quiet]\n"
     try:
         opts = parse_args(argv)
     except ValueError as exc:
@@ -957,7 +961,12 @@ def main(argv):
         sys.stdout.write(usage)
         return 0
 
-    if opts.get("render_candidate"):
+    if opts.get('apply_candidate'):
+        import candidate_apply
+        if candidate_apply.recover(opts['repo']):
+            print('Recovered candidate application; recollect and reconcile before review or sealing.')
+            return 0
+    if opts.get("render_candidate") or opts.get('apply_candidate'):
         analysis = analysis_storage.load(cache_directory(opts["repo"]) / "privacy-datamap.analysis.json") or {}
         opts["candidate"] = opts["candidate"] or analysis.get("collection_mode") == "candidate"
     repo = opts["repo"]
@@ -1058,9 +1067,22 @@ def main(argv):
         # a source for descriptions, declarations, references or system identities.
         baseline_manifest = {} if result["mode"] == "bootstrap" else manifest
         candidate = apply_candidate_mapping(refresh_candidate_evidence(build_candidate(derived, scan, baseline_manifest, candidate_lock), result), mapping)
-        if opts.get("render_candidate"):
+        import system_review
+        for system in candidate.get('system', []):
+            if system_review.needs_review(system, repo):
+                record = system['meta']['non_personal_processing']
+                record['needs_review'] = True
+                record.pop('interpretation', None)
+        if opts.get("render_candidate") or opts.get('apply_candidate'):
             classification_document = analysis_storage.load(cache / "privacy-datamap.analysis.json") or {}
             candidate = field_review.project_candidate(classification_document, candidate, derived=derived, repo=repo)
+            if opts.get('apply_candidate'):
+                errors = field_review.validate_contract(classification_document, derived, repo, require_complete=False, candidate=candidate)
+                if errors:
+                    raise ValueError('Cannot apply stale or inconsistent candidate: ' + '; '.join(errors))
+                candidate_apply.apply(repo, candidate, classification_document, to_yaml)
+                print('Applied candidate draft without sealing or approving it. Recollect and reconcile before review or sealing.')
+                return 0
             sys.stdout.write(to_yaml(candidate))
             return 0
         binding = analysis_binding(repo, manifest_path, result)
@@ -1101,7 +1123,7 @@ def main(argv):
                         {"entity_id": system["fides_key"], "rationale": "", "confidence": None,
                          "refs": [], "system_type": "", "investigation": {"runtime_processing": "", "external_recipients": "", "storage": "", "infrastructure": ""}, "processing_activities": []}
                         for system in candidate.get("system", [])
-                        if not system.get("privacy_declarations") or any(declaration.get("needs_review") for declaration in system.get("privacy_declarations", []))
+                        if (not system.get("privacy_declarations") and (not system.get("meta", {}).get("non_personal_processing") or system.get("meta", {}).get("non_personal_processing", {}).get("needs_review"))) or any(declaration.get("needs_review") for declaration in system.get("privacy_declarations", []))
                     ],
                     "store_investigation": {"search_scope": "", "rationale": "", "confidence": None,
                                             "refs": [], "findings": []},

@@ -866,7 +866,7 @@ def check_datasets(rep, doc, vocab, counts, as_of):
     return keys
 
 
-def check_systems(rep, doc, vocab, dataset_keys, counts, as_of):
+def check_systems(rep, doc, vocab, dataset_keys, counts, as_of, repo=None):
     systems = doc.get("system")
     if systems is None:
         rep.err("system", "missing required `system` (an empty list is a valid answer)")
@@ -922,6 +922,29 @@ def check_systems(rep, doc, vocab, dataset_keys, counts, as_of):
                     rep.err(f"{path}.{direction}", "flow contains invalid data categories")
 
         declarations = system.get("privacy_declarations")
+        non_personal = system.get('meta', {}).get('non_personal_processing')
+        if non_personal:
+            if not isinstance(non_personal, dict):
+                rep.err(path, 'non_personal_processing must be an evidenced review record')
+            else:
+                if declarations or not non_personal.get('rationale') or not non_personal.get('refs'):
+                    rep.err(path, 'non-personal processing requires rationale, source references and no personal declarations')
+                if non_personal.get('needs_review'):
+                    rep.err(path, 'non-personal processing still needs named-owner review')
+                check_interpretation(rep, path + '.meta.non_personal_processing', non_personal)
+                def personal_or_unknown(fields):
+                    return any(field.get('data_categories') or field.get('needs_review') or field.get('meta', {}).get('accepted_uncertainties')
+                               or personal_or_unknown(field.get('fields', [])) for field in fields)
+                if any(personal_or_unknown(collection.get('fields', [])) for dataset in doc.get('dataset', [])
+                       if dataset['fides_key'] in refs for collection in dataset.get('collections', [])):
+                    rep.err(path, 'non-personal processing conflicts with linked personal or unresolved data')
+                if repo is not None:
+                    import system_review
+                    try:
+                        if non_personal.get('evidence_binding') != system_review.binding(system, non_personal.get('refs', []), repo):
+                            rep.err(path, 'non-personal processing evidence or flows changed; reinvestigate this system')
+                    except (ValueError, OSError, TypeError):
+                        rep.err(path, 'non-personal processing evidence is unavailable')
         if declarations is None:
             rep.err(f"{path}.privacy_declarations", "missing required `privacy_declarations`")
             continue
@@ -1304,7 +1327,7 @@ def validate(doc, vocab, as_of=None, observed=None, repo=None, allow_discovery_r
     for error in dataset_inputs.dependency_gaps(doc):
         rep.err("evidence_dependencies", error)
     dataset_keys = check_datasets(rep, doc, vocab, counts, as_of)
-    check_systems(rep, doc, vocab, dataset_keys, counts, as_of)
+    check_systems(rep, doc, vocab, dataset_keys, counts, as_of, repo)
     check_agent_claims(rep, doc, vocab, policy, base)
     if isinstance(observed, dict):
         if doc.get("migration_support", []) != observed.get("migration_support", []):
