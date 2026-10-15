@@ -911,6 +911,157 @@ def test_findings_ingest(results, tmp):
     )
 
 
+def state_after_threat_model(operations, existing=()):
+    """The risks and links that would exist if every planned write had succeeded.
+
+    createRisk files a risk under a new id; updateRisk changes only the fields it sends; a link
+    whose riskId comes from `depends_on` attaches to the risk the create above it filed.
+    """
+    risks = {row["id"]: dict(row) for row in existing}
+    links = {}
+    created = {}
+    for i, op in enumerate(operations):
+        if op["effect"] == "skip":
+            continue
+        args = op["arguments"]
+        if op["operation"] == "createRisk":
+            rid = f"NORU-RISK-{i}"
+            created[i] = rid
+            risks[rid] = {"id": rid, **{k: v for k, v in args.items() if k != "tags"}}
+        elif op["operation"] == "updateRisk":
+            risks[args["riskId"]].update({k: v for k, v in args.items() if k not in ("riskId", "tags", "notes")})
+        elif op["operation"] == "linkRiskToControl":
+            rid = created[op["depends_on"]["operation_index"]] if op.get("depends_on") else args["riskId"]
+            links.setdefault(rid, []).append(args["controlId"])
+    # Deliberately reversed: a list endpoint's order is not part of its contract.
+    return list(reversed(list(risks.values()))), links
+
+
+def test_threat_model(results, tmp):
+    repo, piece, decl, manifest = prepare(tmp, "threat-model")
+    label = "threat-model"
+    validate_and_parse(piece, manifest, repo, results, label)
+
+    stale = {
+        "id": "NORU-RISK-STALE",
+        "externalId": "threat-model:example-org/example-app:clickjacking.0123456789ab",
+        "title": "Clickjacking (Web frontend)",
+        "status": "identified",
+        "category": "security",
+        "likelihood": "possible",
+        "impact": "minor",
+        "description": "noru-grc-engineering:threat-model:threat-model:example-org/example-app:clickjacking.0123456789ab\n\nfiled before",
+        "mitigationStrategy": "",
+    }
+    other_repo = dict(
+        stale, id="NORU-RISK-OTHER",
+        externalId="threat-model:example-org/other-app:clickjacking.aabbccddeeff",
+        description="noru-grc-engineering:threat-model:threat-model:example-org/other-app:clickjacking.aabbccddeeff\n",
+    )
+    write_state(repo, {"fetched_at": "2026-08-28T09:14:00Z", "risks": [stale, other_repo]})
+
+    first = diff(piece, repo)
+    if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
+        return
+    plan = json.loads(first.stdout)
+    ops = plan["operations"]
+    creates = [op for op in ops if op["operation"] == "createRisk"]
+    results.check(
+        f"[{label}] every threat on every element becomes one risk, keyed by externalId",
+        len(creates) == 3
+        and all(op["arguments"]["externalId"].startswith("threat-model:example-org/example-app:") for op in creates),
+        json.dumps([op["arguments"].get("externalId") for op in creates]),
+    )
+    links = [op for op in ops if op["operation"] == "linkRiskToControl"]
+    results.check(
+        f"[{label}] a new risk is linked to its controls in the same push, by the id its create returns",
+        len(links) == 1
+        and links[0]["arguments"] == {"riskId": None, "controlId": "zz-01"}
+        and ops[links[0]["depends_on"]["operation_index"]]["operation"] == "createRisk",
+        json.dumps(links),
+    )
+    resolves = [op for op in ops if op["operation"] == "updateRisk" and op["effect"] == "update"]
+    results.check(
+        f"[{label}] a risk the model no longer names is resolved, and another repository's is left alone",
+        len(resolves) == 1
+        and resolves[0]["arguments"]["riskId"] == "NORU-RISK-STALE"
+        and resolves[0]["arguments"]["status"] == "resolved"
+        and not any(op["arguments"].get("riskId") == "NORU-RISK-OTHER" for op in ops),
+        json.dumps([op["arguments"] for op in resolves]),
+    )
+    results.check(
+        f"[{label}] every create carries the marker on the first line of its description",
+        all(op["arguments"]["description"].startswith("noru-grc-engineering:threat-model:" + op["arguments"]["externalId"] + "\n") for op in creates),
+        "",
+    )
+
+    push = piece / "scripts" / "push.mjs"
+    refused = run(["node", str(push), f"--repo={repo}"])
+    results.check(f"[{label}] push without --confirm is refused with exit 2", refused.returncode == 2, refused.stderr)
+    first_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    if not results.check(f"[{label}] first push emits the confirmed calls", first_push.returncode == 0, first_push.stderr):
+        return
+    calls = json.loads(first_push.stdout)["calls"]
+    linked = [c for c in calls if c["tool"] == "linkRiskToControl"]
+    results.check(
+        f"[{label}] the link call names the create call it takes its riskId from",
+        len(linked) == 1
+        and calls[linked[0]["depends_on"]["order"] - 1]["tool"] == "createRisk"
+        and linked[0]["depends_on"]["field"] == "riskId",
+        json.dumps(linked),
+    )
+
+    risks, risk_controls = state_after_threat_model(ops, [stale, other_repo])
+    write_state(repo, {"fetched_at": "2026-08-28T10:00:00Z", "risks": risks, "risk_controls": risk_controls})
+    second = diff(piece, repo)
+    if not results.check(f"[{label}] second diff succeeds", second.returncode == 0, second.stderr):
+        return
+    non_skip = [op for op in json.loads(second.stdout)["operations"] if op["effect"] != "skip"]
+    results.check(
+        f"[{label}] SECOND DIFF IS A NO-OP (every operation skipped)",
+        len(non_skip) == 0,
+        "; ".join(f"{op['operation']} {op['effect']} {op['reason']}" for op in non_skip),
+    )
+    second_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    results.check(
+        f"[{label}] SECOND PUSH MAKES NO CALLS",
+        second_push.returncode == 0 and len(json.loads(second_push.stdout)["calls"]) == 0,
+        second_push.stdout[:200],
+    )
+
+    # A headless snapshot has no per-risk links: the link is not planned, and the plan says why.
+    write_state(repo, {"fetched_at": "2026-08-28T10:30:00Z", "risks": risks})
+    headless = json.loads(diff(piece, repo).stdout)["operations"]
+    link = [op for op in headless if op["operation"] == "linkRiskToControl"]
+    results.check(
+        f"[{label}] without links in the snapshot, an existing risk's link is skipped, never re-sent",
+        len(link) == 1 and link[0]["effect"] == "skip" and "getRiskControlMappings" in link[0]["reason"]
+        and not any(op["effect"] != "skip" for op in headless),
+        json.dumps([f"{op['operation']} {op['effect']}" for op in headless]),
+    )
+
+    drifted = [dict(r, likelihood="certain") if r.get("title", "").startswith("SQL injection") else r for r in risks]
+    write_state(repo, {"fetched_at": "2026-08-28T11:00:00Z", "risks": drifted, "risk_controls": risk_controls})
+    third = json.loads(diff(piece, repo).stdout)["operations"]
+    updates = [op for op in third if op["effect"] == "update"]
+    results.check(
+        f"[{label}] a field changed in Noru plans an update on the same risk, never a second one",
+        len(updates) == 1 and "likelihood" in updates[0]["reason"]
+        and not any(op["effect"] == "create" for op in third),
+        json.dumps([f"{op['effect']} {op['reason']}" for op in third])[:300],
+    )
+
+    write_state(repo, {"fetched_at": "2026-08-28T10:00:00Z", "risks": risks, "risk_controls": risk_controls})
+    diff(piece, repo)
+    manifest.write_text(manifest.read_text(encoding="utf-8") + "\n# edited after the plan\n", encoding="utf-8")
+    stale_plan = run(["node", str(push), f"--repo={repo}", "--confirm"])
+    results.check(
+        f"[{label}] editing the manifest invalidates the plan",
+        stale_plan.returncode == 1 and "manifest changed" in stale_plan.stderr,
+        stale_plan.stderr,
+    )
+
+
 def state_after_audit_pack(operations):
     """Build the org snapshot that would exist if every planned write had succeeded."""
     evidence = []
@@ -1236,6 +1387,142 @@ def test_change_control(results, tmp):
         f"[{label}] a second push is a no-op",
         effects == {"skip"},
         json.dumps(replan["summary"]),
+    )
+
+
+def state_after_dev_agents(operations):
+    """The org snapshot that would exist if every planned write had landed, links included."""
+    vendors, evidence = [], []
+    for i, op in enumerate(operations):
+        if op["effect"] == "skip":
+            continue
+        args = op["arguments"]
+        if op["operation"] == "createVendor":
+            # A differently-cased name on the way back: the comparison must not care.
+            vendors.append({"id": f"NORU-VENDOR-{i}", "name": args["name"].upper()})
+        elif op["operation"] == "createEvidence":
+            evidence.append({"id": "NORU-EVD-1", "description": args["description"], "linkedControls": []})
+        elif op["operation"] == "linkEvidenceToControl":
+            evidence[-1]["linkedControls"].append({"id": args["controlId"]})
+    return {"fetched_at": "2026-10-05T10:00:00Z", "vendors": vendors, "evidence": evidence}
+
+
+def test_dev_agents(results, tmp):
+    """A vendor per supplier, one evidence record for the window, a link per chosen control.
+
+    Beyond "a second push is a no-op", two properties are specific to this piece: nothing about who
+    ran an agent may reach a plan or a call, and a control mapping added after the evidence landed
+    must be linked to the record that exists rather than file a second one.
+    """
+    repo, piece, decl, manifest = prepare(tmp, "dev-agents")
+    label = "dev-agents"
+
+    validate_and_parse(piece, manifest, repo, results, label)
+    write_state(repo, {"fetched_at": "2026-10-05T09:00:00Z", "vendors": [], "evidence": []})
+
+    first = diff(piece, repo)
+    if not results.check(f"[{label}] first diff succeeds", first.returncode == 0, first.stderr):
+        return
+    plan = json.loads(first.stdout)
+    operations = plan["operations"]
+    by_kind = {}
+    for op in operations:
+        by_kind.setdefault(op["operation"], []).append(op)
+
+    results.check(
+        f"[{label}] one createVendor per supplier",
+        [o["arguments"]["name"] for o in by_kind.get("createVendor", [])]
+        == ["OpenAI", "Example Docs Inc.", "Example Tickets Inc.", "Example Search Inc.",
+            "Example Org Platform Team"],
+        [o["arguments"]["name"] for o in by_kind.get("createVendor", [])],
+    )
+    results.check(
+        f"[{label}] an agent's vendor lands as an AI model provider",
+        by_kind["createVendor"][0]["arguments"]["category"] == "ai_model_provider",
+        by_kind["createVendor"][0]["arguments"],
+    )
+    results.check(
+        f"[{label}] exactly one evidence record for the window",
+        len(by_kind.get("createEvidence", [])) == 1,
+        json.dumps(plan["summary"]),
+    )
+    links = by_kind.get("linkEvidenceToControl", [])
+    results.check(
+        f"[{label}] a link per chosen control, each depending on the evidence it has not created yet",
+        [o["arguments"]["controlId"] for o in links] == ["zz-11", "zz-12"]
+        and all(o.get("depends_on", {}).get("field") == "evidenceId" for o in links),
+        [(o["arguments"], o.get("depends_on")) for o in links],
+    )
+    declared = {op["name"]: op["idempotency"] for op in decl["push"]["operations"]}
+    results.check(
+        f"[{label}] every plan operation's idempotency matches piece.json",
+        all(o["idempotency"]["kind"] == declared[o["operation"]]["kind"] for o in operations),
+        [(o["operation"], o["idempotency"]["kind"]) for o in operations],
+    )
+    content = by_kind["createEvidence"][0]["arguments"]["content"]
+    results.check(
+        f"[{label}] the evidence names agents, vendors, changes, servers and plugins",
+        all(s in content for s in (
+            "codex — vendor OpenAI — 2 change(s) authored", "OpenAI: 2 change(s) authored",
+            "tickets in .mcp.json (claude-code) — stdio, runs npx",
+            "docs in .cursor/mcp.json (cursor) — remote, host mcp.docs.example.com",
+            "release-notes@example-tools",
+        )),
+        content,
+    )
+    # The fixture acc manifest names its people; none of them may reach a write.
+    serialized = json.dumps(plan)
+    results.check(
+        f"[{label}] nothing per person reaches the plan",
+        not any(s in serialized for s in ("priya", "sam-okafor", "github:", "operator")),
+        [s for s in ("priya", "sam-okafor", "github:", "operator") if s in serialized],
+    )
+
+    push = piece / "scripts" / "push.mjs"
+    first_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    if not results.check(f"[{label}] first push emits the confirmed calls", first_push.returncode == 0,
+                         first_push.stderr):
+        return
+    calls = json.loads(first_push.stdout)["calls"]
+    evidence_order = next(c["order"] for c in calls if c["tool"] == "createEvidence")
+    results.check(
+        f"[{label}] each link call substitutes the id of the evidence call before it",
+        [c["depends_on"]["order"] for c in calls if c["tool"] == "linkEvidenceToControl"]
+        == [evidence_order, evidence_order],
+        calls,
+    )
+
+    write_state(repo, state_after_dev_agents(operations))
+    second = diff(piece, repo)
+    if not results.check(f"[{label}] second diff succeeds", second.returncode == 0, second.stderr):
+        return
+    replan = json.loads(second.stdout)
+    results.check(
+        f"[{label}] a second push is a no-op",
+        {o["effect"] for o in replan["operations"]} == {"skip"},
+        json.dumps(replan["summary"]),
+    )
+    second_push = run(["node", str(push), f"--repo={repo}", "--confirm", "--output=json", "--quiet"])
+    results.check(
+        f"[{label}] SECOND PUSH MAKES NO CALLS",
+        second_push.returncode == 0 and len(json.loads(second_push.stdout)["calls"]) == 0,
+        second_push.stdout[:200],
+    )
+
+    # A mapping added after the evidence landed links the record that exists; it files nothing new.
+    landed = state_after_dev_agents(operations)
+    landed["evidence"][0]["linkedControls"] = [{"id": "zz-11"}]
+    write_state(repo, landed)
+    third = diff(piece, repo)
+    replan = json.loads(third.stdout) if third.returncode == 0 else {"operations": []}
+    pending = [o for o in replan["operations"] if o["effect"] != "skip"]
+    results.check(
+        f"[{label}] a control mapping added later links the existing evidence, without depends_on",
+        len(pending) == 1
+        and pending[0]["operation"] == "linkEvidenceToControl"
+        and pending[0]["arguments"] == {"evidenceId": "NORU-EVD-1", "controlId": "zz-12"}
+        and "depends_on" not in pending[0],
+        pending,
     )
 
 
@@ -1710,11 +1997,13 @@ def test_plan_bindings(results, tmp):
 
 IDEMPOTENCY_TESTS = {
     "ai-inventory": test_ai_inventory,
+    "dev-agents": test_dev_agents,
     "evidence-push": test_evidence_push,
     "governance-records": test_governance_records,
     "review-signoff": test_review_signoff,
     "iac-scan": test_iac_scan,
     "findings-ingest": test_findings_ingest,
+    "threat-model": test_threat_model,
     "audit-pack": test_audit_pack,
     "privacy-datamap": test_privacy_datamap,
     "change-control": test_change_control,

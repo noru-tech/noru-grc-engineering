@@ -4880,6 +4880,410 @@ ENTRY_POINT_GUARD = (
 )
 
 
+DEV_AGENTS = ROOT / "plugins" / "dev-agents"
+DA_COLLECTOR = DEV_AGENTS / "scripts" / "collect.mjs"
+DA_VALIDATOR = DEV_AGENTS / "scripts" / "validate_manifest.py"
+DA_ACC = ".noru/.cache/acc-manifest.json"
+FIXTURE_REPO = ROOT / "tests" / "fixture-repo"
+# Built at run time, so no file in this public repository contains anything shaped like a token.
+DA_TOKENS = (
+    "gh" + "p_" + "Q" * 36,
+    "s" + "k-" + "Z" * 40,
+    "planted-" + "not-a-credential-" + "7f3a9c",
+)
+
+
+def da_scan(repo, *flags):
+    result = run(["node", str(DA_COLLECTOR), f"--repo={repo}", "--output=json", "--quiet", *flags])
+    derived = repo / ".noru" / ".cache" / "dev-agents.derived.json"
+    manifest = repo / ".noru" / "dev-agents.yml"
+    return (
+        result,
+        json.loads(derived.read_text(encoding="utf-8")) if derived.is_file() else None,
+        manifest.read_text(encoding="utf-8") if manifest.is_file() else "",
+    )
+
+
+def da_fixture_copy(tmp, name):
+    # One basename for every copy, so two copies' provenance (and so their manifests) can match.
+    repo = pathlib.Path(tmp) / f"da-{name}" / "example-app"
+    shutil.copytree(FIXTURE_REPO, repo)
+    return repo
+
+
+def da_sign(skeleton):
+    """What a person does to a skeleton: decide every supplier, sign, and clear the flags."""
+    text = skeleton
+    n = 0
+
+    def vendor(_match):
+        nonlocal n
+        n += 1
+        return f"vendor_name: Planted Supplier {n}"
+
+    text = re.sub(r"vendor_name: TODO\b", vendor, text)
+    text = text.replace("category: TODO", "category: other")
+    text = text.replace("owner: TODO_a.person@example.com", "owner: dana.whitfield@example.com")
+    text = text.replace("decided_at: TODO_YYYY-MM-DD", "decided_at: 2026-10-05")
+    text = text.replace("expires_at: TODO_YYYY-MM-DD", "expires_at: 2027-04-05")
+    text = re.sub(r'rationale: "TODO:[^"\n]*"', "rationale: Decided for the fixture by a named person.", text)
+    text = text.replace('fetched_at: "TODO_YYYY-MM-DDTHH:MM:SSZ"', "fetched_at: 2026-10-05T09:00:00Z")
+    text = re.sub(r"\n *needs_review: true", "", text)
+    return text
+
+
+def da_push(repo):
+    """validate --emit-parsed, diff, push --confirm; returns (plan text, calls text) or reasons."""
+    parsed = repo / ".noru" / ".cache" / "dev-agents.parsed.json"
+    validated = run(["python3", str(DA_VALIDATOR), str(repo / ".noru" / "dev-agents.yml"),
+                     f"--emit-parsed={parsed}", "--quiet"])
+    (repo / ".noru" / ".cache" / "noru-state.json").write_text(json.dumps({
+        "fetched_at": "2026-10-05T09:00:00Z",
+        "connection": {"organization": {"id": "org_fixture", "name": "Fixture Organization"},
+                       "endpoint": "https://api.noru.tech/v1/mcp", "scopes": ["*"]},
+        "vendors": [], "evidence": [],
+    }), encoding="utf-8")
+    plan = run(["node", str(DEV_AGENTS / "scripts" / "diff.mjs"), f"--repo={repo}", "--output=json", "--quiet"])
+    push = run(["node", str(DEV_AGENTS / "scripts" / "push.mjs"), f"--repo={repo}", "--confirm",
+                "--output=json", "--quiet"])
+    calls = repo / ".noru" / ".cache" / "dev-agents.calls.json"
+    return validated, plan, push, calls.read_text(encoding="utf-8") if calls.is_file() else ""
+
+
+def test_dev_agents_reads_acc_and_config(results, tmp):
+    """The fixture repository: one agent from acc, five servers and one plugin from five files."""
+    repo = da_fixture_copy(tmp, "fixture")
+    completed, derived, manifest = da_scan(repo)
+    if not results.check("[dev-agents] the collector reads the fixture repository",
+                         completed.returncode == 0 and derived, completed.stderr):
+        return
+    results.check(
+        "[dev-agents] each agent comes with its vendor and the changes it authored and reviewed",
+        derived["agents"] == [{
+            "agent": "codex", "actor_id": "agent:codex", "vendor": "openai",
+            "changes_authored": 2, "reviews": 0, "ref": f"{DA_ACC}:1",
+        }] and derived["vendors"] == [{"vendor": "openai", "agents": ["codex"], "changes_authored": 2}],
+        derived["agents"],
+    )
+    acc = derived["acc"]
+    results.check(
+        "[dev-agents] the window, the totals and the acc manifest's sha256 are recorded",
+        acc["window"] == {"opens_on": "2026-07-01", "closes_on": "2026-09-30", "complete": True}
+        and acc["changes"] == 5 and acc["agent_authored"] == 2 and acc["acp_version"] == "0.4"
+        and acc["manifest_sha256"] == hashlib.sha256((repo / DA_ACC).read_bytes()).hexdigest(),
+        acc,
+    )
+    servers = {s["key"]: s for s in derived["mcp_servers"]}
+    results.check(
+        "[dev-agents] each documented format is read, stdio by command name and remote by host",
+        {k: (s["transport"], s.get("command") or s.get("host")) for k, s in servers.items()} == {
+            "claude-code.docs": ("http", "mcp.docs.example.com"),
+            "claude-code.tickets": ("stdio", "npx"),
+            "cursor.docs": ("remote", "mcp.docs.example.com"),
+            "gemini-cli.search": ("http", "search.example.com"),
+            "vscode.tickets": ("stdio", "npx"),
+        },
+        servers,
+    )
+    results.check(
+        "[dev-agents] each server is cited by the line that declares it",
+        servers.get("vscode.tickets", {}).get("ref") == ".vscode/mcp.json:11"
+        and servers.get("claude-code.docs", {}).get("ref") == ".mcp.json:10",
+        servers,
+    )
+    results.check(
+        "[dev-agents] only enabled plugins are recorded, with their marketplace's source",
+        derived["plugins"] == [{
+            "key": "claude-code.release-notes.example-tools", "file": ".claude/settings.json",
+            "tool": "claude-code", "plugin": "release-notes", "marketplace": "example-tools",
+            "marketplace_source": "github", "marketplace_repo": "example-org/agent-plugins",
+            "ref": ".claude/settings.json:3",
+        }],
+        derived["plugins"],
+    )
+    for word in ("@example/tickets-mcp", "TICKETS_TOKEN", "DOCS_TOKEN", "Authorization", "example.com/mcp", "-y",
+                 "tickets-key", "timeout"):
+        results.check(
+            f"[dev-agents] {word!r} from a configuration file reaches neither facts nor manifest",
+            word not in json.dumps(derived) and word not in manifest,
+            word,
+        )
+    results.check(
+        "[dev-agents] the agent's vendor is proposed from acc's registry as an AI model provider",
+        "key: agent-vendor.openai\n    vendor_name: OpenAI\n    category: ai_model_provider" in manifest,
+        manifest[:2000],
+    )
+    proposals = re.findall(r"  - key: (mcp\.|plugin\.)[^\n]*\n    vendor_name: ([^\n]*)\n    category: ([^\n]*)", manifest)
+    results.check(
+        "[dev-agents] an MCP server's or plugin's publisher is never guessed: TODO, both fields",
+        len(proposals) == 6 and all(v == "TODO" and c == "TODO" for _, v, c in proposals),
+        proposals,
+    )
+    results.check(
+        "[dev-agents] every supplier and the attestation carry needs_review: true",
+        len(re.findall(r"^ +needs_review: true$", manifest, re.M)) == 8,
+        re.findall(r"^ +needs_review: true$", manifest, re.M),
+    )
+    blocked = run(["python3", str(DA_VALIDATOR), str(repo / ".noru" / "dev-agents.yml")])
+    results.check(
+        "[dev-agents] an unsigned skeleton does not validate",
+        blocked.returncode == 1 and "still true" in blocked.stdout and "is still TODO" in blocked.stdout,
+        blocked.stdout[-400:],
+    )
+
+
+def test_dev_agents_never_records_a_credential(results, tmp):
+    """A planted token in every place a config can hold one never reaches facts, manifest, plan or calls."""
+    ghp, sk, plain = DA_TOKENS
+    repo = write_files(pathlib.Path(tmp) / "da-secrets", {
+        ".mcp.json": json.dumps({"mcpServers": {
+            "local": {"command": "/home/example-person/bin/tool",
+                      "args": ["--api-key", sk, f"--token={ghp}"], "env": {"API_KEY": plain}},
+            "remote": {"type": "sse", "url": f"https://user:{ghp}@mcp.example.com:8443/sse?key={plain}",
+                       "headers": {"Authorization": f"Bearer {ghp}"}},
+            "templated": {"type": "http", "url": "${MCP_URL}/mcp"},
+            "wrapped": {"command": "${HOME}/bin/tool"},
+        }}, indent=2),
+        ".cursor/mcp.json": json.dumps({"mcpServers": {
+            "remote": {"url": f"https://mcp.example.com/mcp?token={ghp}", "headers": {"API_KEY": sk}},
+        }}),
+        ".vscode/mcp.json": json.dumps({"servers": {
+            "remote": {"type": "http", "url": f"https://mcp.example.com/{plain}",
+                       "headers": {"Authorization": f"Bearer {sk}"}},
+            "local": {"type": "stdio", "command": "uvx", "args": [plain], "envFile": ".env", "env": {"K": ghp}},
+            "untyped": {"url": f"https://untyped.example.com/mcp?k={plain}"},
+        }}),
+        ".gemini/settings.json": json.dumps({"mcpServers": {
+            "remote": {"httpUrl": f"https://mcp.example.com/mcp?key={sk}", "headers": {"X-Key": plain}},
+            "local": {"command": "node", "args": [ghp], "env": {"K": sk}, "cwd": f"/srv/{plain}"},
+        }}),
+        ".claude/settings.json": json.dumps({
+            "enabledPlugins": {"helper@private-tools": True},
+            "extraKnownMarketplaces": {"private-tools": {"source": {
+                "source": "git", "url": f"https://user:{ghp}@git.example.com/tools.git?x={plain}"}}},
+        }),
+    })
+    completed, derived, manifest = da_scan(repo)
+    if not results.check("[dev-agents] the collector reads configuration holding planted tokens",
+                         completed.returncode == 0 and derived, completed.stderr):
+        return
+    servers = {s["key"]: s for s in derived["mcp_servers"]}
+    results.check(
+        "[dev-agents] a remote server is recorded by host alone, whatever the URL carries",
+        servers["claude-code.remote"]["host"] == "mcp.example.com"
+        and servers["cursor.remote"]["host"] == "mcp.example.com"
+        and servers["gemini-cli.remote"] == {**servers["gemini-cli.remote"], "transport": "http", "host": "mcp.example.com"},
+        servers,
+    )
+    results.check(
+        "[dev-agents] a VS Code url with no type is recorded as remote rather than guessed",
+        servers["vscode.untyped"]["transport"] == "remote"
+        and servers["vscode.untyped"]["host"] == "untyped.example.com",
+        servers.get("vscode.untyped"),
+    )
+    results.check(
+        "[dev-agents] a stdio server is recorded by its program's name, never its directory",
+        servers["claude-code.local"]["command"] == "tool" and servers["vscode.local"]["command"] == "uvx"
+        and "example-person" not in json.dumps(derived),
+        servers,
+    )
+    results.check(
+        "[dev-agents] a command or URL built from a variable is recorded as one, not expanded",
+        servers["claude-code.templated"]["host"] == "(variable)"
+        and servers["claude-code.wrapped"]["command"] == "(variable)",
+        servers,
+    )
+    results.check(
+        "[dev-agents] a git marketplace is recorded by host alone",
+        derived["plugins"][0].get("marketplace_host") == "git.example.com",
+        derived["plugins"],
+    )
+    signed = da_sign(manifest)
+    (repo / ".noru" / "dev-agents.yml").write_text(signed, encoding="utf-8")
+    validated, plan, push, calls = da_push(repo)
+    results.check(
+        "[dev-agents] the signed manifest validates, plans and pushes",
+        validated.returncode == 0 and plan.returncode == 0 and push.returncode == 0 and calls,
+        (validated.stdout + plan.stderr + push.stderr)[-400:],
+    )
+    places = {
+        "derived facts": json.dumps(derived), "manifest": signed,
+        "plan": plan.stdout, "calls": calls,
+        "summary": completed.stdout,
+    }
+    for token in DA_TOKENS:
+        leaked = [where for where, text in places.items() if token in text]
+        results.check(
+            f"[dev-agents] a planted {token[:3]}… token reaches no fact, manifest, plan or call",
+            not leaked,
+            leaked,
+        )
+
+
+def test_dev_agents_operator_counts_stay_local(results, tmp):
+    """Per-person counts only on request, only into the cache, and never into anything pushed."""
+    people = ("priya", "sam-okafor", "github:")
+    plain = da_fixture_copy(tmp, "no-operators")
+    completed, derived, manifest = da_scan(plain)
+    operators = plain / ".noru" / ".cache" / "dev-agents.operators.json"
+    results.check(
+        "[dev-agents] without --operator-counts nothing per person is computed or written",
+        completed.returncode == 0 and not operators.exists()
+        and not any(p in json.dumps(derived) or p in manifest or p in completed.stdout for p in people),
+        [p for p in people if p in json.dumps(derived) or p in manifest],
+    )
+
+    repo = da_fixture_copy(tmp, "operators")
+    asked, derived_asked, manifest_asked = da_scan(repo, "--operator-counts")
+    operators = repo / ".noru" / ".cache" / "dev-agents.operators.json"
+    rows = json.loads(operators.read_text(encoding="utf-8"))["operators"] if operators.is_file() else None
+    results.check(
+        "[dev-agents] --operator-counts writes per-operator counts to the cache file only",
+        rows == [{"operator": "github:priya-nair", "agent_changes": 2, "by_agent": {"codex": 2}}],
+        rows,
+    )
+    results.check(
+        "[dev-agents] asking for operator counts changes neither the derived facts nor the manifest",
+        derived_asked == derived and manifest_asked == manifest,
+        "the flag leaked into what is committed",
+    )
+    summary = json.loads(asked.stdout) if asked.returncode == 0 else {}
+    results.check(
+        "[dev-agents] the printed summary names the file and the row count, never the contents",
+        summary.get("operator_counts") == {"written_to": ".noru/.cache/dev-agents.operators.json", "operators": 1}
+        and not any(p in asked.stdout for p in people),
+        asked.stdout[:400],
+    )
+    # A reviewed manifest pushed from the same checkout, with the operator file sitting next to it.
+    shutil.copyfile(DEV_AGENTS / "fixtures" / "valid.dev-agents.yml", repo / ".noru" / "dev-agents.yml")
+    validated, plan, push, calls = da_push(repo)
+    results.check(
+        "[dev-agents] nothing per person reaches the plan or the calls",
+        validated.returncode == 0 and plan.returncode == 0 and calls
+        and not any(p in plan.stdout or p in calls for p in people),
+        [p for p in people if p in plan.stdout or p in calls] or (validated.stdout + plan.stderr)[-300:],
+    )
+
+
+def test_dev_agents_acc_inputs(results, tmp):
+    """ACP 0.3 and 0.4 are read, anything else is refused, and a missing acc is a missing input."""
+    repo = da_fixture_copy(tmp, "acp-03")
+    acc = json.loads((repo / DA_ACC).read_text(encoding="utf-8"))
+    acc["version"] = "0.3"
+    acc["events"]["actors"]["agent:mystery-bot"] = {"display_name": "Mystery", "kind": "agent", "vendor": None}
+    acc["events"]["changes"][0]["author"] = {"actor_id": "agent:mystery-bot", "provenance": []}
+    (repo / DA_ACC).write_text(json.dumps(acc, indent=2), encoding="utf-8")
+    completed, derived, manifest = da_scan(repo)
+    results.check(
+        "[dev-agents] an ACP 0.3 manifest is read",
+        completed.returncode == 0 and derived and derived["acc"]["acp_version"] == "0.3",
+        completed.stderr,
+    )
+    mystery = next((a for a in (derived or {}).get("agents", []) if a["agent"] == "mystery-bot"), None)
+    results.check(
+        "[dev-agents] an agent acc's registry does not know has no vendor, and its supplier is TODO",
+        mystery and mystery["vendor"] is None and mystery["changes_authored"] == 1
+        and "key: agent.mystery-bot\n    vendor_name: TODO" in manifest,
+        mystery,
+    )
+    results.check(
+        "[dev-agents] an agent's acc citation points at its line in the actor registry",
+        mystery and mystery["ref"] == f"{DA_ACC}:"
+        + str(acc_line(repo / DA_ACC, '"agent:mystery-bot": {')),
+        mystery,
+    )
+
+    for version in ("0.2", "1.0"):
+        acc["version"] = version
+        (repo / DA_ACC).write_text(json.dumps(acc), encoding="utf-8")
+        refused, _, _ = da_scan(repo)
+        results.check(
+            f"[dev-agents] an ACP {version} manifest is refused, not misread",
+            refused.returncode == 1 and "this piece reads 0.3 and 0.4" in refused.stderr,
+            refused.stderr,
+        )
+
+    (repo / DA_ACC).unlink()
+    missing, _, _ = da_scan(repo, "--check")
+    results.check(
+        "[dev-agents] a manifest built from acc, on a checkout without it, is a missing input, not drift",
+        missing.returncode == 1 and "was built from one" in missing.stderr and not missing.stdout.strip(),
+        missing.stderr,
+    )
+
+    bare = write_files(pathlib.Path(tmp) / "da-no-acc", {".mcp.json": '{"mcpServers": {"t": {"command": "npx"}}}'})
+    completed, derived, manifest = da_scan(bare)
+    report = run(["python3", str(DA_VALIDATOR), str(bare / ".noru" / "dev-agents.yml"), "--output=json"])
+    warnings = [w["message"] for w in json.loads(report.stdout).get("warnings", [])] if report.stdout else []
+    results.check(
+        "[dev-agents] without an acc manifest the configuration is still inventoried, and the gap is said",
+        completed.returncode == 0 and derived["acc"] is None and derived["agents"] == []
+        and len(derived["mcp_servers"]) == 1
+        and any("coding agents that wrote code here are not in this inventory" in w for w in warnings),
+        warnings,
+    )
+
+
+def acc_line(path, needle):
+    text = path.read_text(encoding="utf-8")
+    return text[: text.index(needle)].count("\n") + 1
+
+
+def test_dev_agents_reads_only_what_is_tracked(results, tmp):
+    """A developer's own untracked configuration is not the repository's."""
+    repo = git_repo(
+        pathlib.Path(tmp) / "da-tracked",
+        {
+            ".mcp.json": '{"mcpServers": {"shared": {"command": "npx"}}}',
+            # Tracked, but a personal file by the tool's own convention; not one of the five read.
+            ".claude/settings.local.json": '{"enabledPlugins": {"mine@personal": true}}',
+        },
+        then={".cursor/mcp.json": '{"mcpServers": {"mine": {"url": "https://personal.example.com/mcp"}}}'},
+    )
+    completed, derived, _ = da_scan(repo)
+    results.check(
+        "[dev-agents] only tracked configuration is read",
+        completed.returncode == 0 and [s["key"] for s in derived["mcp_servers"]] == ["claude-code.shared"]
+        and [c["file"] for c in derived["configs"]] == [".mcp.json"] and derived["plugins"] == [],
+        derived and derived["mcp_servers"],
+    )
+
+
+def test_dev_agents_reports_what_it_cannot_read(results, tmp):
+    """What the collector could not read or recognise is listed as NOT in the inventory."""
+    repo = write_files(pathlib.Path(tmp) / "da-problems", {
+        ".mcp.json": json.dumps({"mcpServers": {
+            "ok": {"command": "npx"},
+            "untyped": {"url": "https://mcp.example.com/mcp"},
+        }}, indent=2),
+        ".gemini/settings.json": "{ this is not json",
+        ".vscode/mcp.json": '{\n  // a comment\n  "servers": {\n    "commented": {"command": "uvx"},\n  },\n}\n',
+    })
+    completed, derived, manifest = da_scan(repo)
+    keys = [s["key"] for s in (derived or {}).get("mcp_servers", [])]
+    problems = [p["message"] for p in (derived or {}).get("problems", [])]
+    results.check(
+        "[dev-agents] a Claude Code url with no type, and an unreadable file, are reported, not inventoried",
+        completed.returncode == 0 and keys == ["claude-code.ok", "vscode.commented"]
+        and any("has a `url` but no `type`" in p for p in problems)
+        and any(".gemini/settings.json is not readable JSON" in p for p in problems),
+        (keys, problems),
+    )
+    results.check(
+        "[dev-agents] comments and trailing commas are tolerated, and the citation keeps its line",
+        any(s["key"] == "vscode.commented" and s["ref"] == ".vscode/mcp.json:4"
+            for s in (derived or {}).get("mcp_servers", [])),
+        (derived or {}).get("mcp_servers"),
+    )
+    report = run(["python3", str(DA_VALIDATOR), str(repo / ".noru" / "dev-agents.yml"), "--output=json"])
+    warnings = [w["message"] for w in json.loads(report.stdout).get("warnings", [])] if report.stdout else []
+    results.check(
+        "[dev-agents] the validator says what is NOT in the inventory",
+        "config_problems:" in manifest and sum("NOT in this inventory" in w for w in warnings) == 2,
+        warnings,
+    )
+
+
 def entry_points():
     """Every script that decides whether to run main() by comparing its URL against argv[1]."""
     for root in (PLUGINS, ROOT / "scripts" / "templates"):
@@ -5123,6 +5527,130 @@ def test_findings_ingest_skeleton_round_trips(results, tmp):
     )
 
 
+THREAT_MODEL = ROOT / "plugins" / "threat-model"
+TM_COLLECTOR = THREAT_MODEL / "scripts" / "collect.mjs"
+TM_QUEUE = {
+    "fetched_at": "2026-08-27T09:14:00Z",
+    "via": ["getOrganizationRisks", "getOrganizationControls"],
+    "open_risks": [],
+    "controls": [],
+}
+
+
+def tm_model(components, dataflows=(), threats=None):
+    return {
+        "otmVersion": "0.2.0",
+        "project": {"id": "shop", "name": "Shop"},
+        "trustZones": [{"id": "internal", "name": "Internal", "risk": {"trustRating": 80}}],
+        "components": list(components),
+        "dataflows": list(dataflows),
+        "threats": threats if threats is not None else [
+            {"id": "sqli", "name": "SQL injection", "risk": {"likelihood": 60, "impact": 80, "impactComment": "x"}},
+            {"id": "dos", "name": "Denial of service", "risk": {"likelihood": 20, "impact": 40, "impactComment": "x"}},
+        ],
+    }
+
+
+def tm_component(cid, threats=(), tags=None, name=None):
+    c = {"id": cid, "name": name or cid, "type": "service", "parent": {"trustZone": "internal"},
+         "threats": [{"threat": t, "state": "exposed"} for t in threats]}
+    if tags is not None:
+        c["tags"] = tags
+    return c
+
+
+def tm_scan(tmp, name, model, derived=None):
+    repo = pathlib.Path(tmp) / f"tm-{name}"
+    write_files(repo, {"design/shop.otm.json": json.dumps(model, indent=2)})
+    cache = repo / ".noru" / ".cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "threat-queue.json").write_text(json.dumps(TM_QUEUE), encoding="utf-8")
+    for piece, doc in (derived or {}).items():
+        (cache / f"{piece}.derived.json").write_text(json.dumps(doc), encoding="utf-8")
+    result = run(["node", str(TM_COLLECTOR), f"--repo={repo}", "--output=json", "--quiet"])
+    path = cache / "threat-model.derived.json"
+    return result, (json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None)
+
+
+def test_threat_model_keys_survive_reordering(results, tmp):
+    """A risk is the threat on an element, not a position in the file."""
+    a = tm_model([tm_component("api", ["sqli", "dos"]), tm_component("db", ["sqli"])])
+    b = tm_model([tm_component("db", ["sqli"]), tm_component("api", ["dos", "sqli"])])
+    b["threats"].reverse()
+    ra, da = tm_scan(tmp, "order-a", a)
+    rb, db = tm_scan(tmp, "order-b", b)
+    results.check(
+        "[threat-model] one risk per threat on each element",
+        ra.returncode == 0 and len(da["risks"]) == 3,
+        ra.stderr or da,
+    )
+    results.check(
+        "[threat-model] reordering the model keeps every risk's identity; its citations move with it",
+        [r["key"] for r in da["risks"]] == [r["key"] for r in db["risks"]]
+        and [r["refs"] for r in da["risks"]] != [r["refs"] for r in db["risks"]],
+        ([r["key"] for r in da["risks"]], [r["key"] for r in db["risks"]]),
+    )
+
+
+def test_threat_model_refuses_an_invalid_model(results, tmp):
+    """A reference to a threat the model never defines stops the scan, and says where."""
+    bad = tm_model([tm_component("api", ["sqli", "csrf"])])
+    result, derived = tm_scan(tmp, "undefined", bad)
+    results.check(
+        "[threat-model] a threat referenced but not defined stops the scan",
+        result.returncode == 1 and "references threat 'csrf'" in result.stderr and derived is None,
+        result.stderr,
+    )
+    twice = tm_model([tm_component("api"), tm_component("api")])
+    result, _ = tm_scan(tmp, "twice", twice)
+    results.check(
+        "[threat-model] an element id defined twice stops the scan",
+        result.returncode == 1 and "defined twice" in result.stderr,
+        result.stderr,
+    )
+
+
+def test_threat_model_reports_undeclared_components(results, tmp):
+    """What other pieces found and no component names, matched exactly, never by similarity."""
+    model = tm_model([
+        tm_component("orders-db", ["sqli"]),
+        tm_component("cdn", tags=["signal:resource:aws_s3_bucket.assets"]),
+        tm_component("Payments Service"),
+    ])
+    derived = {
+        "privacy-datamap": {"datasets": [
+            {"fides_key": "orders_db", "name": "orders", "refs": ["db/schema.sql:1"]},
+            {"fides_key": "orders_archive", "name": "archive", "refs": ["db/archive.sql:1"]},
+        ], "systems": [{"fides_key": "payments-service", "name": "payments", "refs": []}]},
+        "iac-scan": {"findings": [
+            {"resource": "aws_s3_bucket.assets", "ref": "infra/cdn.tf:3"},
+            {"resource": "aws_db_instance.orders", "ref": "infra/db.tf:1"},
+        ]},
+        "ai-inventory": {"providers": [{"key": "example-provider", "refs": ["src/x.ts:1"]}]},
+    }
+    result, facts = tm_scan(tmp, "signals", model, derived)
+    undeclared = sorted((s["kind"], s["key"]) for s in facts["undeclared"])
+    results.check(
+        "[threat-model] a component names a signal by normalized id or name, or by an explicit tag",
+        sorted((s["kind"], s["key"], s["declared_by"]) for s in facts["signals"]) == [
+            ("dataset", "orders_db", "orders-db"),
+            ("resource", "aws_s3_bucket.assets", "cdn"),
+            ("system", "payments-service", "Payments Service"),
+        ],
+        facts["signals"],
+    )
+    results.check(
+        "[threat-model] everything else is undeclared — a near name is not a match",
+        undeclared == [
+            ("dataset", "orders_archive"),
+            ("provider", "example-provider"),
+            ("resource", "aws_db_instance.orders"),
+        ]
+        and facts["signal_sources"] == ["ai-inventory", "iac-scan", "privacy-datamap"],
+        undeclared,
+    )
+
+
 def test_entry_point_runs_from_a_symlinked_path(results, tmp):
     """A collector reached through a symlink must still collect.
 
@@ -5308,11 +5836,20 @@ def main(argv):
             test_change_control_rules_agree_across_languages(results, tmp)
             test_change_control_reads_acc(results, tmp)
             test_change_control_export_survives_a_forbidden_setting(results, tmp)
+            test_dev_agents_reads_acc_and_config(results, tmp)
+            test_dev_agents_never_records_a_credential(results, tmp)
+            test_dev_agents_operator_counts_stay_local(results, tmp)
+            test_dev_agents_acc_inputs(results, tmp)
+            test_dev_agents_reads_only_what_is_tracked(results, tmp)
+            test_dev_agents_reports_what_it_cannot_read(results, tmp)
             test_findings_ingest_never_copies_a_result(results, tmp)
             test_findings_ingest_refuses_double_ingest(results, tmp)
             test_findings_ingest_missing_report_is_not_empty(results, tmp)
             test_findings_ingest_identity(results, tmp)
             test_findings_ingest_skeleton_round_trips(results, tmp)
+            test_threat_model_keys_survive_reordering(results, tmp)
+            test_threat_model_refuses_an_invalid_model(results, tmp)
+            test_threat_model_reports_undeclared_components(results, tmp)
             test_iac_never_copies_the_line(results, tmp)
             test_iac_identity_survives_a_move(results, tmp)
             test_iac_absence_is_detectable(results, tmp)

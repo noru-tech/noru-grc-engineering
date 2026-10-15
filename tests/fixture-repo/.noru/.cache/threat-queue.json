@@ -1,0 +1,17 @@
+{
+  "_comment": "Fixture queue for the threat-model collector. In real use this file is written by the skill from getOrganizationRisks (risks whose description carries this piece's marker) and getOrganizationControls. Everything below is synthetic: the ids belong to no organization.",
+  "fetched_at": "2026-08-27T09:14:00Z",
+  "via": ["getOrganizationRisks", "getOrganizationControls"],
+  "open_risks": [
+    {
+      "id": "EXAMPLE-RISK-OLD",
+      "external_id": "threat-model:example-org/example-app:clickjacking.0123456789ab",
+      "title": "Clickjacking (Web frontend)",
+      "status": "identified"
+    }
+  ],
+  "controls": [
+    { "id": "zz-01", "display_id": "ZZ-01", "name": "Example secure development control" },
+    { "id": "zz-02", "display_id": "ZZ-02", "name": "Example data protection control" }
+  ]
+}

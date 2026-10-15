@@ -98,6 +98,28 @@
       "homepage": "https://github.com/noru-tech/compliance-assistant"
     },
     {
+      "name": "dev-agents",
+      "source": "./plugins/dev-agents",
+      "description": "Inventory the coding agents, MCP servers and plugins a repository's development process depends on, decide with the user which organization stands behind each one, and land them in Noru as vendors plus one evidence record for the window — never anything per person.",
+      "version": "0.13.0",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "coding-agents",
+        "mcp-servers",
+        "plugins",
+        "suppliers",
+        "vendors",
+        "agent-change-control"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
+    },
+    {
       "name": "evidence-push",
       "source": "./plugins/evidence-push",
       "description": "Work Noru's own evidence queue: see which catalogue expectations are unmet, stage local artifacts against them, and upload with control mappings.",
@@ -257,6 +279,26 @@
         "sign-off",
         "iso-27001",
         "soc2"
+      ],
+      "author": {
+        "name": "Noru",
+        "email": "support@noru.tech"
+      }
+    },
+    {
+      "name": "threat-model",
+      "source": "./plugins/threat-model",
+      "description": "Read the threat models a repository keeps in the Open Threat Model format, decide with the user what each threat means here, and land them in Noru's risk register linked to the organization's own controls — flagging the components other pieces found that the model leaves out.",
+      "version": "0.12.2",
+      "license": "MIT",
+      "category": "compliance",
+      "keywords": [
+        "noru",
+        "compliance",
+        "threat-model",
+        "otm",
+        "risk-register",
+        "security"
       ],
       "author": {
         "name": "Noru",

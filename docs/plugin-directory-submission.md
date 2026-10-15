@@ -56,9 +56,11 @@ Use `name` exactly as written. It is the immutable install slug (`/plugin instal
 | `ai-inventory` | Noru AI Inventory | Scan a repository for the AI systems, model providers and oversight points it actually contains, review the manifest in a PR, and land it in Noru as assets, vendors and evidence. |
 | `audit-pack` | Noru Audit Pack | Assemble the evidence bundle, sampling and workpapers an auditor asks for — for one framework over one audit window — from Noru's graph plus the local files an integration cannot reach, and land the tested conclusion for each control back in Noru. |
 | `change-control` | Noru Change Control | Who wrote each change, who approved it, who merged it and who deployed it, for one window — with every separation that did not hold owned by a named person, and the forge configuration that was supposed to keep them apart. |
+| `dev-agents` | Noru Dev Agents | Inventory the coding agents, MCP servers and plugins a repository's development process depends on, decide with the user which organization stands behind each one, and land them in Noru as vendors plus one evidence record for the window — never anything per person. |
 | `evidence-push` | Noru Evidence Push | Work Noru's own evidence queue: see which catalogue expectations are unmet, stage local artifacts against them, and upload with control mappings. |
 | `governance-records` | Noru Governance Records | File the records of human decisions in Noru: minutes, ISMS scope, statement of applicability, internal audit plans and reports, findings and corrective action plans, each attributed and dated. |
 | `findings-ingest` | Noru Findings Ingest | Ingest the SARIF and OSV-Scanner results that never reach a forge alert store, decide with the user what each one means here, and land them in Noru as security findings filed against risks the organization already carries — closing the ones no longer reported. |
+| `threat-model` | Noru Threat Model | Read the threat models a repository keeps in the Open Threat Model format, decide with the user what each threat means here, and land them in Noru's risk register linked to the organization's own controls — flagging the components other pieces found that the model leaves out. |
 | `iac-scan` | Noru IaC Scan | Scan the Terraform, CloudFormation, Kubernetes and CI configuration a repository actually contains, decide what each finding means in this environment, and land the result in Noru as security findings — closing the ones that no longer reproduce. |
 | `noru` | Noru GRC Engineering | Run consolidated branch reviews across independently installed GRC pieces, summarize live Noru work requiring attention with read scopes only, and check shared connection and repository context. |
 | `privacy-datamap` | Privacy Datamap | Read the schemas a repository actually contains — ORM models, migrations, SQL DDL, API contracts — classify the personal data in them against the Fideslang taxonomy, review the result in a pull request, and land the data map in Noru. |
@@ -70,9 +72,11 @@ Use `name` exactly as written. It is the immutable install slug (`/plugin instal
 | `ai-inventory` | noru, compliance, ai, iso-42001, eu-ai-act, inventory, mcp |
 | `audit-pack` | noru, compliance, audit, workpapers, sampling, evidence, soc2 |
 | `change-control` | noru, compliance, change-management, segregation-of-duties, separation-of-duties, soc2, iso27001, code-review |
+| `dev-agents` | noru, compliance, coding-agents, mcp-servers, plugins, suppliers, vendors, agent-change-control |
 | `evidence-push` | noru, compliance, evidence, audit, soc2, iso-27001, upload |
 | `governance-records` | noru, compliance, governance, minutes, internal-audit, iso-27001, soc2 |
 | `findings-ingest` | noru, compliance, sarif, osv, sast, dependencies, security-findings |
+| `threat-model` | noru, compliance, threat-model, otm, risk-register, security |
 | `iac-scan` | noru, compliance, iac, terraform, kubernetes, cloudformation, security-findings |
 | `noru` | noru, compliance, grc, mcp, hub |
 | `privacy-datamap` | noru, compliance, privacy, fides, fideslang, data-map, gdpr, ropa |

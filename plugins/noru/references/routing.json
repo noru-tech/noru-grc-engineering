@@ -46,6 +46,21 @@
       "caveat": "The working tree cannot prove who approved or deployed a change; classify this as possibly relevant until forge history is available."
     },
     {
+      "name": "dev-agents",
+      "summary": "Record the coding agents, MCP servers and plugins the development process depends on as reviewed suppliers.",
+      "signals": [
+        "A committed .mcp.json, .claude/settings.json, .cursor/mcp.json, .vscode/mcp.json or .gemini/settings.json",
+        "An agent-change-control manifest, or changes authored by coding agents",
+        "A request about which AI coding tools or MCP servers engineering depends on"
+      ],
+      "inspect": [
+        "Tracked agent configuration files, by server name, command name or host only",
+        "The acc manifest at .noru/.cache/acc-manifest.json, when acc runs here",
+        "Noru vendors and controls needed to decide suppliers and evidence links"
+      ],
+      "caveat": "A hostname or package scope is not a publisher, so a person decides every supplier; never read env, headers, args or URLs from a configuration file, and never count agent use per person."
+    },
+    {
       "name": "evidence-push",
       "summary": "Match local artifacts to Noru's unmet evidence queue and upload reviewed files.",
       "signals": [
@@ -134,6 +149,21 @@
         "Noru's evidence queue for the relevant review"
       ],
       "caveat": "An export is not a sign-off; require the named human decision, review date, scope and expiry."
+    },
+    {
+      "name": "threat-model",
+      "summary": "Turn a committed Open Threat Model into owned, expiring risks linked to the organization's controls.",
+      "signals": [
+        "A committed *.otm.json threat model",
+        "Architecture or security review documents that describe components and data flows",
+        "Changes adding datastores, model providers or infrastructure a threat model should name"
+      ],
+      "inspect": [
+        "Tracked *.otm.json files",
+        "Other pieces' derived facts for components the model does not name",
+        "Noru risks and controls needed to link and reconcile"
+      ],
+      "caveat": "A threat in a model is something someone thought of, not a conclusion; whether it applies, how bad it is and who owns it are the user's."
     }
   ],
   "utilities": [

@@ -32,6 +32,9 @@ intend to push. Two pieces sit outside that set entirely:
 |---|---|
 | `ai-inventory:diff` also | `read:assets`, `read:vendors` |
 | `ai-inventory:push` | adds `write:assets`, `write:vendors`, `write:evidence` |
+| `dev-agents:scan` | `read:controls` |
+| `dev-agents:diff` | adds `read:organization` to bind the plan, `read:vendors`, `read:evidence` |
+| `dev-agents:push` | adds `write:vendors`, `write:evidence` |
 | `evidence-push:push`, `governance-records:push`, `review-signoff:push`, `audit-pack:push` | adds `write:evidence` |
 | `iac-scan:scan` | `read:risks`, `read:assets` |
 | `iac-scan:diff` | adds `read:organization` to bind the plan |
@@ -39,6 +42,9 @@ intend to push. Two pieces sit outside that set entirely:
 | `findings-ingest:scan` | `read:risks`, `read:assets` |
 | `findings-ingest:diff` | adds `read:organization` to bind the plan |
 | `findings-ingest:push` | adds `write:risks` |
+| `threat-model:scan` | `read:risks`, `read:controls` |
+| `threat-model:diff` | adds `read:organization` to bind the plan |
+| `threat-model:push` | adds `write:risks` |
 | `privacy-datamap:scan` | `read:datamaps` |
 | `privacy-datamap:diff` | adds `read:organization` to bind the plan |
 | `privacy-datamap:push` | adds `write:datamaps` |
@@ -47,8 +53,8 @@ intend to push. Two pieces sit outside that set entirely:
 
 Clone this repository somewhere, then drive the scripts from the repository you want to scan.
 `ai-inventory` below is only the example — every piece ships the same three scripts, so substitute
-`evidence-push`, `governance-records`, `review-signoff`, `audit-pack`, `iac-scan`,
-`findings-ingest` or `privacy-datamap` and the sequence is identical:
+`dev-agents`, `evidence-push`, `governance-records`, `review-signoff`, `audit-pack`, `iac-scan`,
+`findings-ingest`, `threat-model` or `privacy-datamap` and the sequence is identical:
 
 ```bash
 GRC=/path/to/noru-grc-engineering

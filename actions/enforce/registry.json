@@ -91,6 +91,38 @@
       ]
     },
     {
+      "artifact": ".noru/dev-agents.yml",
+      "drift_check": {
+        "arguments": [
+          "--repo={repo}",
+          "--check",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/collect.mjs",
+        "runtime": "node"
+      },
+      "generated_outputs": [],
+      "name": "dev-agents",
+      "validate": {
+        "arguments": [
+          "{manifest}",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/validate_manifest.py",
+        "runtime": "python3"
+      },
+      "watch_paths": [
+        ".mcp.json",
+        ".claude/settings.json",
+        ".cursor/mcp.json",
+        ".vscode/mcp.json",
+        ".gemini/settings.json",
+        ".noru/dev-agents.yml"
+      ]
+    },
+    {
       "artifact": ".noru/evidence-push.yml",
       "drift_check": {
         "arguments": [
@@ -273,6 +305,34 @@
         ".noru/review-signoff.yml",
         "reviews/**",
         "evidence/**"
+      ]
+    },
+    {
+      "artifact": ".noru/threat-model.yml",
+      "drift_check": {
+        "arguments": [
+          "--repo={repo}",
+          "--check",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/collect.mjs",
+        "runtime": "node"
+      },
+      "generated_outputs": [],
+      "name": "threat-model",
+      "validate": {
+        "arguments": [
+          "{manifest}",
+          "--output=json",
+          "--quiet"
+        ],
+        "entrypoint": "scripts/validate_manifest.py",
+        "runtime": "python3"
+      },
+      "watch_paths": [
+        "**/*.otm.json",
+        ".noru/threat-model.yml"
       ]
     }
   ],

@@ -22,6 +22,11 @@ From [docs/verification.md, "Maturity"](./docs/verification.md#maturity):
   provider names, such as a scanner, a policy engine or an allowlist, is reported as containing them.
 - **Article 50 disclosure states are a repository fact.** Whether they match the running product is
   what a scan cannot see.
+- **`dev-agents` knows the agents acc knows.** A change whose agent authorship acc did not
+  establish counts as a person's, and an agent missing from acc's vendor registry has no proposed
+  vendor. It reads five configuration files at the repository root and nothing else: user-level
+  configuration, `.claude/settings.local.json`, extensions and IDE settings stores are out of scope,
+  and a server configured only there is not in the inventory.
 - **`governance-records`, `evidence-push` and `audit-pack` have only met fixture inputs.** A real
   minute book, a real evidence catalogue and a full framework scope have not been seen.
 - **The upload digest checks in `evidence-push` are not covered by an executed test**, because every
@@ -34,6 +39,11 @@ From [docs/verification.md, "Maturity"](./docs/verification.md#maturity):
   is a statement a person makes; nothing checks it against the organization's integrations, so a
   wrong one files results twice. It reads SARIF 2.1.0 and OSV-Scanner JSON only, and a result in a
   file that is not in the checkout is counted, not filed.
+- **`threat-model` reads OTM's JSON form only, and links controls to existing risks only
+  interactively.** A model kept in YAML is converted once. A CI job cannot read each risk's current
+  links, so it links controls only to the risks it creates; a control added to an existing risk is
+  linked by an interactive diff. Undeclared components are matched by exact (normalized) id, name or
+  tag, never by similarity.
 - **`change-control` exporters are tested against a canned server, not a live forge.** An admin
   merge is inferred from its shape, and nothing can discover who ran an agent: `agent_operator` is
   left for a human to fill in.

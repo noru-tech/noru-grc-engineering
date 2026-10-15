@@ -56,6 +56,18 @@
       "category": "Productivity"
     },
     {
+      "name": "dev-agents",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dev-agents"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
       "name": "evidence-push",
       "source": {
         "source": "local",
@@ -144,6 +156,18 @@
       "source": {
         "source": "local",
         "path": "./plugins/review-signoff"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "threat-model",
+      "source": {
+        "source": "local",
+        "path": "./plugins/threat-model"
       },
       "policy": {
         "installation": "AVAILABLE",
