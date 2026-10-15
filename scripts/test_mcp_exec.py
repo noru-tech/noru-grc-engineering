@@ -22,6 +22,13 @@ What it asserts, in one line each:
   * a key echoed back in an error never reaches stdout, stderr, the report or the receipt
   * a server answering in Server-Sent Events works the same
   * a read tool the connection does not offer is refused, and a short page is refused, not written
+  * a trust record id instead of a key: one CI token exchange per job, with the GitHub or the GitLab
+    ID token, for only the piece's scopes; every call carries the issued token, and no token is
+    ever printed
+  * a trust record id and a key: the exchange wins and the report says the key went unused
+  * a trust record id with no ID token (a fork pull request): skipped, and Noru never hears from it
+  * a refused exchange is a tooling error that names the reason, and nothing is written
+  * a redirected exchange is refused: the ID token never follows it
 
 Usage:
     python3 scripts/test_mcp_exec.py [--output=json] [--quiet]
@@ -35,6 +42,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import urllib.parse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from test_ci_mode import AS_OF, CI_CHECK, Results, build_green_repo  # noqa: E402
@@ -72,6 +80,16 @@ class FakeNoru:
         self.echo_auth = False
         self.sse = False
         self.calls_seen = {}
+        # The CI token exchange and the GitHub ID token endpoint the loopback also plays.
+        self.trust_id = "trust_fixture"
+        self.id_token = ".".join(["eyJhbGciOiJSUzI1NiJ9", "eyJzdWIiOiJyZXBvOmFjbWUvYXBpIn0", "c2lnbmF0dXJlLWJ5dGVz"])
+        self.request_token = "gh-request-" + "r3qu3st" * 3
+        self.issued = "noru_ci_" + "1ssu3d" * 6
+        self.exchanges = []
+        self.id_token_requests = []
+        self.refuse_exchange = None  # (error, description)
+        self.redirect_exchange = False
+        self.redirect_hits = []
         self.lock = threading.Lock()
 
     def writes(self):
@@ -143,7 +161,54 @@ def make_handler(noru):
             self.send_response(200)
             self.end_headers()
 
+        def answer(self, status, payload):
+            data = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            # GitHub's ID token endpoint: ACTIONS_ID_TOKEN_REQUEST_URL, with `&audience=`.
+            if self.path.startswith("/id-token"):
+                with noru.lock:
+                    noru.id_token_requests.append({"path": self.path, "auth": self.headers.get("authorization", "")})
+                if self.headers.get("authorization") != f"bearer {noru.request_token}":
+                    self.answer(401, {"message": "bad request token"})
+                    return
+                self.answer(200, {"value": noru.id_token})
+                return
+            self.answer(404, {})
+
         def do_POST(self):
+            if self.path == "/elsewhere":
+                with noru.lock:
+                    noru.redirect_hits.append(self.rfile.read(int(self.headers.get("content-length", 0))).decode())
+                self.answer(200, {"access_token": "noru_ci_" + "st0l3n" * 6, "token_type": "Bearer"})
+                return
+            if self.path == "/v1/oidc/token" and noru.redirect_exchange:
+                self.send_response(307)
+                self.send_header("location", "/elsewhere")
+                self.send_header("content-length", "0")
+                self.end_headers()
+                return
+            if self.path == "/v1/oidc/token":
+                length = int(self.headers.get("content-length", 0))
+                form = dict(urllib.parse.parse_qsl(self.rfile.read(length).decode()))
+                with noru.lock:
+                    noru.exchanges.append({"form": form, "auth": self.headers.get("authorization")})
+                if noru.refuse_exchange:
+                    error, description = noru.refuse_exchange
+                    self.answer(400, {"error": error, "error_description": description})
+                    return
+                if form.get("subject_token") != noru.id_token or form.get("audience") != noru.trust_id:
+                    self.answer(400, {"error": "invalid_grant", "error_description": "not accepted"})
+                    return
+                self.answer(200, {"access_token": noru.issued, "token_type": "Bearer", "expires_in": 900,
+                                  "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                                  "scope": form.get("scope", "")})
+                return
             body = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))) or b"{}")
             auth = self.headers.get("authorization", "")
             with noru.lock:
@@ -197,17 +262,26 @@ class Loopback:
         self.server.shutdown()
         self.server.server_close()
 
-    def env(self, key=True):
+    def env(self, key=True, trust=None):
+        """trust: None, "github" (the runner's ID token endpoint) or "gitlab" (NORU_ID_TOKEN)."""
         env = {"NORU_API_URL": self.origin}
         if key:
             env["NORU_API_KEY"] = FAKE_KEY
+        if trust:
+            env["NORU_TRUST_ID"] = self.noru.trust_id
+        if trust == "github":
+            env["ACTIONS_ID_TOKEN_REQUEST_URL"] = f"{self.origin}/id-token?api-version=2.0"
+            env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"] = self.noru.request_token
+        if trust == "gitlab":
+            env["NORU_ID_TOKEN"] = self.noru.id_token
         return env
 
 
 def run(cmd, env):
     merged = dict(os.environ)
-    merged.pop("NORU_API_KEY", None)
-    merged.pop("NORU_API_URL", None)
+    for name in ("NORU_API_KEY", "NORU_API_URL", "NORU_TRUST_ID", "NORU_ID_TOKEN",
+                 "ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"):
+        merged.pop(name, None)
     merged.update(env)
     return subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False, env=merged)
 
@@ -561,6 +635,122 @@ def case_every_piece_declares(results, tmp):
         )
 
 
+def leaked(lb, completed, report):
+    """Any token the exchange handled, wherever the job wrote output."""
+    seen = (completed.stdout or "") + (completed.stderr or "") + json.dumps(report or {})
+    return [name for name, value in (("id token", lb.noru.id_token), ("issued token", lb.noru.issued),
+                                     ("request token", lb.noru.request_token)) if value in seen]
+
+
+def case_trust_github(results, tmp):
+    repo, _ = build_green_repo(pathlib.Path(tmp) / "trust-github", "iac-scan")
+    with Loopback() as lb:
+        completed, report = ci(repo, "iac-scan", lb.env(key=False, trust="github"), *ALL)
+        mcp_auth = {r["auth"] for r in lb.noru.requests}
+        results.check("trust/github: exits 0", completed.returncode == 0, completed.stderr or report)
+        results.check("trust/github: state and push ran",
+                      step(report, "state").get("status") == "pass" and step(report, "push").get("status") == "pass",
+                      report and report.get("steps"))
+        results.check("trust/github: one ID token request, for the API origin, with the runner's token",
+                      len(lb.noru.id_token_requests) == 1
+                      and f"audience={urllib.parse.quote(lb.origin, safe='')}" in lb.noru.id_token_requests[0]["path"]
+                      and lb.noru.id_token_requests[0]["auth"] == f"bearer {lb.noru.request_token}",
+                      lb.noru.id_token_requests)
+        form = lb.noru.exchanges[0]["form"] if lb.noru.exchanges else {}
+        results.check("trust/github: one exchange, RFC 8693, naming the trust record",
+                      len(lb.noru.exchanges) == 1
+                      and form.get("grant_type") == "urn:ietf:params:oauth:grant-type:token-exchange"
+                      and form.get("subject_token_type") == "urn:ietf:params:oauth:token-type:id_token"
+                      and form.get("audience") == lb.noru.trust_id
+                      and lb.noru.exchanges[0]["auth"] is None,
+                      lb.noru.exchanges)
+        results.check("trust/github: asks for exactly the piece's read and write scopes",
+                      form.get("scope", "").split() == ["read:assets", "read:organization", "read:risks", "write:risks"],
+                      form.get("scope"))
+        results.check("trust/github: every MCP request carries the issued token",
+                      mcp_auth == {f"Bearer {lb.noru.issued}"}, mcp_auth)
+        results.check("trust/github: the report names the source, never the token",
+                      (report or {}).get("credential") == {"source": "ci_token_exchange", "trust_id": lb.noru.trust_id,
+                                                           "scopes": ["read:assets", "read:organization", "read:risks", "write:risks"],
+                                                           "api_key_unused": False},
+                      (report or {}).get("credential"))
+        results.check("trust/github: no token reaches stdout, stderr or the report",
+                      leaked(lb, completed, report) == [], leaked(lb, completed, report))
+
+
+def case_trust_gitlab(results, tmp):
+    repo, _ = build_green_repo(pathlib.Path(tmp) / "trust-gitlab", "iac-scan")
+    with Loopback() as lb:
+        completed, report = ci(repo, "iac-scan", lb.env(key=False, trust="gitlab"),
+                               "--steps=scan,validate,expiry,policy,state,diff")
+        form = lb.noru.exchanges[0]["form"] if lb.noru.exchanges else {}
+        results.check("trust/gitlab: exits 0 and builds the state", completed.returncode == 0
+                      and step(report, "state").get("status") == "pass", completed.stderr or report)
+        results.check("trust/gitlab: uses NORU_ID_TOKEN; no ID token request is made",
+                      lb.noru.id_token_requests == [] and form.get("subject_token") == lb.noru.id_token,
+                      lb.noru.id_token_requests)
+        results.check("trust/gitlab: a run that cannot push asks for read scopes only",
+                      form.get("scope", "").split() == ["read:assets", "read:organization", "read:risks"],
+                      form.get("scope"))
+        results.check("trust/gitlab: no token reaches stdout, stderr or the report",
+                      leaked(lb, completed, report) == [], leaked(lb, completed, report))
+
+
+def case_trust_and_key(results, tmp):
+    repo, _ = build_green_repo(pathlib.Path(tmp) / "trust-key", "iac-scan")
+    with Loopback() as lb:
+        completed, report = ci(repo, "iac-scan", lb.env(key=True, trust="gitlab"), *ALL)
+        mcp_auth = {r["auth"] for r in lb.noru.requests}
+        results.check("trust+key: the exchange wins", completed.returncode == 0
+                      and mcp_auth == {f"Bearer {lb.noru.issued}"}, mcp_auth)
+        results.check("trust+key: the report says the key went unused",
+                      ((report or {}).get("credential") or {}).get("api_key_unused") is True,
+                      (report or {}).get("credential"))
+
+
+def case_trust_without_id_token(results, tmp):
+    repo, _ = build_green_repo(pathlib.Path(tmp) / "trust-fork", "iac-scan")
+    with Loopback() as lb:
+        env = lb.env(key=False, trust=None)
+        env["NORU_TRUST_ID"] = lb.noru.trust_id
+        completed, report = ci(repo, "iac-scan", env, *ALL)
+        results.check("trust/no ID token: state and push are skipped, not failed",
+                      completed.returncode == 0 and step(report, "state").get("status") == "skipped"
+                      and step(report, "push").get("status") == "skipped",
+                      report and report.get("steps"))
+        results.check("trust/no ID token: the reason names the missing permission",
+                      "id-token: write" in step(report, "state").get("detail", ""), step(report, "state"))
+        results.check("trust/no ID token: Noru never hears from the job",
+                      lb.noru.requests == [] and lb.noru.exchanges == [], lb.noru.requests)
+
+
+def case_trust_refused(results, tmp):
+    repo, _ = build_green_repo(pathlib.Path(tmp) / "trust-refused", "iac-scan")
+    with Loopback() as lb:
+        lb.noru.refuse_exchange = ("invalid_scope", "Request only scopes this CI trust record allows.")
+        completed, report = ci(repo, "iac-scan", lb.env(key=False, trust="github"), *ALL)
+        results.check("trust/refused: a tooling error (exit 6)", completed.returncode == 6, completed.returncode)
+        results.check("trust/refused: the state step names Noru's reason",
+                      step(report, "state").get("status") == "error"
+                      and "invalid_scope: Request only scopes this CI trust record allows." in step(report, "state").get("detail", ""),
+                      step(report, "state"))
+        results.check("trust/refused: no MCP request, nothing written", lb.noru.requests == [], lb.noru.requests)
+        results.check("trust/refused: no token reaches stdout, stderr or the report",
+                      leaked(lb, completed, report) == [], leaked(lb, completed, report))
+
+
+def case_trust_redirect(results, tmp):
+    repo, _ = build_green_repo(pathlib.Path(tmp) / "trust-redirect", "iac-scan")
+    with Loopback() as lb:
+        lb.noru.redirect_exchange = True
+        completed, report = ci(repo, "iac-scan", lb.env(key=False, trust="gitlab"), *ALL)
+        results.check("trust/redirect: a redirected exchange is refused, not followed",
+                      completed.returncode == 6 and step(report, "state").get("status") == "error"
+                      and lb.noru.redirect_hits == [],
+                      (step(report, "state"), lb.noru.redirect_hits))
+        results.check("trust/redirect: nothing reaches the MCP endpoint", lb.noru.requests == [], lb.noru.requests)
+
+
 CASES = (
     case_end_to_end,
     case_depends_on,
@@ -573,6 +763,12 @@ CASES = (
     case_sse,
     case_state_guards,
     case_every_piece_declares,
+    case_trust_github,
+    case_trust_gitlab,
+    case_trust_and_key,
+    case_trust_without_id_token,
+    case_trust_refused,
+    case_trust_redirect,
 )
 
 

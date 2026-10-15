@@ -909,11 +909,16 @@ def case_credentials(results, tmp):
     # the helper every step goes through, rather than by inspecting a child we cannot see into.
     probe = [sys.executable, "-c", "import os;print('NORU_API_KEY' in os.environ)"]
     os.environ["NORU_API_KEY"] = "test-value-not-a-real-key"
+    saved = dict(ci_check._CREDENTIAL)
     try:
+        ci_check._CREDENTIAL.update(resolved=False, credential=None, unavailable=None, refused=None)
+        ci_check.credential(ci_check.Report("probe", pathlib.Path("."), "warn", {}))
         without, _ = ci_check.run(probe)
         with_key, _ = ci_check.run(probe, with_api_key=True)
     finally:
         os.environ.pop("NORU_API_KEY", None)
+        ci_check._CREDENTIAL.clear()
+        ci_check._CREDENTIAL.update(saved)
     results.check(
         "credential: stripped from every step that does not push",
         without is not None and without.stdout.strip() == "False",

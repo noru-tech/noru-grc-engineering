@@ -468,6 +468,56 @@ Rules this workflow obeys, and that a reviewer should check it still obeys:
   workflow is that confirmation, given once in a reviewed file — which is why it belongs on a
   protected branch with an environment, not on `pull_request`
 
+### Without a stored key: a CI trust record
+
+Noru can issue a CI job a short-lived token instead of the job holding `NORU_API_KEY`: the job
+presents the OIDC ID token GitHub Actions or GitLab.com signs for it, and Noru's CI token exchange
+(`POST /v1/oidc/token`, documented under "CI jobs: OIDC token exchange" in
+<https://api.noru.tech/llms.txt>) answers with a token that lasts 15 minutes. An admin creates a
+**CI trust record** in Noru (Settings, Developer, CI trust) naming the repository, the refs it
+accepts, optionally a deployment environment, and the most scopes a token may carry. Give its id
+to the job as `trust-id` (the action and the GitLab component) or `NORU_TRUST_ID`:
+
+```yaml
+  land-it:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: compliance
+    permissions:
+      contents: read
+      id-token: write           # lets the job request its ID token; nothing else
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - uses: noru-tech/noru-ci-action@v0
+        with:
+          piece: iac-scan
+          mode: gate
+          steps: all
+          trust-id: ${{ vars.NORU_TRUST_ID }}
+```
+
+- `scripts/ci_check.py` does the exchange itself (`scripts/ci_credential.py`, standard library
+  only), once per job, the first time the `state` or `push` step needs Noru. GitLab mints one ID
+  token per job, and Noru exchanges each ID token once, so a job never exchanges twice.
+- The token asks only for the piece's read scopes from `piece.json`, plus its write scopes when this
+  run includes `push`. A trust record that does not allow one of them refuses the exchange with
+  `invalid_scope`, and the step reports that reason as a tooling error.
+- The ID token is requested for the Noru API's origin, `NORU_API_URL` (default
+  `https://api.noru.tech`), and the exchange is sent there and nowhere else, over https.
+- When `trust-id` and `NORU_API_KEY` are both present, the trust record wins, and the report's
+  `credential` says the key went unused, so a leftover secret cannot silently stay in use.
+- The issued token reaches exactly the children `NORU_API_KEY` reaches, under that name. No child
+  receives the ID token, or the runner's means of requesting one, and neither token is printed.
+- A job with no ID token, as on a fork pull request, has no credential: `state`, `diff` and `push`
+  report `skipped`, exactly as without a key.
+
+A GitHub `pull_request_target` job carries the base branch's ref while it may run the pull request's
+code, so never give one `id-token: write`. Put an environment with required reviewers on the trust
+record for a job that writes, as the example's `environment:` does for the key.
+
 ## Confirmation by a reviewed plan
 
 `steps: all` in a reviewed workflow confirms every plan the job builds. There is a narrower
@@ -658,7 +708,9 @@ confirmation by a reviewed plan reads GitHub's pull request and artifact APIs.
 | `piece` | *(required)* | Which piece to run |
 | `repo` | `.` | Path to the repository to check, relative to the project directory |
 | `mode` | `gate` | `gate` fails the job on a finding; `warn` reports the same findings and passes |
-| `steps` | `scan,validate,expiry,policy` | Add `state`, `diff` and `push`, or use `all`; those need `NORU_API_KEY` |
+| `steps` | `scan,validate,expiry,policy` | Add `state`, `diff` and `push`, or use `all`; those need `trust-id` or `NORU_API_KEY` |
+| `trust-id` | *(empty)* | A CI trust record id: the job exchanges its ID token for a 15-minute token and needs no `NORU_API_KEY` |
+| `api-origin` | `https://api.noru.tech` | The audience of the job's ID token; equal to `NORU_API_URL` when that is set |
 | `fail-on`, `baseline`, `max-age-days`, `warn-within-days`, `as-of`, `gate-on-new`, `state`, `on-missing-prerequisite` | as the action | As the action |
 | `base-ref` | the merge request's diff base | Compare the manifest against the merge base with this ref |
 | `security-findings` | `include` | `omit` writes the security report with no findings in it |
@@ -676,7 +728,8 @@ in `warn` mode with `gate-on-new: true`, and has no `steps` input at all.
 
 | Variable | Read by | Needed for |
 |---|---|---|
-| `NORU_API_KEY` | `scripts/ci_check.py`, which passes it only to the one step that sends it | `state`, `diff` and `push`. Never an input |
+| `NORU_API_KEY` | `scripts/ci_check.py`, which passes it only to the one step that sends it | `state`, `diff` and `push`, when there is no `trust-id`. Never an input |
+| `NORU_ID_TOKEN` | `scripts/ci_check.py`, for the CI token exchange, and removed from every child | `state`, `diff` and `push` with `trust-id`. Issued by GitLab through the job's `id_tokens`; nothing to create |
 | `NORU_GITLAB_NOTE_TOKEN` | `scripts/gitlab_mr_note.py`, at the point of use | The merge request note. Nothing else inherits it |
 
 Both are CI/CD variables you create, masked. Make `NORU_API_KEY` **protected** as well: a protected
@@ -694,7 +747,12 @@ Ultimate (<https://docs.gitlab.com/user/project/settings/project_access_tokens/>
 use a personal access token of an account that is a member of this one project alone. The note writer
 sends the token in a `PRIVATE-TOKEN` header to `CI_API_V4_URL` only, only over https, never follows a
 redirect with it, and scrubs it from anything it prints. No step of `ci_check.py` or `ci_review.py`
-inherits the job token or the note token; `NORU_API_KEY` never reaches the note writer.
+inherits the job token or the note token; neither `NORU_API_KEY` nor `NORU_ID_TOKEN` reaches the
+note writer.
+
+With `trust-id`, the job needs no `NORU_API_KEY` at all. The trust record decides which refs may
+exchange (a protected branch, say) and, optionally, which environment the job must run in, which
+does for the exchange what a protected variable does for the key.
 
 A merge request from a fork runs its pipeline in the fork by default, without the parent project's
 variables, so the note is skipped and `state`, `diff` and `push` report `skipped`, as on a GitHub fork

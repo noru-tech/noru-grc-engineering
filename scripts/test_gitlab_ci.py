@@ -450,8 +450,15 @@ def case_template_structure(results, tmp):
     (_, ci_job), = jobs.items()
     script = script_of(ci_job)
     results.check(
-        "[noru-ci.yml] the check never inherits the note token, and the note never inherits NORU_API_KEY",
-        "env -u NORU_GITLAB_NOTE_TOKEN python3" in script and "env -u NORU_API_KEY python3" in script,
+        "[noru-ci.yml] the check never inherits the note token, and the note never inherits NORU_API_KEY or the ID token",
+        "env -u NORU_GITLAB_NOTE_TOKEN python3" in script and "env -u NORU_API_KEY -u NORU_ID_TOKEN python3" in script,
+    )
+    results.check(
+        "[noru-ci.yml] trust-id: the job's ID token is NORU_ID_TOKEN, issued for api-origin",
+        (ci_job.get("id_tokens") or {}).get("NORU_ID_TOKEN") == {"aud": "$[[ inputs.api-origin ]]"}
+        and (ci_job.get("variables") or {}).get("NORU_TRUST_ID") == "$[[ inputs.trust-id ]]"
+        and spec["trust-id"]["default"] == "" and spec["api-origin"]["default"] == "https://api.noru.tech",
+        (ci_job.get("id_tokens"), spec.get("trust-id"), spec.get("api-origin")),
     )
     results.check(
         "[noru-ci.yml] has no rules of its own: the pipeline's workflow rules decide when it runs",

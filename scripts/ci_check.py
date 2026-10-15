@@ -27,13 +27,18 @@ This file is driven entirely by `plugins/<piece>/piece.json` — entrypoints, ar
 codes. A piece scaffolded tomorrow works here with no change to this file, and there is a test that
 says so.
 
-Credentials: NORU_API_KEY is never read, printed or written by this script. Its *presence* decides
-whether the state and push steps can run; its value is passed through the process environment to
-the one child that sends it (the REST piece's own push entrypoint, or scripts/mcp_exec.mjs), which
-reads it at the point of use. The piece's MCP :push, which only writes a call list, never gets it. Every step that does not need it is run
-with it removed from the child environment, and everything captured from a child process is passed
-through redact() before it can reach stdout or the report. The CI system's own credentials — a GitLab
-job token, the merge request note token — are removed from every child: no step needs one.
+Credentials: the job reaches Noru with NORU_API_KEY, or, when NORU_TRUST_ID names a CI trust record,
+with a 15-minute token from Noru's CI token exchange (scripts/ci_credential.py), which then wins over
+the key. The exchange runs once, the first time the state or push step needs Noru, and asks only for
+the piece's read scopes, plus its write scopes when this run may push. Whether a credential is
+available decides whether those steps run; a job with neither (a fork pull request) skips them. The
+credential is passed through the process environment, as NORU_API_KEY, to the one child that sends
+it (the REST piece's own push entrypoint, or scripts/mcp_exec.mjs), which reads it at the point of
+use, and is never printed. The piece's MCP :push, which only writes a call list, never gets it.
+Every step that does not need it is run with it removed from the child environment, and everything
+captured from a child process is passed through redact() before it can reach stdout or the report.
+The CI system's own credentials — a GitLab job token, the merge request note token, and whatever
+would let a process obtain an OIDC ID token — are removed from every child: no step needs one.
 
 Nothing here reads which CI system it is running on. `--code-quality` and `--security-report` write
 the two report files a GitLab merge request reads (scripts/gitlab_reports.py); they are files, and a
@@ -87,6 +92,7 @@ from check_policy import (  # noqa: E402
     parse_document as parse_manifest_text,
 )
 from finding_docs import see as see_finding_docs  # noqa: E402
+import ci_credential  # noqa: E402
 import reviewed_plan  # noqa: E402
 import gitlab_reports  # noqa: E402
 
@@ -159,7 +165,9 @@ USAGE = (
 # HTTP error body can echo a header back, and this script prints child output.
 _REDACTIONS = (
     (re.compile(r"\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE), r"\1<redacted>"),
-    (re.compile(r"\bnoru_[A-Za-z0-9]{6,}"), "<redacted>"),
+    (re.compile(r"\bnoru_[A-Za-z0-9_-]{6,}"), "<redacted>"),
+    # An OIDC ID token, or any other JWT: three base64url segments, the first a JSON header.
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*"), "<redacted>"),
     (
         re.compile(
             r"(\"?(?:api[_-]?key|authorization|token|secret|password)\"?\s*[:=]\s*\"?)([^\"\s,}]{6,})",
@@ -172,9 +180,36 @@ _REDACTIONS = (
 
 def redact(value):
     text = value if isinstance(value, str) else json.dumps(value)
+    for secret in ci_credential.SECRETS:
+        text = text.replace(secret, "<redacted>")
     for pattern, replacement in _REDACTIONS:
         text = pattern.sub(replacement, text)
     return text
+
+
+# The job's credential, resolved once, the first time a step needs Noru. GitLab mints one ID token
+# per job and each exchanges once, so a second exchange in the same job could not succeed anyway.
+_CREDENTIAL = {"resolved": False, "credential": None, "unavailable": None, "refused": None}
+_CREDENTIAL_SCOPES = []
+
+
+def credential(report):
+    """("ok", None), ("absent", why) or ("refused", why). Records the source in the report."""
+    if not _CREDENTIAL["resolved"]:
+        _CREDENTIAL["resolved"] = True
+        try:
+            _CREDENTIAL["credential"] = ci_credential.resolve(_CREDENTIAL_SCOPES)
+            report.payload["credential"] = _CREDENTIAL["credential"].describe()
+        except ci_credential.Unavailable as exc:
+            # Names variables, never a value, and redact() would read `id-token: write` as one.
+            _CREDENTIAL["unavailable"] = str(exc)
+        except ci_credential.Refused as exc:
+            _CREDENTIAL["refused"] = redact(str(exc))
+    if _CREDENTIAL["credential"] is not None:
+        return "ok", None
+    if _CREDENTIAL["refused"]:
+        return "refused", _CREDENTIAL["refused"]
+    return "absent", _CREDENTIAL["unavailable"]
 
 
 class Report:
@@ -213,10 +248,17 @@ class Report:
 
 
 def run(cmd, cwd=None, with_api_key=False):
-    """Run a child process. NORU_API_KEY is removed unless the step is the one that needs it."""
+    """Run a child process. NORU_API_KEY is removed unless the step is the one that needs it.
+
+    The one that needs it gets the job's credential under that name: the API key, or the token
+    the CI token exchange issued. No child gets what it would take to obtain an ID token.
+    """
     env = dict(os.environ)
-    if not with_api_key:
-        env.pop("NORU_API_KEY", None)
+    env.pop("NORU_API_KEY", None)
+    for name in ci_credential.ID_TOKEN_SOURCES:
+        env.pop(name, None)
+    if with_api_key and _CREDENTIAL["credential"] is not None:
+        env["NORU_API_KEY"] = _CREDENTIAL["credential"].token
     for name in FOREIGN_CREDENTIALS:
         env.pop(name, None)
     try:
@@ -909,15 +951,16 @@ def step_state(report, decl, repo, plugins, state_source):
             ),
         )
         return "skipped"
-    # Presence only, as for the push step. The executor reads the value at the point of use.
-    if not os.environ.get("NORU_API_KEY"):
+    # The value is handed to the executor, which reads it at the point of use.
+    available, why = credential(report)
+    if available == "refused":
+        report.step("state", "error", detail=why)
+        return "tooling"
+    if available == "absent":
         report.step(
             "state",
             "skipped",
-            detail=(
-                "NORU_API_KEY is not present in the environment, so this job cannot read the "
-                "organization. This is the expected state on a fork pull request."
-            ),
+            detail=f"{why}, so this job cannot read the organization. This is the expected state on a fork pull request.",
         )
         return "skipped"
     completed, failure = run(
@@ -1052,16 +1095,17 @@ def step_push(report, piece_dir, decl, repo, diff_outcome, confirm=None):
         report.step("push", "error", detail=f"unsupported push transport set: {sorted(transports)}")
         return "tooling"
 
-    # Presence only. The value is never read here; whichever child performs the writes (the REST
-    # piece's own push entrypoint, or scripts/mcp_exec.mjs) reads it at the point of use.
-    if not os.environ.get("NORU_API_KEY"):
+    # Whichever child performs the writes (the REST piece's own push entrypoint, or
+    # scripts/mcp_exec.mjs) gets the credential and reads it at the point of use.
+    available, why = credential(report)
+    if available == "refused":
+        report.step("push", "error", detail=why)
+        return "tooling"
+    if available == "absent":
         report.step(
             "push",
             "skipped",
-            detail=(
-                "NORU_API_KEY is not present in the environment, so this job cannot write to Noru. "
-                "This is the expected state on a fork pull request; the checks above still ran."
-            ),
+            detail=f"{why}, so this job cannot write to Noru. This is the expected state on a fork pull request; the checks above still ran.",
         )
         return "skipped"
 
@@ -1454,6 +1498,14 @@ def main(argv):
         "gate_on_new": opts["gate_on_new"],
         "artifact": decl["artifact"],
     }
+
+    # A token from the CI token exchange carries only what this run needs: the piece's read scopes,
+    # and its write scopes only when this run may push.
+    declared_scopes = decl.get("scopes") or {}
+    _CREDENTIAL_SCOPES[:] = sorted(
+        set(declared_scopes.get("read") or [])
+        | (set(declared_scopes.get("write") or []) if "push" in opts["steps"] else set())
+    )
 
     tooling = False
     diff_outcome = "skipped"

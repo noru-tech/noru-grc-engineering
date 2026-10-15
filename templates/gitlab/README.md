@@ -4,7 +4,7 @@ Two components, the GitLab counterparts of the two GitHub Actions:
 
 | Component | Counterpart | What it does |
 |---|---|---|
-| [`noru-ci.yml`](./noru-ci.yml) | `noru-ci` action | Runs one piece's CI-mode check — drift, expiry, privacy baseline, and, with `NORU_API_KEY`, the `state`, `diff` and `push` steps |
+| [`noru-ci.yml`](./noru-ci.yml) | `noru-ci` action | Runs one piece's CI-mode check — drift, expiry, privacy baseline, and, with `trust-id` or `NORU_API_KEY`, the `state`, `diff` and `push` steps |
 | [`noru-review.yml`](./noru-review.yml) | `noru-review` action and [`../github/noru-grc-review.yml`](../github/noru-grc-review.yml) | Routes a merge request's changes to the pieces they implicate and runs only their local checks. No `diff` or `push`, ever |
 
 Include them from a **release tag** of this repository. Replace `vX.Y.Z` with the tag of the
