@@ -44,7 +44,7 @@ import { basename, isAbsolute, join, posix, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const PIECE = "findings-ingest";
-export const VERSION = "0.16.1";
+export const VERSION = "0.17.0";
 const GENERATED_BY = `${PIECE}@${VERSION}`;
 
 // The `source` this piece's findings carry in Noru. A finding is keyed on (source, externalId), so
