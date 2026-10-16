@@ -1,12 +1,12 @@
 # Invalid fixture for the threat-model validator: An accepted risk whose reasoning is a shrug.
 # Otherwise identical to valid.threat-model.yml. Synthetic throughout.
-version: 0.16.1
+version: 0.17.0
 piece: threat-model
 source:
   slug: example-org/example-app
   commit_sha: 0f3c9a1e7b2d4c6e8a0b1c2d3e4f5a6b7c8d9e0f
   branch: main
-  generated_by: threat-model@0.16.1
+  generated_by: threat-model@0.17.0
   derived_digest: da21190666db58a59275587dc445e8632a621e8ea3eab562ed696445aef0c48c
 models:
   - file: security/app.otm.json

@@ -1,6 +1,6 @@
 {
   "name": "threat-model",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "description": "Read the threat models a repository keeps in the Open Threat Model format, decide with the user what each threat means here, and land them in Noru's risk register linked to the organization's own controls — flagging the components other pieces found that the model leaves out.",
   "author": {
     "name": "Noru",

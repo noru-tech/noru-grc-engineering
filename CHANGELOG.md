@@ -6,6 +6,8 @@ one version number; the release workflow fails if they disagree.
 
 ## Unreleased
 
+## 0.17.0 — 2026-10-16
+
 - `change-control` takes agent-change-control's `ACC012`. Each branch update acc holds against (a
   direct push, a force push or a deletion of a protected branch that no merged change accounts for)
   becomes a record of its own, kind `direct_push`, keyed `update-<branch>-<id>`, with the bypass set;

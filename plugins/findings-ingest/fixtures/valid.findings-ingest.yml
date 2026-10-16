@@ -1,13 +1,13 @@
 # Valid fixture for the findings-ingest validator. Synthetic: the organization, people, ids and
 # advisories below belong to nobody. The derived_digest is the one the collector computes over
 # tests/fixture-repo, so this manifest is current for that repository.
-version: 0.16.1
+version: 0.17.0
 piece: findings-ingest
 source:
   slug: example-org/example-app
   commit_sha: 0f3c9a1e7b2d4c6e8a0b1c2d3e4f5a6b7c8d9e0f
   branch: main
-  generated_by: findings-ingest@0.16.1
+  generated_by: findings-ingest@0.17.0
   derived_digest: df99ce71c2f0acddc4cf8b56c215a7053828f34bf244e941313376b74f41f739
 inputs:
   - id: example-sast
