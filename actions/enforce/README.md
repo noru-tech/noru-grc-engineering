@@ -86,7 +86,7 @@ exits, so `if: always()` can pick it up:
   with:
     as-of: ${{ steps.clock.outputs.date }}
 - if: always()
-  uses: actions/upload-artifact@v4
+  uses: actions/upload-artifact@v7
   with:
     name: noru-grc-enforcement
     path: ${{ steps.enforce.outputs.report }}

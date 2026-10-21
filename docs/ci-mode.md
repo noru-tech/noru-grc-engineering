@@ -602,7 +602,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
       - id: acc
         if: steps.pr.outputs.number != ''
-        uses: noru-tech/agent-change-control@v0.6.0
+        uses: noru-tech/agent-change-control@v0.7.0
         with:
           pr: ${{ steps.pr.outputs.number }}
           format: json
