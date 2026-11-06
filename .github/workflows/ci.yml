@@ -96,7 +96,7 @@ jobs:
 
   tests:
     name: tests (node ${{ matrix.node }}, python ${{ matrix.python }}, ${{ matrix.yaml }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -108,9 +108,12 @@ jobs:
         # bug where PyYAML resolved unquoted dates to datetime.date and every valid fixture failed
         # on any machine that had PyYAML installed.
         include:
+          # ubuntu-latest is Ubuntu 26.04, which setup-python has no 3.9 build for, so the floor
+          # leg stays on the newest image that still has one.
           - node: "18"
             python: "3.9"
             yaml: "no pyyaml"
+            os: ubuntu-24.04
           - node: "20"
             python: "3.12"
             yaml: "no pyyaml"
